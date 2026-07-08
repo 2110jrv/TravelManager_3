@@ -129,7 +129,7 @@ function renderDays(items) {
   els.dayList.innerHTML = '';
   for (const day of state.days) {
     const dayItems = items.filter(item => (item.DayDate || item.StartDate) === day.DayDate).sort(compareItems);
-    const total = dayItems.reduce((sum, item) => sum + Number(item.AmountUSD || 0), 0);
+    const total = dayItems.reduce((sum, item) => sum + getFinancialAmount(item), 0);
     const isOpen = state.openDayKey === day.DayDate;
     const card = document.createElement('article');
     card.className = 'day-card';
@@ -169,7 +169,7 @@ function renderItem(item) {
       <span class="item-title">${escapeHtml(getDisplayTitle(item))}</span>
       <span class="item-meta">
         <span class="category category-${escapeHtml((item.ItemType || 'OTHER').toLowerCase())}">${escapeHtml(getCategoryLabel(item.ItemType))}</span>
-        <span class="item-price">${formatMoney(item.AmountUSD || 0)}</span>
+        <span class="item-price">${formatItemAmount(item)}</span>
         ${item.GoogleMapsUrl || item.GooglePlusCode ? `<a class="map-button" target="_blank" rel="noopener" href="${escapeHtml(getMapUrl(item))}">${escapeHtml(item.GooglePlusCode || 'Mapas')}</a>` : ''}
         <span class="planning-toggle" role="group" aria-label="Estado de planificación">
           <button type="button" data-status="CONFIRMED" aria-pressed="${getItemPlanningStatus(item) === 'CONFIRMED'}" class="${getItemPlanningStatus(item) === 'CONFIRMED' ? 'active' : ''}">Confirmado</button>
@@ -246,15 +246,16 @@ async function updatePlanningStatus(item, PlanningStatus) {
 
 function renderBudget() {
   const confirmed = state.items.filter(item => getItemPlanningStatus(item) === 'CONFIRMED');
-  const total = sumAmount(confirmed);
-  const paid = sumAmount(confirmed.filter(item => item.IsPaid || item.PaymentStatus === 'PAID'));
+  const uniqueConfirmed = uniqueFinancialItems(confirmed);
+  const total = sumAmount(uniqueConfirmed);
+  const paid = sumAmount(uniqueConfirmed.filter(item => item.IsPaid || item.PaymentStatus === 'PAID'));
   const pending = total - paid;
   els.budgetSection.innerHTML = `
     <div class="summary-grid">
       <div class="summary-card"><span>Total confirmado</span><strong>${formatMoney(total)}</strong></div>
       <div class="summary-card"><span>Total pagado</span><strong>${formatMoney(paid)}</strong></div>
       <div class="summary-card"><span>Total pendiente</span><strong>${formatMoney(pending)}</strong></div>
-      <div class="summary-card"><span>Items confirmados</span><strong>${confirmed.length}</strong></div>
+      <div class="summary-card"><span>Items confirmados</span><strong>${uniqueConfirmed.length}</strong></div>
     </div>
     <p class="placeholder-note">Gráficas y desglose por categoría se añadirán en la próxima fase.</p>
   `;
@@ -527,6 +528,41 @@ function getCategoryLabel(type = 'OTHER') {
 
 function getMapUrl(item) {
   return item.GoogleMapsUrl || `https://maps.google.com/?q=${encodeURIComponent(item.GooglePlusCode)}`;
+}
+
+function uniqueFinancialItems(items) {
+  const unique = new Map();
+  for (const item of items) {
+    const key = getLogicalKey(item);
+    if (!unique.has(key) || isChargeOccurrence(item)) {
+      unique.set(key, item);
+    }
+  }
+  return [...unique.values()];
+}
+
+function getLogicalKey(item) {
+  return item.SourceItemID || item.ItemID;
+}
+
+function getFinancialAmount(item) {
+  return isChargeOccurrence(item) ? Number(item.AmountUSD || 0) : 0;
+}
+
+function isChargeOccurrence(item) {
+  const key = getLogicalKey(item);
+  const related = state.items.filter(row => getLogicalKey(row) === key);
+  if (related.length <= 1) return true;
+  const startDate = item.StartDate || item.DayDate;
+  if (related.some(row => row.DayDate === startDate)) {
+    return item.DayDate === startDate;
+  }
+  const firstDate = related.map(row => row.DayDate || row.StartDate || '').sort()[0];
+  return (item.DayDate || item.StartDate || '') === firstDate;
+}
+
+function formatItemAmount(item) {
+  return isChargeOccurrence(item) ? formatMoney(item.AmountUSD || 0) : 'Incluido en reserva';
 }
 
 function sumAmount(items) {
