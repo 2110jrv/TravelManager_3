@@ -1,4 +1,4 @@
-export function renderDayCards(items, container) {
+export function renderDayCards(items, container, options = {}) {
   container.innerHTML = '';
   if (!Array.isArray(items) || items.length === 0) {
     renderEmptyState(container, 'No hay items cargados.');
@@ -6,13 +6,14 @@ export function renderDayCards(items, container) {
   }
 
   for (const day of groupAgendaItemsByDay(items)) {
+    const isDayOpen = options.openDayKeys?.has(day.key) === true;
     const card = document.createElement('article');
     card.className = 'day-card';
 
     const button = document.createElement('button');
     button.className = 'day-summary';
     button.type = 'button';
-    button.setAttribute('aria-expanded', 'false');
+    button.setAttribute('aria-expanded', String(isDayOpen));
 
     const summaryText = document.createElement('span');
     summaryText.className = 'day-summary-text';
@@ -23,13 +24,13 @@ export function renderDayCards(items, container) {
 
     const indicator = document.createElement('span');
     indicator.className = 'expand-indicator';
-    indicator.textContent = '▸';
+    indicator.textContent = isDayOpen ? '▾' : '▸';
 
     const details = document.createElement('div');
-    details.className = 'day-items hidden';
+    details.className = `day-items${isDayOpen ? '' : ' hidden'}`;
 
     for (const item of day.items) {
-      details.append(renderAgendaItem(item));
+      details.append(renderAgendaItem(item, options));
     }
 
     button.append(summaryText, indicator);
@@ -37,6 +38,7 @@ export function renderDayCards(items, container) {
       const isClosed = details.classList.toggle('hidden');
       button.setAttribute('aria-expanded', String(!isClosed));
       indicator.textContent = isClosed ? '▸' : '▾';
+      options.onDayToggle?.(day.key, !isClosed);
     });
 
     card.append(button, details);
@@ -48,7 +50,7 @@ export function renderEmptyState(container, message) {
   container.innerHTML = `<div class="day-card empty-state"><p>${escapeHtml(message)}</p></div>`;
 }
 
-function renderAgendaItem(item) {
+function renderAgendaItem(item, options = {}) {
   const itemEl = document.createElement('article');
   itemEl.className = 'agenda-item';
 
@@ -56,6 +58,8 @@ function renderAgendaItem(item) {
   button.className = 'item-summary';
   button.type = 'button';
   button.setAttribute('aria-expanded', 'false');
+  let holdTimer = null;
+  let ignoreClick = false;
 
   const timeLabel = document.createElement('span');
   timeLabel.className = 'item-time';
@@ -80,6 +84,16 @@ function renderAgendaItem(item) {
   const mapAction = createMapAction(item);
   if (mapAction) meta.append(mapAction);
 
+  const editButton = document.createElement('span');
+  editButton.className = 'edit-chip';
+  editButton.textContent = 'Editar';
+  editButton.addEventListener('click', event => {
+    event.preventDefault();
+    event.stopPropagation();
+    options.onEditItem?.(item);
+  });
+  meta.append(editButton);
+
   const details = document.createElement('div');
   details.className = 'item-details hidden';
   details.innerHTML = [
@@ -90,7 +104,38 @@ function renderAgendaItem(item) {
   ].filter(Boolean).map(value => `<p>${escapeHtml(value)}</p>`).join('');
 
   button.append(timeLabel, titleLabel, meta);
-  button.addEventListener('click', () => {
+  button.addEventListener('pointerdown', event => {
+    if (event.button && event.button !== 0) return;
+    holdTimer = window.setTimeout(() => {
+      ignoreClick = true;
+      options.onEditItem?.(item);
+    }, 600);
+  });
+
+  button.addEventListener('pointerup', () => {
+    window.clearTimeout(holdTimer);
+  });
+
+  button.addEventListener('pointerleave', () => {
+    window.clearTimeout(holdTimer);
+  });
+
+  button.addEventListener('pointercancel', () => {
+    window.clearTimeout(holdTimer);
+  });
+
+  button.addEventListener('contextmenu', event => {
+    event.preventDefault();
+    window.clearTimeout(holdTimer);
+    options.onEditItem?.(item);
+  });
+
+  button.addEventListener('click', event => {
+    if (ignoreClick) {
+      event.preventDefault();
+      ignoreClick = false;
+      return;
+    }
     const isClosed = details.classList.toggle('hidden');
     button.setAttribute('aria-expanded', String(!isClosed));
   });
@@ -117,6 +162,7 @@ function groupAgendaItemsByDay(items) {
   }
 
   return Array.from(map.values()).map(row => ({
+    key: row.date,
     label: formatAgendaDayLabel(row.date),
     location: row.location,
     items: row.items,

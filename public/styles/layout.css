@@ -371,6 +371,19 @@ h1 {
   font-weight: 700;
 }
 
+.edit-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  border-radius: 8px;
+  padding: 5px 8px;
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  color: #475569;
+  font-size: .82rem;
+  font-weight: 700;
+}
+
 .item-details {
   border-top: 1px solid #e2e8f0;
   color: #475569;
@@ -404,5 +417,126 @@ h1 {
 
   .item-details {
     padding-left: 95px;
+  }
+}
+
+.edit-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(15, 23, 42, 0.5);
+}
+
+.edit-modal-panel {
+  width: min(100%, 720px);
+  max-height: min(92vh, 820px);
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 22px 60px rgba(15, 23, 42, 0.22);
+  overflow: hidden;
+}
+
+.edit-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.edit-form {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  overflow: auto;
+}
+
+.edit-form label {
+  display: grid;
+  gap: 6px;
+  color: #334155;
+  font-size: .88rem;
+  font-weight: 700;
+}
+
+.edit-form input,
+.edit-form select,
+.edit-form textarea {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 10px 11px;
+  background: #fff;
+  color: #111827;
+  font: inherit;
+}
+
+.edit-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.edit-checks {
+  align-self: end;
+  display: grid;
+  gap: 8px;
+  padding: 7px 0;
+}
+
+.edit-checks label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.edit-checks input {
+  width: auto;
+}
+
+.edit-error {
+  min-height: 20px;
+  color: #b91c1c;
+  font-weight: 700;
+  font-size: .9rem;
+}
+
+.edit-actions {
+  position: sticky;
+  bottom: -16px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 8px;
+  background: #fff;
+}
+
+@media (max-width: 640px) {
+  .edit-modal {
+    padding: 10px;
+    align-items: stretch;
+  }
+
+  .edit-modal-panel {
+    max-height: calc(100vh - 20px);
+    width: 100%;
+  }
+
+  .edit-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .edit-actions {
+    justify-content: stretch;
+  }
+
+  .edit-actions button {
+    flex: 1;
   }
 }

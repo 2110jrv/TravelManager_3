@@ -88,3 +88,14 @@ export async function clearItems() {
     req.onerror = () => reject(req.error);
   });
 }
+
+export async function updateItem(item) {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_ITEMS, 'readwrite');
+    const store = transaction.objectStore(STORE_ITEMS);
+    const request = store.put(item);
+    request.onsuccess = () => resolve(item);
+    request.onerror = () => reject(request.error);
+  });
+}
