@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>TravelManager 3.0</title>
+  <link rel="stylesheet" href="./styles/base.css" />
+  <link rel="stylesheet" href="./styles/layout.css" />
+  <link rel="manifest" href="./manifest.webmanifest" />
+</head>
+<body>
+  <div id="app" class="app-shell">
+    <header class="app-header">
+      <div>
+        <p class="eyebrow">TravelManager 3.0</p>
+        <h1>Agenda de viaje</h1>
+      </div>
+      <button id="menuButton" class="icon-button" aria-label="Abrir menú">☰</button>
+    </header>
+
+    <main class="page-content">
+      <section class="status-row" id="statusRow">
+        <span id="statusOnline">Offline</span>
+        <span id="statusSync">Sincronización local</span>
+      </section>
+
+      <section class="section" id="agendaSection">
+        <div class="section-header">
+          <h2>Agenda</h2>
+          <button id="refreshButton" class="primary-button">Refrescar</button>
+        </div>
+        <div id="dayList" class="card-list"></div>
+      </section>
+
+      <section class="section" id="spreadsheetSection">
+        <div class="section-header">
+          <h2>Datos</h2>
+          <button id="openSpreadsheetButton" class="secondary-button">Abrir tabla</button>
+        </div>
+      </section>
+    </main>
+
+    <nav class="bottom-nav">
+      <button id="navAgenda" class="nav-button active">Agenda</button>
+      <button id="navData" class="nav-button">Data</button>
+    </nav>
+  </div>
+
+  <div id="sheetModal" class="modal hidden">
+    <div class="modal-panel">
+      <header class="modal-header">
+        <h2>Tabla de datos</h2>
+        <button id="closeSheetButton" class="icon-button" aria-label="Cerrar">✕</button>
+      </header>
+      <div class="modal-body">
+        <div class="sheet-toolbar">
+          <button id="addRowButton" class="primary-button">+ Fila</button>
+          <button id="importButton" class="secondary-button">Importar</button>
+          <button id="exportButton" class="secondary-button">Exportar</button>
+        </div>
+        <div id="sheetContainer" class="sheet-container"></div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="./src/app.js"></script>
+</body>
+</html>

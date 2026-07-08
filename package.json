@@ -1,0 +1,8 @@
+{
+  "name": "travelmanager-3",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "start": "npx http-server ./public -c-1 -p 5000"
+  }
+}
