@@ -65,6 +65,7 @@ function adaptItem(entry, day, dayIndex, itemIndex) {
     Description: cleanText(entry.summary || raw.Subtitle || ''),
     Provider: cleanText(raw.Provider || ''),
     Status: raw.Status || entry.visibility?.status || 'PLANNED',
+    PlanningStatus: getPlanningStatus(raw.Status || entry.visibility?.status),
     IsPaid: raw.IsPaid === true,
     PaymentStatus: raw.PaymentStatus || 'NOT_PAID',
     AmountUSD: Number(raw.AmountUSD ?? 0),
@@ -101,6 +102,11 @@ function normalizeType(type) {
   if (normalized === 'LOGISTICS') return 'OTHER';
   if (normalized === 'TOUR') return 'ACTIVITY';
   return 'OTHER';
+}
+
+export function getPlanningStatus(status) {
+  if (String(status || '').toUpperCase() === 'CONFIRMED') return 'CONFIRMED';
+  return 'PROPOSED';
 }
 
 function getLodgingMode(type, label = '') {

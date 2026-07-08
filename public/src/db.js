@@ -1,6 +1,7 @@
 const DB_NAME = 'TravelManager3';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_ITEMS = 'items';
+const STORE_SETTINGS = 'settings';
 
 export function openDatabase() {
   return new Promise((resolve, reject) => {
@@ -13,6 +14,9 @@ export function openDatabase() {
         store.createIndex('TripID', 'TripID', { unique: false });
         store.createIndex('DayDate', 'DayDate', { unique: false });
         store.createIndex('SyncStatus', 'SyncStatus', { unique: false });
+      }
+      if (!db.objectStoreNames.contains(STORE_SETTINGS)) {
+        db.createObjectStore(STORE_SETTINGS, { keyPath: 'key' });
       }
     };
 
@@ -100,6 +104,17 @@ export async function updateItem(item) {
   });
 }
 
+export async function addItem(item) {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_ITEMS, 'readwrite');
+    const store = transaction.objectStore(STORE_ITEMS);
+    const request = store.add(item);
+    request.onsuccess = () => resolve(item);
+    request.onerror = () => reject(request.error);
+  });
+}
+
 export async function replaceItemsByPredicate(items, predicate) {
   const db = await openDatabase();
   const existing = await getAllItems();
@@ -110,5 +125,27 @@ export async function replaceItemsByPredicate(items, predicate) {
     items.forEach(item => store.put(item));
     transaction.oncomplete = () => resolve(items.length);
     transaction.onerror = () => reject(transaction.error);
+  });
+}
+
+export async function getSetting(key, fallback = null) {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_SETTINGS, 'readonly');
+    const store = transaction.objectStore(STORE_SETTINGS);
+    const request = store.get(key);
+    request.onsuccess = () => resolve(request.result ? request.result.value : fallback);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function setSetting(key, value) {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_SETTINGS, 'readwrite');
+    const store = transaction.objectStore(STORE_SETTINGS);
+    const request = store.put({ key, value });
+    request.onsuccess = () => resolve(value);
+    request.onerror = () => reject(request.error);
   });
 }

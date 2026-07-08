@@ -372,7 +372,7 @@ h1 {
 }
 
 .edit-chip {
-  display: inline-flex;
+  display: none;
   align-items: center;
   min-height: 28px;
   border-radius: 8px;
@@ -382,6 +382,151 @@ h1 {
   color: #475569;
   font-size: .82rem;
   font-weight: 700;
+}
+
+.menu-button {
+  min-width: 44px;
+}
+
+.menu-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 15;
+  background: rgba(15, 23, 42, 0.32);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.menu-panel {
+  width: min(82vw, 320px);
+  height: 100%;
+  padding: 18px;
+  background: #fff;
+  box-shadow: -18px 0 45px rgba(15, 23, 42, 0.16);
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+
+.menu-panel button,
+.tab-button {
+  border-radius: 8px;
+  padding: 11px 12px;
+  background: #f1f5f9;
+  color: #111827;
+  text-align: left;
+}
+
+.tabs {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.tab-button {
+  flex: 1;
+  text-align: center;
+  font-weight: 800;
+}
+
+.tab-button.active,
+.planning-toggle button.active {
+  background: #334155;
+  color: #fff;
+}
+
+.planning-toggle {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: #e2e8f0;
+}
+
+.planning-toggle button {
+  border-radius: 6px;
+  padding: 5px 7px;
+  background: transparent;
+  color: #475569;
+  font-size: .76rem;
+  font-weight: 800;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.summary-card,
+.settings-panel {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.summary-card {
+  display: grid;
+  gap: 6px;
+}
+
+.summary-card span,
+.placeholder-note,
+.settings-message {
+  color: #64748b;
+}
+
+.summary-card strong {
+  font-size: 1.25rem;
+}
+
+.placeholder-note {
+  margin: 14px 0 0;
+}
+
+.settings-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.settings-panel label {
+  display: grid;
+  gap: 6px;
+  font-weight: 800;
+  color: #334155;
+}
+
+.settings-panel input {
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 10px 11px;
+  font: inherit;
+}
+
+.settings-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.empty-day {
+  color: #64748b;
+  padding: 12px;
+}
+
+@media (max-width: 640px) {
+  .summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .planning-toggle {
+    width: 100%;
+  }
+
+  .planning-toggle button {
+    flex: 1;
+  }
 }
 
 .item-details {

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'travelmanager3-cache-v2';
+const CACHE_NAME = 'travelmanager3-cache-v3';
 const ASSETS = [
   './',
   './index.html',
@@ -6,6 +6,7 @@ const ASSETS = [
   './styles/base.css',
   './styles/layout.css',
   './src/app.js',
+  './src/app2.js',
   './src/db.js',
   './src/ui.js',
   './src/italyAdapter.js',
@@ -16,13 +17,14 @@ self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME).then(cache => cache.addAll(ASSETS))
   );
+  self.skipWaiting();
 });
 
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys().then(keys => Promise.all(
       keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key))
-    ))
+    )).then(() => self.clients.claim())
   );
 });
 

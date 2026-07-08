@@ -13,9 +13,18 @@
     <header class="app-header">
       <div>
         <p class="eyebrow">TravelManager 3.0</p>
-        <h1>Agenda de viaje</h1>
+        <h1 id="viewTitle">Agenda de viaje</h1>
       </div>
+      <button id="menuButton" class="icon-button menu-button" type="button" aria-label="Abrir menú">☰</button>
     </header>
+
+    <div id="menuOverlay" class="menu-overlay hidden">
+      <nav class="menu-panel" aria-label="Principal">
+        <button type="button" data-view="home">Home</button>
+        <button type="button" data-view="budget">Presupuesto</button>
+        <button type="button" data-view="settings">Configuración</button>
+      </nav>
+    </div>
 
     <main class="page-content">
       <section class="status-row" id="statusRow">
@@ -23,7 +32,7 @@
         <span id="statusSync">Sincronización local</span>
       </section>
 
-      <section class="section" id="agendaSection">
+      <section class="section" id="homeSection">
         <div class="section-header">
           <h2>Agenda</h2>
           <div>
@@ -31,11 +40,17 @@
             <button id="resetSeedButton" class="secondary-button">Restaurar datos originales del viaje</button>
           </div>
         </div>
+        <div class="tabs" role="tablist">
+          <button id="confirmedTab" class="tab-button active" type="button" data-tab="CONFIRMED">Confirmado</button>
+          <button id="proposedTab" class="tab-button" type="button" data-tab="PROPOSED">Propuesto</button>
+        </div>
         <div id="dayList" class="card-list"></div>
       </section>
+      <section class="section hidden" id="budgetSection"></section>
+      <section class="section hidden" id="settingsSection"></section>
     </main>
   </div>
 
-  <script type="module" src="./src/app.js"></script>
+  <script type="module" src="./src/app2.js"></script>
 </body>
 </html>
