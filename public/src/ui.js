@@ -1,49 +1,192 @@
 export function renderDayCards(items, container) {
   container.innerHTML = '';
-  const groups = groupItemsByDay(items);
-  for (const day of groups) {
-    const card = document.createElement('article');
-    card.className = 'card';
+  if (!Array.isArray(items) || items.length === 0) {
+    renderEmptyState(container, 'No hay items cargados.');
+    return;
+  }
 
-    const title = document.createElement('div');
-    title.className = 'card-title';
-    title.innerHTML = `<div><strong>${day.label}</strong><div class="card-meta">${day.location} · Total: $${day.total.toFixed(2)}</div></div>`;
+  for (const day of groupAgendaItemsByDay(items)) {
+    const card = document.createElement('article');
+    card.className = 'day-card';
+
+    const button = document.createElement('button');
+    button.className = 'day-summary';
+    button.type = 'button';
+    button.setAttribute('aria-expanded', 'false');
+
+    const summaryText = document.createElement('span');
+    summaryText.className = 'day-summary-text';
+    summaryText.innerHTML = `
+      <strong>${escapeHtml(day.label)}</strong>
+      <span>${escapeHtml(day.location || 'Sin ciudad')} • Total: ${formatMoney(day.total, day.currency)}</span>
+    `;
+
+    const indicator = document.createElement('span');
+    indicator.className = 'expand-indicator';
+    indicator.textContent = '▸';
 
     const details = document.createElement('div');
     details.className = 'day-items hidden';
-    details.innerHTML = day.items.map(item => `<div class="card card-item"><strong>${item.StartTime || 'Todo el día'}</strong> — ${item.Title} — $${item.AmountUSD.toFixed(2)}</div>`).join('');
 
-    title.addEventListener('click', () => {
-      details.classList.toggle('hidden');
+    for (const item of day.items) {
+      details.append(renderAgendaItem(item));
+    }
+
+    button.append(summaryText, indicator);
+    button.addEventListener('click', () => {
+      const isClosed = details.classList.toggle('hidden');
+      button.setAttribute('aria-expanded', String(!isClosed));
+      indicator.textContent = isClosed ? '▸' : '▾';
     });
 
-    card.append(title, details);
+    card.append(button, details);
     container.append(card);
   }
 }
 
-function groupItemsByDay(items) {
+export function renderEmptyState(container, message) {
+  container.innerHTML = `<div class="day-card empty-state"><p>${escapeHtml(message)}</p></div>`;
+}
+
+function renderAgendaItem(item) {
+  const itemEl = document.createElement('article');
+  itemEl.className = 'agenda-item';
+
+  const button = document.createElement('button');
+  button.className = 'item-summary';
+  button.type = 'button';
+  button.setAttribute('aria-expanded', 'false');
+
+  const timeLabel = document.createElement('span');
+  timeLabel.className = 'item-time';
+  timeLabel.textContent = item.IsAllDay ? 'Todo el día' : (item.StartTime || '');
+
+  const titleLabel = document.createElement('span');
+  titleLabel.className = 'item-title';
+  titleLabel.textContent = getDisplayTitle(item);
+
+  const meta = document.createElement('span');
+  meta.className = 'item-meta';
+
+  const category = document.createElement('span');
+  category.className = `category category-${(item.ItemType || 'OTHER').toLowerCase()}`;
+  category.textContent = getCategoryLabel(item.ItemType);
+
+  const price = document.createElement('span');
+  price.className = 'item-price';
+  price.textContent = formatMoney(Number(item.AmountUSD || 0), item.Currency || 'USD');
+
+  meta.append(category, price);
+  const mapAction = createMapAction(item);
+  if (mapAction) meta.append(mapAction);
+
+  const details = document.createElement('div');
+  details.className = 'item-details hidden';
+  details.innerHTML = [
+    item.Description,
+    item.Notes,
+    item.Address,
+    item.GooglePlusCode ? `Plus Code: ${item.GooglePlusCode}` : ''
+  ].filter(Boolean).map(value => `<p>${escapeHtml(value)}</p>`).join('');
+
+  button.append(timeLabel, titleLabel, meta);
+  button.addEventListener('click', () => {
+    const isClosed = details.classList.toggle('hidden');
+    button.setAttribute('aria-expanded', String(!isClosed));
+  });
+
+  itemEl.append(button, details);
+  return itemEl;
+}
+
+function groupAgendaItemsByDay(items) {
   const map = new Map();
-  items.sort((a,b) => (a.DayDate || '').localeCompare(b.DayDate || '') || (a.StartTime || '').localeCompare(b.StartTime || ''));
-  for (const item of items) {
-    const key = item.DayDate || 'Sin fecha';
-    const row = map.get(key) || { date: key, items: [], total: 0, location: item.City || item.LocationLabel || '' };
+  for (const item of [...items].sort(compareAgendaItems)) {
+    const key = item.DayDate || item.StartDate || 'Sin fecha';
+    const row = map.get(key) || {
+      date: key,
+      items: [],
+      total: 0,
+      location: item.City || item.LocationLabel || '',
+      currency: item.Currency || 'USD'
+    };
     row.items.push(item);
     row.total += Number(item.AmountUSD || 0);
+    if (!row.location && (item.City || item.LocationLabel)) row.location = item.City || item.LocationLabel;
     map.set(key, row);
   }
 
   return Array.from(map.values()).map(row => ({
-    label: formatDayLabel(row.date),
+    label: formatAgendaDayLabel(row.date),
     location: row.location,
     items: row.items,
-    total: row.total
+    total: row.total,
+    currency: row.currency
   }));
 }
 
-function formatDayLabel(dateString) {
+function compareAgendaItems(a, b) {
+  const dateCompare = (a.DayDate || a.StartDate || '').localeCompare(b.DayDate || b.StartDate || '');
+  if (dateCompare !== 0) return dateCompare;
+  const allDayCompare = Number(Boolean(a.IsAllDay)) - Number(Boolean(b.IsAllDay));
+  if (allDayCompare !== 0) return allDayCompare;
+  const timeCompare = (a.StartTime || '').localeCompare(b.StartTime || '');
+  if (timeCompare !== 0) return timeCompare;
+  return Number(a.SortOrder || 0) - Number(b.SortOrder || 0);
+}
+
+function getDisplayTitle(item) {
+  if (item.ItemType !== 'LODGING') return item.Title || 'Sin título';
+  if (item.LodgingDisplayMode === 'CHECK_IN') return `Check-in: ${item.Title}`;
+  if (item.LodgingDisplayMode === 'CHECK_OUT') return `Check-out: ${item.Title}`;
+  if (item.LodgingDisplayMode === 'FULL_DAY') return `Hospedaje: ${item.Title}`;
+  return item.Title || 'Hospedaje';
+}
+
+function createMapAction(item) {
+  if (!item.GoogleMapsUrl && !item.GooglePlusCode) return null;
+  const link = document.createElement('a');
+  link.className = 'map-button';
+  link.href = item.GoogleMapsUrl || `https://maps.google.com/?q=${encodeURIComponent(item.GooglePlusCode)}`;
+  link.target = '_blank';
+  link.rel = 'noopener';
+  link.textContent = item.GooglePlusCode || 'Mapas';
+  link.addEventListener('click', event => event.stopPropagation());
+  return link;
+}
+
+function getCategoryLabel(type = 'OTHER') {
+  const labels = {
+    ACTIVITY: 'Actividad',
+    FLIGHT: 'Vuelo',
+    FOOD: 'Comida',
+    LODGING: 'Hospedaje',
+    TRANSPORT: 'Transporte'
+  };
+  return labels[type] || 'Otro';
+}
+
+function formatAgendaDayLabel(dateString) {
   if (!dateString) return 'Día sin fecha';
-  const date = new Date(dateString);
-  if (isNaN(date)) return dateString;
-  return `Día · ${date.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'short' })}`;
+  const date = new Date(`${dateString}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return dateString;
+  return `Día • ${date.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'short' })}`;
+}
+
+function formatMoney(amount, currency = 'USD') {
+  return new Intl.NumberFormat('es-US', {
+    style: 'currency',
+    currency,
+    maximumFractionDigits: 2
+  }).format(amount || 0);
+}
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, char => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#039;'
+  }[char]));
 }

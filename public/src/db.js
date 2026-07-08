@@ -31,3 +31,60 @@ export async function getAllItems() {
     request.onerror = () => reject(request.error);
   });
 }
+
+export async function addItemsIfMissing(items) {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_ITEMS, 'readwrite');
+    const store = transaction.objectStore(STORE_ITEMS);
+    let pending = items.length;
+    if (pending === 0) {
+      resolve(0);
+      return;
+    }
+
+    let added = 0;
+    items.forEach(item => {
+      const getRequest = store.get(item.ItemID);
+      getRequest.onsuccess = () => {
+        if (!getRequest.result) {
+          const addRequest = store.add(item);
+          addRequest.onsuccess = () => {
+            added += 1;
+            if (--pending === 0) resolve(added);
+          };
+          addRequest.onerror = () => {
+            if (--pending === 0) resolve(added);
+          };
+        } else {
+          if (--pending === 0) resolve(added);
+        }
+      };
+      getRequest.onerror = () => {
+        if (--pending === 0) resolve(added);
+      };
+    });
+  });
+}
+
+export async function countItems() {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_ITEMS, 'readonly');
+    const store = transaction.objectStore(STORE_ITEMS);
+    const request = store.count();
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function clearItems() {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_ITEMS, 'readwrite');
+    const store = transaction.objectStore(STORE_ITEMS);
+    const req = store.clear();
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
