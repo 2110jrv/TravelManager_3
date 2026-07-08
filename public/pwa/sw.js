@@ -1,4 +1,4 @@
-const CACHE_NAME = 'travelmanager3-cache-v1';
+const CACHE_NAME = 'travelmanager3-cache-v2';
 const ASSETS = [
   './',
   './index.html',
@@ -8,7 +8,8 @@ const ASSETS = [
   './src/app.js',
   './src/db.js',
   './src/ui.js',
-  './data/sample.json'
+  './src/italyAdapter.js',
+  './data/italy-2026.json'
 ];
 
 self.addEventListener('install', event => {

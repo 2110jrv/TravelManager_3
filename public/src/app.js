@@ -1,5 +1,6 @@
-import { openDatabase, getAllItems, addItemsIfMissing, clearItems, updateItem } from './db.js';
+import { openDatabase, getAllItems, updateItem, replaceItemsByPredicate } from './db.js';
 import { renderDayCards, renderEmptyState } from './ui.js';
+import { ITALY_DATASET_ID, ITALY_DATASET_MARK_KEY, ITALY_DAYS_KEY, loadItalyItinerary } from './italyAdapter.js';
 
 const dayList = document.getElementById('dayList');
 const statusOnline = document.getElementById('statusOnline');
@@ -9,16 +10,17 @@ const refreshButton = document.getElementById('refreshButton');
 const resetSeedButton = document.getElementById('resetSeedButton');
 const openDayKeys = new Set();
 let currentItems = [];
+let itineraryDays = [];
 let editingItem = null;
 let editInitialValue = '';
 const editModal = createEditModal();
 
 async function initApp() {
   await openDatabase();
-  const items = await getAllItems();
-  if (items.length === 0) {
-    await seedSampleData();
-  }
+  const itinerary = await loadItalyItinerary();
+  itineraryDays = itinerary.days;
+  localStorage.setItem(ITALY_DAYS_KEY, JSON.stringify(itineraryDays));
+  await migrateToItalyItineraryIfNeeded(itinerary);
 
   const loadedItems = await getAllItems();
   if (loadedItems.length === 0) {
@@ -70,25 +72,22 @@ function normalizeItem(item) {
   };
 }
 
-async function seedSampleData() {
-  try {
-    const response = await fetch('./data/sample.json');
-    if (!response.ok) {
-      throw new Error('No se pudo cargar sample.json');
-    }
-    const rawItems = await response.json();
-    const items = Array.isArray(rawItems) ? rawItems.map(normalizeItem) : [];
-    await addItemsIfMissing(items);
-    statusSync.textContent = 'Datos iniciales cargados';
-  } catch (error) {
-    const existingItems = await getAllItems();
-    if (existingItems.length > 0) {
-      statusSync.textContent = 'Fallo fetch, usando datos locales';
-    } else {
-      statusSync.textContent = 'Error de carga inicial';
-    }
-    console.warn(error);
-  }
+async function migrateToItalyItineraryIfNeeded(itinerary) {
+  const existingItems = await getAllItems();
+  const datasetMark = localStorage.getItem(ITALY_DATASET_MARK_KEY);
+  const isEmpty = existingItems.length === 0;
+  const isSampleOnly = existingItems.length > 0 && existingItems.every(isSampleItem);
+
+  if (datasetMark === ITALY_DATASET_ID && !isSampleOnly) return;
+  if (!isEmpty && !isSampleOnly) return;
+
+  await replaceItemsByPredicate(itinerary.items, item => isSampleItem(item) || item.DatasetID === ITALY_DATASET_ID);
+  localStorage.setItem(ITALY_DATASET_MARK_KEY, ITALY_DATASET_ID);
+  statusSync.textContent = 'Itinerario Italy 2026 cargado';
+}
+
+function isSampleItem(item) {
+  return item.TripID === 'trip-001' || /^item-00\d$/.test(item.ItemID || '');
 }
 
 function updateStatus() {
@@ -115,20 +114,23 @@ refreshButton?.addEventListener('click', async () => {
 });
 
 resetSeedButton?.addEventListener('click', async () => {
-  if (!confirm('Restablecer datos de prueba: borrar solo los items locales y recargar sample.json?')) return;
+  if (!confirm('Restaurar datos originales del viaje? Esto elimina modificaciones locales de los items de Italy 2026.')) return;
   try {
-    await clearItems();
-    await seedSampleData();
+    const itinerary = await loadItalyItinerary();
+    itineraryDays = itinerary.days;
+    localStorage.setItem(ITALY_DAYS_KEY, JSON.stringify(itineraryDays));
+    await replaceItemsByPredicate(itinerary.items, item => item.DatasetID === ITALY_DATASET_ID || item.TripID === 'TRIP_ITALY_2026');
+    localStorage.setItem(ITALY_DATASET_MARK_KEY, ITALY_DATASET_ID);
     const reloaded = await getAllItems();
     if (reloaded.length === 0) {
       renderEmptyState(dayList, 'No hay datos después de reseed');
     } else {
       renderAgenda(reloaded);
     }
-    alert('Datos de prueba restablecidos');
+    alert('Datos originales del viaje restaurados');
   } catch (e) {
     console.error(e);
-    alert('Error al restablecer datos');
+    alert('Error al restaurar datos');
   }
 });
 
@@ -142,10 +144,15 @@ initApp();
 
 function renderAgenda(items) {
   currentItems = items;
-  if (items.length === 0) {
+  if (openDayKeys.size === 0 && itineraryDays.length > 0) {
+    openDayKeys.add(itineraryDays[0].DayDate);
+  }
+
+  if (items.length === 0 && itineraryDays.length === 0) {
     renderEmptyState(dayList, 'No hay datos después de restablecer.');
   } else {
     renderDayCards(items, dayList, {
+      days: itineraryDays,
       openDayKeys,
       onDayToggle: (dayKey, isOpen) => {
         if (isOpen) openDayKeys.add(dayKey);

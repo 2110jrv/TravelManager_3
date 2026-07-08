@@ -5,7 +5,7 @@ export function renderDayCards(items, container, options = {}) {
     return;
   }
 
-  for (const day of groupAgendaItemsByDay(items)) {
+  for (const day of groupAgendaItemsByDay(items, options.days || [])) {
     const isDayOpen = options.openDayKeys?.has(day.key) === true;
     const card = document.createElement('article');
     card.className = 'day-card';
@@ -29,8 +29,15 @@ export function renderDayCards(items, container, options = {}) {
     const details = document.createElement('div');
     details.className = `day-items${isDayOpen ? '' : ' hidden'}`;
 
-    for (const item of day.items) {
-      details.append(renderAgendaItem(item, options));
+    if (day.items.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'empty-day';
+      empty.textContent = 'Sin items programados';
+      details.append(empty);
+    } else {
+      for (const item of day.items) {
+        details.append(renderAgendaItem(item, options));
+      }
     }
 
     button.append(summaryText, indicator);
@@ -84,16 +91,6 @@ function renderAgendaItem(item, options = {}) {
   const mapAction = createMapAction(item);
   if (mapAction) meta.append(mapAction);
 
-  const editButton = document.createElement('span');
-  editButton.className = 'edit-chip';
-  editButton.textContent = 'Editar';
-  editButton.addEventListener('click', event => {
-    event.preventDefault();
-    event.stopPropagation();
-    options.onEditItem?.(item);
-  });
-  meta.append(editButton);
-
   const details = document.createElement('div');
   details.className = 'item-details hidden';
   details.innerHTML = [
@@ -144,12 +141,27 @@ function renderAgendaItem(item, options = {}) {
   return itemEl;
 }
 
-function groupAgendaItemsByDay(items) {
+function groupAgendaItemsByDay(items, days = []) {
   const map = new Map();
+  for (const day of days) {
+    if (!day.DayDate) continue;
+    map.set(day.DayDate, {
+      date: day.DayDate,
+      label: day.DayLabel,
+      title: day.Title,
+      items: [],
+      total: 0,
+      location: day.City || '',
+      currency: 'USD'
+    });
+  }
+
   for (const item of [...items].sort(compareAgendaItems)) {
     const key = item.DayDate || item.StartDate || 'Sin fecha';
     const row = map.get(key) || {
       date: key,
+      label: '',
+      title: '',
       items: [],
       total: 0,
       location: item.City || item.LocationLabel || '',
@@ -161,9 +173,9 @@ function groupAgendaItemsByDay(items) {
     map.set(key, row);
   }
 
-  return Array.from(map.values()).map(row => ({
+  return Array.from(map.values()).sort((a, b) => a.date.localeCompare(b.date)).map(row => ({
     key: row.date,
-    label: formatAgendaDayLabel(row.date),
+    label: formatAgendaDayLabel(row.date, row.label, row.title),
     location: row.location,
     items: row.items,
     total: row.total,
@@ -176,6 +188,8 @@ function compareAgendaItems(a, b) {
   if (dateCompare !== 0) return dateCompare;
   const allDayCompare = Number(Boolean(a.IsAllDay)) - Number(Boolean(b.IsAllDay));
   if (allDayCompare !== 0) return allDayCompare;
+  const lodgingStayCompare = Number(a.LodgingDisplayMode === 'FULL_DAY') - Number(b.LodgingDisplayMode === 'FULL_DAY');
+  if (lodgingStayCompare !== 0) return lodgingStayCompare;
   const timeCompare = (a.StartTime || '').localeCompare(b.StartTime || '');
   if (timeCompare !== 0) return timeCompare;
   return Number(a.SortOrder || 0) - Number(b.SortOrder || 0);
@@ -212,11 +226,12 @@ function getCategoryLabel(type = 'OTHER') {
   return labels[type] || 'Otro';
 }
 
-function formatAgendaDayLabel(dateString) {
+function formatAgendaDayLabel(dateString, dayLabel = '', title = '') {
   if (!dateString) return 'Día sin fecha';
   const date = new Date(`${dateString}T00:00:00`);
   if (Number.isNaN(date.getTime())) return dateString;
-  return `Día • ${date.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'short' })}`;
+  const formatted = date.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'short' });
+  return [dayLabel || 'Día', formatted, title].filter(Boolean).join(' • ');
 }
 
 function formatMoney(amount, currency = 'USD') {

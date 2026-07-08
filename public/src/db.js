@@ -99,3 +99,16 @@ export async function updateItem(item) {
     request.onerror = () => reject(request.error);
   });
 }
+
+export async function replaceItemsByPredicate(items, predicate) {
+  const db = await openDatabase();
+  const existing = await getAllItems();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_ITEMS, 'readwrite');
+    const store = transaction.objectStore(STORE_ITEMS);
+    existing.filter(predicate).forEach(item => store.delete(item.ItemID));
+    items.forEach(item => store.put(item));
+    transaction.oncomplete = () => resolve(items.length);
+    transaction.onerror = () => reject(transaction.error);
+  });
+}
