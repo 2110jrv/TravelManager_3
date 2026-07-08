@@ -798,7 +798,8 @@ h1 {
   min-width: 100%;
   border-collapse: separate;
   border-spacing: 0;
-  font-size: .86rem;
+  font-size: .82rem;
+  line-height: 1.2;
 }
 
 .data-table th {
@@ -814,7 +815,7 @@ h1 {
 .data-table th,
 .data-table td {
   border-bottom: 1px solid #e2e8f0;
-  padding: 7px;
+  padding: 5px;
   vertical-align: top;
 }
 
@@ -824,10 +825,11 @@ h1 {
   width: 150px;
   border: 1px solid #cbd5e1;
   border-radius: 6px;
-  padding: 7px 8px;
+  padding: 4px 6px;
   background: #fff;
   color: #111827;
   font: inherit;
+  line-height: 1.2;
 }
 
 .data-table [data-field="Title"],
@@ -853,10 +855,11 @@ h1 {
 
 .row-actions button {
   border-radius: 999px;
-  padding: 7px 9px;
+  padding: 4px 7px;
   background: #f1f5f9;
   color: #334155;
   font-weight: 800;
+  line-height: 1.2;
 }
 
 .paste-preview {
@@ -975,8 +978,9 @@ h1 {
   .data-table td {
     display: grid;
     grid-template-columns: 112px minmax(0, 1fr);
-    gap: 8px;
+    gap: 7px;
     align-items: center;
+    padding: 7px;
   }
 
   .data-table td::before {
@@ -988,12 +992,19 @@ h1 {
   .data-table input,
   .data-table select {
     width: 100% !important;
+    min-height: 34px;
+    padding: 6px 8px;
   }
 
   .row-actions {
     position: static;
     display: flex;
     flex-wrap: wrap;
+  }
+
+  .row-actions button {
+    min-height: 34px;
+    padding: 6px 10px;
   }
 
   .row-actions::before {
