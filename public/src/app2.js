@@ -164,19 +164,19 @@ function renderItem(item) {
   itemEl.className = 'agenda-item';
   const time = item.IsAllDay ? 'Todo el día' : (item.StartTime || '');
   itemEl.innerHTML = `
-    <button class="item-summary" type="button" aria-expanded="${isOpen}">
+    <div class="item-summary" role="button" tabindex="0" aria-expanded="${isOpen}">
       <span class="item-time">${escapeHtml(time)}</span>
       <span class="item-title">${escapeHtml(getDisplayTitle(item))}</span>
       <span class="item-meta">
         <span class="category category-${escapeHtml((item.ItemType || 'OTHER').toLowerCase())}">${escapeHtml(getCategoryLabel(item.ItemType))}</span>
         <span class="item-price">${formatMoney(item.AmountUSD || 0)}</span>
         ${item.GoogleMapsUrl || item.GooglePlusCode ? `<a class="map-button" target="_blank" rel="noopener" href="${escapeHtml(getMapUrl(item))}">${escapeHtml(item.GooglePlusCode || 'Mapas')}</a>` : ''}
-        <span class="planning-toggle" role="group">
-          <button type="button" data-status="CONFIRMED" class="${getItemPlanningStatus(item) === 'CONFIRMED' ? 'active' : ''}">Confirmado</button>
-          <button type="button" data-status="PROPOSED" class="${getItemPlanningStatus(item) === 'PROPOSED' ? 'active' : ''}">Propuesto</button>
+        <span class="planning-toggle" role="group" aria-label="Estado de planificación">
+          <button type="button" data-status="CONFIRMED" aria-pressed="${getItemPlanningStatus(item) === 'CONFIRMED'}" class="${getItemPlanningStatus(item) === 'CONFIRMED' ? 'active' : ''}">Confirmado</button>
+          <button type="button" data-status="PROPOSED" aria-pressed="${getItemPlanningStatus(item) === 'PROPOSED'}" class="${getItemPlanningStatus(item) === 'PROPOSED' ? 'active' : ''}">Propuesto</button>
         </span>
       </span>
-    </button>
+    </div>
     <div class="item-details${isOpen ? '' : ' hidden'}">${renderDetails(item)}</div>
   `;
 
@@ -208,8 +208,22 @@ function renderItem(item) {
     state.openItemId = isOpen ? null : item.ItemID;
     renderHome();
   });
+  summary.addEventListener('keydown', event => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    if (event.target.closest('a, .planning-toggle')) return;
+    event.preventDefault();
+    state.openItemId = isOpen ? null : item.ItemID;
+    renderHome();
+  });
   itemEl.querySelectorAll('.planning-toggle button').forEach(button => {
+    ['pointerdown', 'pointerup', 'click', 'keydown', 'contextmenu'].forEach(type => {
+      button.addEventListener(type, event => {
+        event.stopPropagation();
+        if (type === 'contextmenu') event.preventDefault();
+      });
+    });
     button.addEventListener('click', event => {
+      event.preventDefault();
       event.stopPropagation();
       updatePlanningStatus(item, button.dataset.status);
     });
