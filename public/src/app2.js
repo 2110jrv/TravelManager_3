@@ -30,6 +30,11 @@ const els = {
 
 const editModal = createItemModal('editItemModal', 'Editar item', saveEditForm);
 const newItemModal = createItemModal('newItemModal', 'Nuevo item', saveNewItemForm);
+const DATA_COLUMNS = ['ItemID', 'StartDate', 'EndDate', 'StartTime', 'EndTime', 'ItemType', 'Title', 'City', 'AmountUSD', 'PlanningStatus', 'PaymentStatus', 'IsPaid', 'GooglePlusCode', 'GoogleMapsUrl', 'Notes'];
+const ITEM_TYPES = ['ACTIVITY', 'FLIGHT', 'FOOD', 'LODGING', 'TRANSPORT', 'OTHER'];
+const PLANNING_STATUSES = ['CONFIRMED', 'PROPOSED'];
+const PAYMENT_STATUSES = ['PAID', 'NOT_PAID', 'PARTIAL', 'RESERVED', 'ESTIMATED'];
+const SNAPSHOT_KEY = 'tm3.dataSnapshots';
 
 await initApp();
 
@@ -311,6 +316,7 @@ async function renderBudget() {
 
 async function renderSettings() {
   const budget = await getSetting('tripBudgetUSD', 6000);
+  const rows = getLogicalRows();
   els.settingsSection.innerHTML = `
     <div class="settings-panel">
       <label>Presupuesto total del viaje (USD)<input id="budgetInput" type="number" min="0" step="0.01" value="${Number(budget || 0)}" /></label>
@@ -320,6 +326,22 @@ async function renderSettings() {
       </div>
       <p id="settingsMessage" class="settings-message"></p>
     </div>
+    <section class="data-manager">
+      <header class="data-manager-header">
+        <div>
+          <h2>Administrar itinerario</h2>
+          <p>${rows.length} filas lógicas únicas</p>
+        </div>
+        <div class="data-actions">
+          <input id="dataSearch" type="search" placeholder="Buscar título, ciudad o ItemID" />
+          <button id="addDataRow" class="secondary-button" type="button">Añadir fila</button>
+          <button id="pasteDataRows" class="secondary-button" type="button">Pegar TSV</button>
+        </div>
+      </header>
+      <div id="dataMessage" class="settings-message"></div>
+      <div id="dataManagerTable">${renderDataTable(rows)}</div>
+      <div id="pastePreview" class="paste-preview hidden"></div>
+    </section>
   `;
   document.getElementById('saveBudgetButton').addEventListener('click', async () => {
     const value = Number(document.getElementById('budgetInput').value || 0);
@@ -332,6 +354,299 @@ async function renderSettings() {
     message.textContent = 'Presupuesto guardado';
   });
   document.getElementById('newItemButton').addEventListener('click', openNewItemModal);
+  bindDataManager();
+}
+
+function bindDataManager() {
+  const table = document.getElementById('dataManagerTable');
+  const search = document.getElementById('dataSearch');
+  document.getElementById('addDataRow').addEventListener('click', () => addLogicalRow());
+  document.getElementById('pasteDataRows').addEventListener('click', openPastePreview);
+  search.addEventListener('input', () => {
+    table.innerHTML = renderDataTable(getFilteredLogicalRows(search.value));
+  });
+  table.addEventListener('keydown', event => {
+    if (event.key === 'Enter' && event.target.matches('[data-field]')) {
+      event.preventDefault();
+      saveDataRow(event.target.closest('[data-key]'));
+    }
+  });
+  table.addEventListener('click', event => {
+    const row = event.target.closest('[data-key]');
+    if (!row) return;
+    if (event.target.matches('[data-save-row]')) saveDataRow(row);
+    if (event.target.matches('[data-duplicate-row]')) duplicateDataRow(row);
+    if (event.target.matches('[data-delete-row]')) deleteDataRow(row);
+  });
+}
+
+function renderDataTable(rows) {
+  const sorted = [...rows].sort((a, b) => (a.StartDate || '').localeCompare(b.StartDate || '') || (a.StartTime || '').localeCompare(b.StartTime || '') || a.ItemID.localeCompare(b.ItemID));
+  return `
+    <div class="data-table-wrap">
+      <table class="data-table">
+        <thead><tr>${DATA_COLUMNS.map(column => `<th>${column}</th>`).join('')}<th>Acciones</th></tr></thead>
+        <tbody>
+          ${sorted.map(row => renderDataRow(row)).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderDataRow(row) {
+  return `
+    <tr data-key="${escapeHtml(row._key)}" data-original-item-id="${escapeHtml(row.ItemID)}">
+      ${DATA_COLUMNS.map(column => `<td data-label="${column}">${renderDataCell(column, row[column])}</td>`).join('')}
+      <td class="row-actions"><button type="button" data-save-row>Guardar</button><button type="button" data-duplicate-row>Duplicar</button><button type="button" data-delete-row>Eliminar</button></td>
+    </tr>
+  `;
+}
+
+function renderDataCell(column, value) {
+  if (column === 'ItemType') return `<select data-field="${column}">${ITEM_TYPES.map(option => `<option value="${option}"${value === option ? ' selected' : ''}>${option}</option>`).join('')}</select>`;
+  if (column === 'PlanningStatus') return `<select data-field="${column}">${PLANNING_STATUSES.map(option => `<option value="${option}"${value === option ? ' selected' : ''}>${option}</option>`).join('')}</select>`;
+  if (column === 'PaymentStatus') return `<select data-field="${column}">${PAYMENT_STATUSES.map(option => `<option value="${option}"${value === option ? ' selected' : ''}>${option}</option>`).join('')}</select>`;
+  if (column === 'IsPaid') return `<select data-field="${column}"><option value="false"${value ? '' : ' selected'}>false</option><option value="true"${value ? ' selected' : ''}>true</option></select>`;
+  const type = column === 'AmountUSD' ? 'number' : column.endsWith('Date') ? 'date' : 'text';
+  const step = column === 'AmountUSD' ? ' step="0.01" min="0"' : '';
+  return `<input data-field="${column}" type="${type}"${step} value="${escapeHtml(value ?? '')}" />`;
+}
+
+function getFilteredLogicalRows(query) {
+  const text = String(query || '').trim().toLowerCase();
+  const rows = getLogicalRows();
+  if (!text) return rows;
+  return rows.filter(row => [row.ItemID, row.Title, row.City].some(value => String(value || '').toLowerCase().includes(text)));
+}
+
+function getLogicalRows() {
+  return uniqueFinancialItems(state.items).map(item => ({
+    _key: getLogicalKey(item),
+    ItemID: getLogicalKey(item),
+    StartDate: item.StartDate || item.DayDate || '',
+    EndDate: item.EndDate || item.StartDate || item.DayDate || '',
+    StartTime: item.StartTime || '',
+    EndTime: item.EndTime || '',
+    ItemType: item.ItemType || 'OTHER',
+    Title: item.Title || '',
+    City: item.City || '',
+    AmountUSD: Number(item.AmountUSD || 0),
+    PlanningStatus: getItemPlanningStatus(item),
+    PaymentStatus: item.PaymentStatus || 'NOT_PAID',
+    IsPaid: item.IsPaid === true,
+    GooglePlusCode: item.GooglePlusCode || '',
+    GoogleMapsUrl: item.GoogleMapsUrl || '',
+    Notes: item.Notes || ''
+  }));
+}
+
+function readDataRow(rowEl) {
+  const data = {};
+  DATA_COLUMNS.forEach(column => {
+    const input = rowEl.querySelector(`[data-field="${column}"]`);
+    data[column] = input ? input.value.trim() : '';
+  });
+  if (!data.ItemID) data.ItemID = `local-${crypto.randomUUID()}`;
+  data.AmountUSD = Number(data.AmountUSD || 0);
+  data.IsPaid = data.IsPaid === 'true';
+  return data;
+}
+
+async function saveDataRow(rowEl) {
+  const originalKey = rowEl.dataset.key;
+  const data = readDataRow(rowEl);
+  const error = validateDataRow(data, originalKey);
+  if (error) return setDataMessage(error, true);
+  await upsertLogicalRow(originalKey, data);
+  await loadState();
+  state.openDayKey = data.StartDate;
+  state.openItemId = data.ItemID;
+  setDataMessage('Fila guardada.');
+  renderSettings();
+}
+
+async function addLogicalRow() {
+  const date = state.days[0]?.DayDate || new Date().toISOString().slice(0, 10);
+  const data = {
+    ItemID: `local-${crypto.randomUUID()}`,
+    StartDate: date,
+    EndDate: date,
+    StartTime: '',
+    EndTime: '',
+    ItemType: 'ACTIVITY',
+    Title: 'Nuevo item',
+    City: state.days.find(day => day.DayDate === date)?.City || '',
+    AmountUSD: 0,
+    PlanningStatus: 'PROPOSED',
+    PaymentStatus: 'NOT_PAID',
+    IsPaid: false,
+    GooglePlusCode: '',
+    GoogleMapsUrl: '',
+    Notes: ''
+  };
+  await upsertLogicalRow('', data);
+  await loadState();
+  setDataMessage('Nueva fila creada.');
+  renderSettings();
+}
+
+async function duplicateDataRow(rowEl) {
+  const data = readDataRow(rowEl);
+  data.ItemID = `local-${crypto.randomUUID()}`;
+  data.Title = `${data.Title} copia`;
+  await upsertLogicalRow('', data);
+  await loadState();
+  setDataMessage('Fila duplicada.');
+  renderSettings();
+}
+
+async function deleteDataRow(rowEl) {
+  const key = rowEl.dataset.key;
+  if (!confirm('Eliminar este ItemID lógico y sus apariciones visuales?')) return;
+  await createDataSnapshot();
+  await replaceItemsByPredicate([], item => getLogicalKey(item) === key);
+  await loadState();
+  setDataMessage('Fila eliminada.');
+  renderSettings();
+}
+
+async function upsertLogicalRow(originalKey, data) {
+  const now = new Date().toISOString();
+  const related = state.items.filter(item => getLogicalKey(item) === originalKey);
+  if (related.length === 0) {
+    const item = buildItemFromData(data, now);
+    await addItem(item);
+    return;
+  }
+  for (const item of related) {
+    const shouldMoveDay = related.length === 1 || isChargeOccurrence(item) || item.DayDate === item.StartDate;
+    await updateItem({
+      ...item,
+      ...data,
+      ItemID: item.ItemID,
+      SourceItemID: data.ItemID,
+      DayDate: shouldMoveDay ? data.StartDate : item.DayDate,
+      StartDate: data.StartDate,
+      EndDate: data.EndDate,
+      Status: data.PlanningStatus === 'CONFIRMED' ? 'CONFIRMED' : 'PLANNED',
+      LastUpdatedAt: now,
+      SyncStatus: 'LOCAL_PENDING'
+    });
+  }
+}
+
+function buildItemFromData(data, now) {
+  return {
+    ...data,
+    SourceItemID: data.ItemID,
+    DatasetID: ITALY_DATASET_ID,
+    TripID: 'TRIP_ITALY_2026',
+    DayDate: data.StartDate,
+    Currency: 'USD',
+    Status: data.PlanningStatus === 'CONFIRMED' ? 'CONFIRMED' : 'PLANNED',
+    IsAllDay: !data.StartTime,
+    IsMultiDay: data.EndDate > data.StartDate,
+    LodgingDisplayMode: 'NORMAL',
+    SortOrder: Date.now(),
+    LastUpdatedAt: now,
+    SyncStatus: 'LOCAL_PENDING'
+  };
+}
+
+function validateDataRow(data, originalKey = '') {
+  const keys = getLogicalRows().map(row => row.ItemID);
+  if (!data.ItemID) return 'ItemID requerido.';
+  if (keys.includes(data.ItemID) && data.ItemID !== originalKey) return 'ItemID duplicado.';
+  if (!isValidDate(data.StartDate)) return 'StartDate inválida.';
+  if (!isValidDate(data.EndDate)) return 'EndDate inválida.';
+  if (data.EndDate < data.StartDate) return 'EndDate debe ser mayor o igual a StartDate.';
+  if (!data.Title) return 'Title requerido.';
+  if (Number.isNaN(data.AmountUSD) || data.AmountUSD < 0) return 'AmountUSD debe ser numérico y mayor o igual a 0.';
+  if (!isValidTime(data.StartTime)) return 'StartTime debe usar HH:mm.';
+  if (!isValidTime(data.EndTime)) return 'EndTime debe usar HH:mm.';
+  if (!PLANNING_STATUSES.includes(data.PlanningStatus)) return 'PlanningStatus inválido.';
+  if (!PAYMENT_STATUSES.includes(data.PaymentStatus)) return 'PaymentStatus inválido.';
+  return '';
+}
+
+function openPastePreview() {
+  const preview = document.getElementById('pastePreview');
+  preview.classList.remove('hidden');
+  preview.innerHTML = `
+    <h3>Pegar TSV</h3>
+    <textarea id="tsvInput" rows="7" placeholder="${DATA_COLUMNS.join('\t')}"></textarea>
+    <div class="settings-actions">
+      <button id="previewTsv" class="secondary-button" type="button">Previsualizar</button>
+      <button id="cancelTsv" class="secondary-button" type="button">Cancelar</button>
+    </div>
+    <div id="tsvResult"></div>
+  `;
+  document.getElementById('cancelTsv').addEventListener('click', () => preview.classList.add('hidden'));
+  document.getElementById('previewTsv').addEventListener('click', previewTsvImport);
+}
+
+function previewTsvImport() {
+  const text = document.getElementById('tsvInput').value.trim();
+  const rows = parseTsvRows(text);
+  const errors = [];
+  const seen = new Set();
+  rows.forEach((row, index) => {
+    if (row._columnCount !== DATA_COLUMNS.length) errors.push(`Fila ${index + 1}: columnas ${row._columnCount}/${DATA_COLUMNS.length}.`);
+    if (seen.has(row.ItemID)) errors.push(`Fila ${index + 1}: ItemID duplicado en pegado.`);
+    seen.add(row.ItemID);
+    const error = validateDataRow(row, row.ItemID);
+    if (error && !getLogicalRows().some(existing => existing.ItemID === row.ItemID)) errors.push(`Fila ${index + 1}: ${error}`);
+  });
+  const result = document.getElementById('tsvResult');
+  if (errors.length) {
+    result.innerHTML = `<div class="data-error">${errors.map(escapeHtml).join('<br>')}</div>`;
+    return;
+  }
+  result.innerHTML = `<p>${rows.length} filas listas para importar.</p><button id="confirmTsv" class="primary-button" type="button">Confirmar importación</button>`;
+  document.getElementById('confirmTsv').addEventListener('click', () => importTsvRows(rows));
+}
+
+function parseTsvRows(text) {
+  if (!text) return [];
+  const lines = text.split(/\r?\n/).filter(Boolean);
+  if (lines[0]?.split('\t').map(cell => cell.trim()).join('|') === DATA_COLUMNS.join('|')) lines.shift();
+  return lines.map(line => {
+    const cells = line.split('\t');
+    const row = {};
+    DATA_COLUMNS.forEach((column, index) => {
+      row[column] = (cells[index] || '').trim();
+    });
+    if (!row.ItemID) row.ItemID = `local-${crypto.randomUUID()}`;
+    row.AmountUSD = Number(row.AmountUSD || 0);
+    row.IsPaid = String(row.IsPaid).toLowerCase() === 'true';
+    row._columnCount = cells.length;
+    return row;
+  });
+}
+
+async function importTsvRows(rows) {
+  await createDataSnapshot();
+  for (const row of rows) {
+    await upsertLogicalRow(getLogicalRows().some(existing => existing.ItemID === row.ItemID) ? row.ItemID : '', row);
+    await loadState();
+  }
+  await loadState();
+  setDataMessage(`${rows.length} filas importadas.`);
+  renderSettings();
+}
+
+async function createDataSnapshot() {
+  const snapshots = JSON.parse(localStorage.getItem(SNAPSHOT_KEY) || '[]');
+  snapshots.unshift({ createdAt: new Date().toISOString(), items: state.items });
+  localStorage.setItem(SNAPSHOT_KEY, JSON.stringify(snapshots.slice(0, 5)));
+}
+
+function setDataMessage(message, isError = false) {
+  const el = document.getElementById('dataMessage');
+  if (!el) return;
+  el.textContent = message;
+  el.classList.toggle('data-error', isError);
 }
 
 async function restoreOriginalItinerary() {
@@ -460,7 +775,7 @@ function createItemModal(id, title, submitHandler) {
         </div>
         <div class="edit-grid">
           <label>PlanningStatus<select name="PlanningStatus"><option value="CONFIRMED">CONFIRMED</option><option value="PROPOSED">PROPOSED</option></select></label>
-          <label>PaymentStatus<select name="PaymentStatus"><option value="NOT_PAID">NOT_PAID</option><option value="RESERVED">RESERVED</option><option value="PAID">PAID</option><option value="PARTIAL">PARTIAL</option></select></label>
+          <label>PaymentStatus<select name="PaymentStatus"><option value="NOT_PAID">NOT_PAID</option><option value="RESERVED">RESERVED</option><option value="PAID">PAID</option><option value="PARTIAL">PARTIAL</option><option value="ESTIMATED">ESTIMATED</option></select></label>
         </div>
         <label>City<input name="City" /></label>
         <label>GooglePlusCode<input name="GooglePlusCode" /></label>
@@ -770,6 +1085,12 @@ function formatPercent(value) {
 
 function isValidTime(value) {
   return !value || /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+}
+
+function isValidDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value || '')) return false;
+  const date = new Date(`${value}T00:00:00`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
 }
 
 function updateOnlineStatus() {
