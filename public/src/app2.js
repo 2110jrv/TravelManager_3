@@ -244,21 +244,69 @@ async function updatePlanningStatus(item, PlanningStatus) {
   render();
 }
 
-function renderBudget() {
+async function renderBudget() {
   const confirmed = state.items.filter(item => getItemPlanningStatus(item) === 'CONFIRMED');
   const uniqueConfirmed = uniqueFinancialItems(confirmed);
+  const proposed = uniqueFinancialItems(state.items.filter(item => getItemPlanningStatus(item) === 'PROPOSED'));
+  const budget = Number(await getSetting('tripBudgetUSD', 6000) || 0);
   const total = sumAmount(uniqueConfirmed);
-  const paid = sumAmount(uniqueConfirmed.filter(item => item.IsPaid || item.PaymentStatus === 'PAID'));
+  const paid = sumAmount(uniqueConfirmed.filter(isPaidFinancial));
   const pending = total - paid;
+  const available = budget - total;
+  const percentUsed = budget > 0 ? (total / budget) * 100 : 0;
+  const categoryRows = getCategoryRows(uniqueConfirmed, total);
+  const dayRows = getBudgetDayRows(uniqueConfirmed);
+  const proposedTotal = sumAmount(proposed);
   els.budgetSection.innerHTML = `
+    ${budget > 0 ? '' : '<div class="budget-alert">No hay presupuesto configurado. <button class="link-button" type="button" data-go-settings>Ir a Configuración</button></div>'}
+    ${available < 0 ? `<div class="budget-alert danger">Presupuesto excedido por ${formatMoney(Math.abs(available))}</div>` : ''}
     <div class="summary-grid">
+      <div class="summary-card"><span>Presupuesto reservado</span><strong>${formatMoney(budget)}</strong></div>
       <div class="summary-card"><span>Total confirmado</span><strong>${formatMoney(total)}</strong></div>
       <div class="summary-card"><span>Total pagado</span><strong>${formatMoney(paid)}</strong></div>
       <div class="summary-card"><span>Total pendiente</span><strong>${formatMoney(pending)}</strong></div>
-      <div class="summary-card"><span>Items confirmados</span><strong>${uniqueConfirmed.length}</strong></div>
+      <div class="summary-card ${available < 0 ? 'over-budget' : ''}"><span>Disponible restante</span><strong>${formatMoney(available)}</strong></div>
+      <div class="summary-card"><span>Porcentaje utilizado</span><strong>${formatPercent(percentUsed)}</strong></div>
+      <div class="summary-card"><span>Items confirmados únicos</span><strong>${uniqueConfirmed.length}</strong></div>
     </div>
-    <p class="placeholder-note">Gráficas y desglose por categoría se añadirán en la próxima fase.</p>
+    <section class="budget-panel">
+      <h2>Pagado vs pendiente</h2>
+      ${renderPaidPendingChart(paid, pending, total)}
+    </section>
+    <section class="budget-panel">
+      <h2>Desglose por categoría</h2>
+      ${renderCategoryBreakdown(categoryRows)}
+    </section>
+    <section class="budget-panel">
+      <h2>Desglose por día</h2>
+      ${renderDayBreakdown(dayRows)}
+    </section>
+    <section class="budget-panel">
+      <h2>Desglose de gastos</h2>
+      <div class="expense-toolbar">
+        <button class="filter-button active" type="button" data-expense-filter="all">Todos</button>
+        <button class="filter-button" type="button" data-expense-filter="paid">Pagados</button>
+        <button class="filter-button" type="button" data-expense-filter="pending">Pendientes</button>
+        <select id="expenseCategoryFilter" aria-label="Categoría">
+          <option value="">Categoría</option>
+          ${categoryRows.map(row => `<option value="${escapeHtml(row.type)}">${escapeHtml(getCategoryLabel(row.type))}</option>`).join('')}
+        </select>
+      </div>
+      <div id="expenseList"></div>
+    </section>
+    <section class="budget-panel muted-panel">
+      <h2>Impacto potencial de propuestas</h2>
+      <div class="proposal-impact">
+        <span>${proposed.length} items propuestos únicos</span>
+        <strong>${formatMoney(proposedTotal)}</strong>
+      </div>
+    </section>
   `;
+  els.budgetSection.querySelector('[data-go-settings]')?.addEventListener('click', () => {
+    state.activeView = 'settings';
+    render();
+  });
+  setupExpenseFilters(uniqueConfirmed);
 }
 
 async function renderSettings() {
@@ -274,8 +322,14 @@ async function renderSettings() {
     </div>
   `;
   document.getElementById('saveBudgetButton').addEventListener('click', async () => {
-    await setSetting('tripBudgetUSD', Number(document.getElementById('budgetInput').value || 0));
-    document.getElementById('settingsMessage').textContent = 'Presupuesto guardado';
+    const value = Number(document.getElementById('budgetInput').value || 0);
+    const message = document.getElementById('settingsMessage');
+    if (Number.isNaN(value) || value < 0) {
+      message.textContent = 'El presupuesto no puede ser negativo.';
+      return;
+    }
+    await setSetting('tripBudgetUSD', value);
+    message.textContent = 'Presupuesto guardado';
   });
   document.getElementById('newItemButton').addEventListener('click', openNewItemModal);
 }
@@ -530,6 +584,135 @@ function getMapUrl(item) {
   return item.GoogleMapsUrl || `https://maps.google.com/?q=${encodeURIComponent(item.GooglePlusCode)}`;
 }
 
+function getCategoryRows(items, total) {
+  const groups = new Map();
+  for (const item of items) {
+    const type = item.ItemType || 'OTHER';
+    const row = groups.get(type) || { type, amount: 0, count: 0 };
+    row.amount += Number(item.AmountUSD || 0);
+    row.count += 1;
+    groups.set(type, row);
+  }
+  return [...groups.values()]
+    .map(row => ({ ...row, percent: total > 0 ? (row.amount / total) * 100 : 0 }))
+    .sort((a, b) => b.amount - a.amount);
+}
+
+function getBudgetDayRows(items) {
+  return state.days.map(day => {
+    const dayItems = items.filter(item => getBudgetDate(item) === day.DayDate);
+    const paid = sumAmount(dayItems.filter(isPaidFinancial));
+    const total = sumAmount(dayItems);
+    return {
+      ...day,
+      count: dayItems.length,
+      total,
+      paid,
+      pending: total - paid
+    };
+  });
+}
+
+function renderPaidPendingChart(paid, pending, total) {
+  const paidPercent = total > 0 ? (paid / total) * 100 : 0;
+  const pendingPercent = total > 0 ? (pending / total) * 100 : 0;
+  return `
+    <div class="stacked-chart" aria-label="Pagado ${formatPercent(paidPercent)}, pendiente ${formatPercent(pendingPercent)}">
+      <span class="stack-paid" style="width:${paidPercent}%"></span>
+      <span class="stack-pending" style="width:${pendingPercent}%"></span>
+    </div>
+    <div class="chart-legend">
+      <span><i class="legend-paid"></i>Pagado ${formatMoney(paid)}</span>
+      <span><i class="legend-pending"></i>Pendiente ${formatMoney(pending)}</span>
+    </div>
+  `;
+}
+
+function renderCategoryBreakdown(rows) {
+  if (rows.length === 0) return '<p class="placeholder-note">Sin gastos confirmados.</p>';
+  return `
+    <div class="bar-list">
+      ${rows.map(row => `
+        <div class="bar-row">
+          <div class="bar-label">
+            <strong>${escapeHtml(getCategoryLabel(row.type))}</strong>
+            <span>${formatMoney(row.amount)} · ${formatPercent(row.percent)} · ${row.count} items</span>
+          </div>
+          <div class="bar-track"><span style="width:${Math.max(1, row.percent)}%"></span></div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+function renderDayBreakdown(rows) {
+  return `
+    <div class="breakdown-list">
+      ${rows.map(row => `
+        <details class="breakdown-card">
+          <summary>
+            <span><strong>${escapeHtml(formatDayTitle(row))}</strong><small>${escapeHtml(row.City || 'Sin ciudad')}</small></span>
+            <b>${formatMoney(row.total)}</b>
+          </summary>
+          <div class="breakdown-meta">
+            <span>Pagado: ${formatMoney(row.paid)}</span>
+            <span>Pendiente: ${formatMoney(row.pending)}</span>
+            <span>Items: ${row.count}</span>
+          </div>
+        </details>
+      `).join('')}
+    </div>
+  `;
+}
+
+function setupExpenseFilters(items) {
+  const list = els.budgetSection.querySelector('#expenseList');
+  const buttons = [...els.budgetSection.querySelectorAll('[data-expense-filter]')];
+  const category = els.budgetSection.querySelector('#expenseCategoryFilter');
+  const renderFiltered = () => {
+    const active = buttons.find(button => button.classList.contains('active'))?.dataset.expenseFilter || 'all';
+    const type = category.value;
+    let filtered = [...items];
+    if (active === 'paid') filtered = filtered.filter(isPaidFinancial);
+    if (active === 'pending') filtered = filtered.filter(item => !isPaidFinancial(item));
+    if (type) filtered = filtered.filter(item => (item.ItemType || 'OTHER') === type);
+    list.innerHTML = renderExpenseList(filtered);
+  };
+  buttons.forEach(button => {
+    button.addEventListener('click', () => {
+      buttons.forEach(other => other.classList.toggle('active', other === button));
+      renderFiltered();
+    });
+  });
+  category.addEventListener('change', renderFiltered);
+  renderFiltered();
+}
+
+function renderExpenseList(items) {
+  const sorted = [...items].sort((a, b) => getBudgetDate(a).localeCompare(getBudgetDate(b)) || (a.StartTime || '').localeCompare(b.StartTime || ''));
+  if (sorted.length === 0) return '<p class="placeholder-note">Sin gastos para este filtro.</p>';
+  return `
+    <div class="expense-list">
+      ${sorted.map(item => `
+        <details class="expense-card">
+          <summary>
+            <span>
+              <strong>${escapeHtml(item.Title || 'Sin título')}</strong>
+              <small>${escapeHtml(getCategoryLabel(item.ItemType))} · ${escapeHtml(getBudgetDate(item))}${item.StartTime ? ` · ${escapeHtml(item.StartTime)}` : ''}</small>
+            </span>
+            <b>${formatMoney(item.AmountUSD || 0)}</b>
+          </summary>
+          <div class="breakdown-meta">
+            <span>${isPaidFinancial(item) ? 'Pagado' : 'Pendiente'}</span>
+            ${item.Provider ? `<span>Proveedor: ${escapeHtml(item.Provider)}</span>` : ''}
+            ${item.City ? `<span>Ciudad: ${escapeHtml(item.City)}</span>` : ''}
+          </div>
+        </details>
+      `).join('')}
+    </div>
+  `;
+}
+
 function uniqueFinancialItems(items) {
   const unique = new Map();
   for (const item of items) {
@@ -569,8 +752,20 @@ function sumAmount(items) {
   return items.reduce((sum, item) => sum + Number(item.AmountUSD || 0), 0);
 }
 
+function isPaidFinancial(item) {
+  return item.IsPaid === true || item.PaymentStatus === 'PAID';
+}
+
+function getBudgetDate(item) {
+  return item.StartDate || item.DayDate || '';
+}
+
 function formatMoney(amount) {
   return new Intl.NumberFormat('es-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(Number(amount || 0));
+}
+
+function formatPercent(value) {
+  return `${Number(value || 0).toFixed(1)}%`;
 }
 
 function isValidTime(value) {
