@@ -1029,6 +1029,88 @@ h1 {
   padding: 12px;
 }
 
+.calendar-toolbar {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.calendar-toolbar div {
+  display: grid;
+  gap: 4px;
+  text-align: center;
+}
+
+.calendar-toolbar p {
+  margin: 0;
+  color: #64748b;
+  font-weight: 700;
+}
+
+.calendar-actions {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+
+.calendar-weekdays,
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.calendar-weekdays {
+  gap: 6px;
+  margin-bottom: 6px;
+  color: #64748b;
+  font-size: .78rem;
+  font-weight: 800;
+  text-align: center;
+}
+
+.calendar-grid {
+  gap: 6px;
+}
+
+.calendar-day {
+  min-height: 92px;
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+  color: #334155;
+  text-align: left;
+}
+
+.calendar-day.muted {
+  background: #f8fafc;
+  color: #94a3b8;
+}
+
+.calendar-day.no-trip-day {
+  border-style: dashed;
+}
+
+.calendar-day:focus-visible {
+  outline: 2px solid #334155;
+  outline-offset: 2px;
+}
+
+.calendar-number {
+  color: #111827;
+  font-size: 1rem;
+  font-weight: 900;
+}
+
+.calendar-count {
+  font-weight: 800;
+}
+
 @media (max-width: 640px) {
   .summary-grid {
     grid-template-columns: 1fr;
@@ -1052,6 +1134,30 @@ h1 {
 
   .planning-toggle button {
     flex: 1;
+  }
+
+  .calendar-toolbar {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .calendar-toolbar div {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+
+  .calendar-toolbar [data-calendar-prev],
+  .calendar-toolbar [data-calendar-next] {
+    grid-row: 2;
+  }
+
+  .calendar-grid {
+    gap: 4px;
+  }
+
+  .calendar-day {
+    min-height: 76px;
+    padding: 6px;
+    font-size: .72rem;
   }
 }
 

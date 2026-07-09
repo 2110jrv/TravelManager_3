@@ -1,4 +1,4 @@
-import { addItem, deleteTrip, deleteTripDay, getActiveTripId, getAllItems, getAllTrips, getSetting, getTrip, getTripDays, migrateLegacyTravelData, openDatabase, replaceDatasetItems, replaceItemsByPredicate, saveTrip, saveTripDay, selectDefaultTrip, setActiveTripId, setSetting, updateItem } from './db.js';
+import { addItem, deleteTrip, deleteTripDay, enqueueDeletion, getActiveTripId, getAllItems, getAllTrips, getOrCreateDeviceId, getSetting, getTrip, getTripDays, migrateLegacyTravelData, openDatabase, replaceDatasetItems, replaceItemsByPredicate, saveTrip, saveTripDay, selectDefaultTrip, setActiveTripId, setSetting, updateItem } from './db.js';
 import { ITALY_DATASET_ID, ITALY_DATASET_MARK_KEY, ITALY_DAYS_KEY, getPlanningStatus, loadItalyItinerary } from './italyAdapter.js';
 
 const state = {
@@ -16,7 +16,9 @@ const state = {
   newInitialValue: '',
   pendingBackup: null,
   daysPanelOpen: false,
-  auditPanelOpen: false
+  auditPanelOpen: false,
+  calendarMonth: '',
+  calendarMessage: ''
 };
 
 const els = {
@@ -27,6 +29,7 @@ const els = {
   menuButton: document.getElementById('menuButton'),
   menuOverlay: document.getElementById('menuOverlay'),
   homeSection: document.getElementById('homeSection'),
+  calendarSection: document.getElementById('calendarSection'),
   budgetSection: document.getElementById('budgetSection'),
   settingsSection: document.getElementById('settingsSection'),
   resetButton: document.getElementById('resetSeedButton'),
@@ -41,6 +44,8 @@ const ITEM_TYPES = ['ACTIVITY', 'FLIGHT', 'FOOD', 'LODGING', 'TRANSPORT', 'OTHER
 const PLANNING_STATUSES = ['CONFIRMED', 'PROPOSED'];
 const PAYMENT_STATUSES = ['PAID', 'NOT_PAID', 'PARTIAL', 'RESERVED', 'ESTIMATED'];
 const SNAPSHOT_KEY = 'tm3.dataSnapshots';
+const VIEW_STATE_KEY = 'tm3.activeView';
+const CALENDAR_MONTH_KEY = 'tm3.calendarMonth';
 const BACKUP_SCHEMA_VERSION = 1;
 const APP_VERSION = '0.1.0';
 const ITEM_ID_PATTERN = /^ITEM_\d{3}$/;
@@ -50,6 +55,9 @@ await initApp();
 
 async function initApp() {
   await openDatabase();
+  await getOrCreateDeviceId();
+  state.activeView = getStoredView();
+  state.calendarMonth = localStorage.getItem(CALENDAR_MONTH_KEY) || '';
   const itinerary = await loadItalyItinerary();
   await migrateLegacyTravelData(itinerary);
   await refreshTripsAndDays(itinerary.days);
@@ -72,6 +80,8 @@ function bindEvents() {
   els.menuOverlay.querySelectorAll('[data-view]').forEach(button => {
     button.addEventListener('click', () => {
       state.activeView = button.dataset.view;
+      if (state.activeView === 'calendar') ensureCalendarMonth();
+      persistViewState();
       closeMenu();
       render();
     });
@@ -185,12 +195,25 @@ function isSampleItem(item) {
   return item.TripID === 'trip-001' || /^item-00\d$/.test(item.ItemID || '');
 }
 
+function getStoredView() {
+  const view = localStorage.getItem(VIEW_STATE_KEY);
+  return ['home', 'calendar', 'budget', 'settings'].includes(view) ? view : 'home';
+}
+
+function persistViewState() {
+  localStorage.setItem(VIEW_STATE_KEY, state.activeView);
+  if (state.calendarMonth) localStorage.setItem(CALENDAR_MONTH_KEY, state.calendarMonth);
+}
+
 async function render() {
   els.homeSection.classList.toggle('hidden', state.activeView !== 'home');
+  els.calendarSection.classList.toggle('hidden', state.activeView !== 'calendar');
   els.budgetSection.classList.toggle('hidden', state.activeView !== 'budget');
   els.settingsSection.classList.toggle('hidden', state.activeView !== 'settings');
   els.viewTitle.textContent = state.activeView === 'budget' ? 'Presupuesto' : state.activeView === 'settings' ? 'Configuración' : 'Inicio';
+  if (state.activeView === 'calendar') els.viewTitle.textContent = 'Calendario';
   if (state.activeView === 'home') renderHome();
+  if (state.activeView === 'calendar') renderCalendar();
   if (state.activeView === 'budget') await renderBudget();
   if (state.activeView === 'settings') await renderSettings();
 }
@@ -204,11 +227,12 @@ function renderHome() {
 function renderDays(items) {
   els.dayList.innerHTML = '';
   for (const day of state.days) {
-    const dayItems = items.filter(item => (item.DayDate || item.StartDate) === day.DayDate).sort(compareItems);
+    const dayItems = items.filter(item => dateInItemRange(day.DayDate, item)).sort(compareItems);
     const total = dayItems.reduce((sum, item) => sum + getFinancialAmount(item), 0);
     const isOpen = state.openDayKey === day.DayDate;
     const card = document.createElement('article');
     card.className = 'day-card';
+    card.dataset.dayDate = day.DayDate;
     card.innerHTML = `
       <button class="day-summary" type="button" aria-expanded="${isOpen}">
         <span class="day-summary-text">
@@ -232,6 +256,119 @@ function renderDays(items) {
     }
     els.dayList.append(card);
   }
+}
+
+function ensureCalendarMonth() {
+  if (state.calendarMonth) return;
+  state.calendarMonth = getInitialCalendarMonth();
+}
+
+function getInitialCalendarMonth() {
+  const trip = state.trips.find(row => row.TripID === state.activeTripId);
+  const today = new Date().toISOString().slice(0, 10);
+  if (trip && isTripCurrent(trip)) return today.slice(0, 7);
+  return (trip?.StartDate || state.days[0]?.DayDate || today).slice(0, 7);
+}
+
+function renderCalendar() {
+  ensureCalendarMonth();
+  const monthStart = `${state.calendarMonth}-01`;
+  const monthDate = new Date(`${monthStart}T00:00:00`);
+  const monthLabel = monthDate.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
+  const trip = state.trips.find(row => row.TripID === state.activeTripId);
+  els.calendarSection.innerHTML = `
+    <div class="calendar-toolbar">
+      <button class="secondary-button" type="button" data-calendar-prev>Anterior</button>
+      <div>
+        <h2>${escapeHtml(monthLabel)}</h2>
+        <p>${escapeHtml(trip?.TripTitle || trip?.TripName || state.activeTripId || 'Viaje activo')}</p>
+      </div>
+      <button class="secondary-button" type="button" data-calendar-next>Siguiente</button>
+    </div>
+    <div class="calendar-actions">
+      <button class="primary-button" type="button" data-calendar-start>Mes inicio del viaje</button>
+    </div>
+    <p class="settings-message${state.calendarMessage ? '' : ' hidden'}">${escapeHtml(state.calendarMessage)}</p>
+    <div class="calendar-weekdays">${['Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab', 'Dom'].map(day => `<span>${day}</span>`).join('')}</div>
+    <div class="calendar-grid">
+      ${buildCalendarDates(state.calendarMonth).map(date => renderCalendarDay(date)).join('')}
+    </div>
+  `;
+  els.calendarSection.querySelector('[data-calendar-prev]').addEventListener('click', () => changeCalendarMonth(-1));
+  els.calendarSection.querySelector('[data-calendar-next]').addEventListener('click', () => changeCalendarMonth(1));
+  els.calendarSection.querySelector('[data-calendar-start]').addEventListener('click', () => {
+    state.calendarMonth = getInitialCalendarMonth();
+    state.calendarMessage = '';
+    persistViewState();
+    renderCalendar();
+  });
+  els.calendarSection.querySelectorAll('[data-calendar-date]').forEach(button => {
+    button.addEventListener('click', () => openCalendarDate(button.dataset.calendarDate));
+  });
+}
+
+function renderCalendarDay(date) {
+  const counts = getCalendarCounts(date);
+  const inMonth = date.slice(0, 7) === state.calendarMonth;
+  const hasTripDay = state.days.some(day => day.DayDate === date);
+  return `
+    <button class="calendar-day${inMonth ? '' : ' muted'}${hasTripDay ? '' : ' no-trip-day'}" type="button" data-calendar-date="${escapeHtml(date)}">
+      <span class="calendar-number">${Number(date.slice(8, 10))}</span>
+      <span class="calendar-count">Total ${counts.total}</span>
+      <span>Confirmado ${counts.confirmed}</span>
+      <span>Propuesto ${counts.proposed}</span>
+    </button>
+  `;
+}
+
+function buildCalendarDates(monthKey) {
+  const first = new Date(`${monthKey}-01T00:00:00`);
+  const start = new Date(first);
+  const mondayOffset = (first.getDay() + 6) % 7;
+  start.setDate(first.getDate() - mondayOffset);
+  const dates = [];
+  for (let index = 0; index < 42; index += 1) {
+    const date = new Date(start);
+    date.setDate(start.getDate() + index);
+    dates.push(date.toISOString().slice(0, 10));
+  }
+  return dates;
+}
+
+function changeCalendarMonth(delta) {
+  const date = new Date(`${state.calendarMonth}-01T00:00:00`);
+  date.setMonth(date.getMonth() + delta);
+  state.calendarMonth = date.toISOString().slice(0, 7);
+  state.calendarMessage = '';
+  persistViewState();
+  renderCalendar();
+}
+
+function getCalendarCounts(date) {
+  const dayItems = state.items.filter(item => dateInItemRange(date, item));
+  const confirmed = dayItems.filter(item => getItemPlanningStatus(item) === 'CONFIRMED').length;
+  const proposed = dayItems.filter(item => getItemPlanningStatus(item) === 'PROPOSED').length;
+  return { total: dayItems.length, confirmed, proposed };
+}
+
+async function openCalendarDate(date) {
+  const day = state.days.find(row => row.DayDate === date);
+  if (!day) {
+    state.calendarMessage = `No existe un dÃ­a del viaje para ${date}.`;
+    renderCalendar();
+    return;
+  }
+  const counts = getCalendarCounts(date);
+  state.activeTab = counts.confirmed > 0 ? 'CONFIRMED' : 'PROPOSED';
+  state.openDayKey = date;
+  state.openItemId = null;
+  state.activeView = 'home';
+  state.calendarMessage = '';
+  persistViewState();
+  await render();
+  window.setTimeout(() => {
+    document.querySelector(`[data-day-date="${CSS.escape(date)}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, 0);
 }
 
 function renderItem(item) {
@@ -489,6 +626,9 @@ function bindTripManager() {
     await loadState();
     state.openDayKey = null;
     state.openItemId = null;
+    state.calendarMonth = getInitialCalendarMonth();
+    state.calendarMessage = '';
+    persistViewState();
     await render();
   });
   document.getElementById('newTripButton').addEventListener('click', () => openTripEditor());
@@ -562,6 +702,7 @@ async function deleteActiveTrip() {
   if (days.length > 0) return setInlineMessage(message, `Este viaje todavía tiene ${days.length} días. Debe borrarlos primero.`, true);
   if (!confirm(`Eliminar viaje ${trip.TripID}? Esta acción no se puede deshacer.`)) return;
   await createDataSnapshot('Antes de eliminar viaje');
+  await recordDeletion('TRIP', trip.TripID, trip.TripID, trip);
   await deleteTrip(trip.TripID);
   state.trips = await getAllTrips();
   await setActiveTripId(selectDefaultTrip(state.trips) || '');
@@ -646,6 +787,7 @@ async function deleteDay(TripDayID) {
   }
   if (!confirm(`Eliminar día ${date}?`)) return;
   await createDataSnapshot('Antes de eliminar día');
+  await recordDeletion('TRIP_DAY', TripDayID, day.TripID || state.activeTripId, day);
   await deleteTripDay(TripDayID);
   await refreshTripsAndDays();
   await loadState();
@@ -1308,11 +1450,27 @@ async function deleteDataRow(rowEl) {
   await deleteLogicalItem(item);
 }
 
+async function recordDeletion(EntityType, EntityId, TripID, entity = {}) {
+  const Version = String(entity.Version || entity.LastUpdatedAt || entity.UpdatedAt || 1);
+  const DeviceId = await getOrCreateDeviceId();
+  await enqueueDeletion({
+    DeletionID: [EntityType, TripID || '', EntityId, Version].map(value => encodeURIComponent(String(value))).join(':'),
+    EntityType,
+    EntityId,
+    TripID: TripID || '',
+    DeletedAt: new Date().toISOString(),
+    Version,
+    DeviceId,
+    SyncStatus: 'LOCAL_PENDING'
+  });
+}
+
 async function deleteLogicalItem(item, modal = null) {
   const key = getLogicalKey(item);
   const title = item.Title || 'Sin título';
   if (!confirm(`Eliminar item ${key} - ${title}? Se borrarán todas sus apariciones.`)) return;
   await createDataSnapshot('Antes de eliminar item');
+  await recordDeletion('ITEM', key, item.TripID || state.activeTripId, item);
   await replaceItemsByPredicate([], row => row.TripID === state.activeTripId && getLogicalKey(row) === key);
   if (modal) closeModal(modal);
   await loadState();

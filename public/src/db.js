@@ -1,9 +1,10 @@
 const DB_NAME = 'TravelManager3';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 const STORE_ITEMS = 'items';
 const STORE_SETTINGS = 'settings';
 const STORE_TRIPS = 'trips';
 const STORE_TRIP_DAYS = 'tripDays';
+const STORE_DELETION_QUEUE = 'deletionQueue';
 
 export function openDatabase() {
   return new Promise((resolve, reject) => {
@@ -28,6 +29,14 @@ export function openDatabase() {
         store.createIndex('TripID', 'TripID', { unique: false });
         store.createIndex('Date', 'Date', { unique: false });
         store.createIndex('TripID_Date', ['TripID', 'Date'], { unique: true });
+      }
+      if (!db.objectStoreNames.contains(STORE_DELETION_QUEUE)) {
+        const store = db.createObjectStore(STORE_DELETION_QUEUE, { keyPath: 'DeletionID' });
+        store.createIndex('EntityType', 'EntityType', { unique: false });
+        store.createIndex('EntityId', 'EntityId', { unique: false });
+        store.createIndex('TripID', 'TripID', { unique: false });
+        store.createIndex('SyncStatus', 'SyncStatus', { unique: false });
+        store.createIndex('DeletedAt', 'DeletedAt', { unique: false });
       }
     };
 
@@ -170,6 +179,45 @@ export async function setSetting(key, value) {
     const store = transaction.objectStore(STORE_SETTINGS);
     const request = store.put({ key, value });
     request.onsuccess = () => resolve(value);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function getOrCreateDeviceId() {
+  const existing = await getSetting('deviceId', '');
+  if (existing) return existing;
+  const random = crypto?.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const deviceId = `device-${random}`;
+  await setSetting('deviceId', deviceId);
+  return deviceId;
+}
+
+export async function enqueueDeletion(record) {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_DELETION_QUEUE, 'readwrite');
+    const store = transaction.objectStore(STORE_DELETION_QUEUE);
+    const request = store.get(record.DeletionID);
+    request.onsuccess = () => {
+      if (request.result) {
+        resolve(request.result);
+        return;
+      }
+      const addRequest = store.add(record);
+      addRequest.onsuccess = () => resolve(record);
+      addRequest.onerror = () => reject(addRequest.error);
+    };
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function getDeletionQueue() {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_DELETION_QUEUE, 'readonly');
+    const store = transaction.objectStore(STORE_DELETION_QUEUE);
+    const request = store.getAll();
+    request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
 }
