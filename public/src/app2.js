@@ -14,7 +14,9 @@ const state = {
   editingItem: null,
   editInitialValue: '',
   newInitialValue: '',
-  pendingBackup: null
+  pendingBackup: null,
+  daysPanelOpen: false,
+  auditPanelOpen: false
 };
 
 const els = {
@@ -384,10 +386,11 @@ async function renderBudget() {
 }
 
 async function renderSettings() {
-  const budget = await getActiveTripBudget();
   const rows = getLogicalRows();
   const snapshots = getSnapshots();
   const trip = state.trips.find(row => row.TripID === state.activeTripId) || null;
+  const audit = buildTripAudit();
+  const auditCount = audit.errors.length + audit.warnings.length + audit.info.length;
   els.settingsSection.innerHTML = `
     <section class="settings-panel">
       <h2>Viaje activo</h2>
@@ -395,30 +398,40 @@ async function renderSettings() {
       <div class="settings-actions">
         <button id="newTripButton" class="secondary-button" type="button">Nuevo viaje</button>
         <button id="editTripButton" class="secondary-button" type="button">Editar viaje</button>
-        <button id="deleteTripButton" class="secondary-button danger-button" type="button">Eliminar viaje</button>
       </div>
       <div id="tripEditor" class="inline-editor hidden"></div>
       <p id="tripMessage" class="settings-message"></p>
     </section>
-    <div class="settings-panel">
-      <label>Presupuesto total del viaje (USD)<input id="budgetInput" type="number" min="0" step="0.01" value="${Number(budget || 0)}" /></label>
-      <div class="settings-actions">
-        <button id="saveBudgetButton" class="primary-button" type="button">Guardar presupuesto</button>
-        <button id="newItemButton" class="secondary-button" type="button">Nuevo item</button>
-      </div>
-      <p id="settingsMessage" class="settings-message"></p>
-    </div>
     <section class="data-manager">
       <header class="data-manager-header">
         <div>
           <h2>Días del viaje</h2>
           <p>${state.days.length} días en ${escapeHtml(trip?.TripTitle || trip?.TripName || state.activeTripId)}</p>
         </div>
-        <button id="addTripDayButton" class="secondary-button" type="button">Añadir día</button>
+        <button id="toggleDaysPanel" class="secondary-button" type="button">${state.daysPanelOpen ? 'Ocultar' : 'Mostrar'}</button>
       </header>
-      <div id="dayMessage" class="settings-message"></div>
-      <div id="dayEditor" class="inline-editor hidden"></div>
-      <div class="day-admin-list">${renderTripDayAdminList()}</div>
+      <div id="daysPanelBody" class="${state.daysPanelOpen ? '' : 'hidden'}">
+        <div class="settings-actions"><button id="addTripDayButton" class="secondary-button" type="button">Añadir día</button></div>
+        <div id="dayMessage" class="settings-message"></div>
+        <div id="dayEditor" class="inline-editor hidden"></div>
+        <div class="day-admin-list">${renderTripDayAdminList()}</div>
+      </div>
+    </section>
+    <section class="data-manager">
+      <header class="data-manager-header">
+        <div>
+          <h2>Administrar itinerario</h2>
+          <p>${rows.length} filas lógicas únicas</p>
+        </div>
+        <div class="data-actions">
+          <input id="dataSearch" type="search" placeholder="Buscar título, ciudad o ItemID" />
+          <button id="addDataRow" class="secondary-button" type="button">Añadir fila</button>
+          <button id="pasteDataRows" class="secondary-button" type="button">Pegar TSV</button>
+        </div>
+      </header>
+      <div id="dataMessage" class="settings-message"></div>
+      <div id="dataManagerTable">${renderDataTable(rows)}</div>
+      <div id="pastePreview" class="paste-preview hidden"></div>
     </section>
     <section class="backup-panel">
       <header class="data-manager-header">
@@ -441,35 +454,22 @@ async function renderSettings() {
     <section class="data-manager">
       <header class="data-manager-header">
         <div>
-          <h2>Administrar itinerario</h2>
-          <p>${rows.length} filas lógicas únicas</p>
+          <h2>Auditoría del viaje</h2>
+          <p>${auditCount === 0 ? 'Sin problemas' : `${auditCount} asuntos por revisar`}</p>
         </div>
-        <div class="data-actions">
-          <input id="dataSearch" type="search" placeholder="Buscar título, ciudad o ItemID" />
-          <button id="addDataRow" class="secondary-button" type="button">Añadir fila</button>
-          <button id="pasteDataRows" class="secondary-button" type="button">Pegar TSV</button>
-        </div>
+        <button id="toggleAuditPanel" class="secondary-button" type="button">${state.auditPanelOpen ? 'Ocultar' : 'Mostrar'}</button>
       </header>
-      <div id="dataMessage" class="settings-message"></div>
-      <div id="dataManagerTable">${renderDataTable(rows)}</div>
-      <div id="pastePreview" class="paste-preview hidden"></div>
+      <div id="auditPanelBody" class="${state.auditPanelOpen ? '' : 'hidden'}">
+        <div class="settings-actions"><button id="refreshAuditButton" class="secondary-button" type="button">Volver a auditar</button></div>
+        ${renderAudit(audit)}
+      </div>
     </section>
   `;
-  document.getElementById('saveBudgetButton').addEventListener('click', async () => {
-    const value = Number(document.getElementById('budgetInput').value || 0);
-    const message = document.getElementById('settingsMessage');
-    if (Number.isNaN(value) || value < 0) {
-      message.textContent = 'El presupuesto no puede ser negativo.';
-      return;
-    }
-    await setActiveTripBudget(value);
-    message.textContent = 'Presupuesto guardado';
-  });
-  document.getElementById('newItemButton').addEventListener('click', openNewItemModal);
   bindTripManager();
   bindDayManager();
   bindBackupManager();
   bindDataManager();
+  bindAuditManager();
 }
 
 function getTripOptionLabel(trip) {
@@ -493,7 +493,6 @@ function bindTripManager() {
   });
   document.getElementById('newTripButton').addEventListener('click', () => openTripEditor());
   document.getElementById('editTripButton').addEventListener('click', () => openTripEditor(state.trips.find(trip => trip.TripID === state.activeTripId)));
-  document.getElementById('deleteTripButton').addEventListener('click', deleteActiveTrip);
 }
 
 function openTripEditor(trip = null) {
@@ -518,10 +517,11 @@ function openTripEditor(trip = null) {
     </div>
     <label>Notes<textarea id="tripNotesInput" rows="2">${escapeHtml(draft.Notes || '')}</textarea></label>
     <label class="inline-check"><input id="tripActiveInput" type="checkbox"${draft.IsActive !== false ? ' checked' : ''} /> IsActive</label>
-    <div class="settings-actions"><button id="saveTripButton" class="primary-button" type="button">Guardar viaje</button><button id="cancelTripEdit" class="secondary-button" type="button">Cancelar</button></div>
+    <div class="settings-actions"><button id="saveTripButton" class="primary-button" type="button">Guardar viaje</button>${trip ? '<button id="deleteTripFromEditor" class="secondary-button danger-button" type="button">Eliminar viaje</button>' : ''}<button id="cancelTripEdit" class="secondary-button" type="button">Cancelar</button></div>
   `;
   document.getElementById('cancelTripEdit').addEventListener('click', () => editor.classList.add('hidden'));
   document.getElementById('saveTripButton').addEventListener('click', () => saveTripEditor(trip?.TripID || ''));
+  document.getElementById('deleteTripFromEditor')?.addEventListener('click', deleteActiveTrip);
 }
 
 async function saveTripEditor(originalTripId = '') {
@@ -557,11 +557,11 @@ async function deleteActiveTrip() {
   if (!trip) return;
   const itemCount = state.allItems.filter(item => item.TripID === trip.TripID).length;
   const days = await getTripDays(trip.TripID);
-  const warning = `Eliminar ${trip.TripID}? Items: ${itemCount}. Días: ${days.length}. Escribe ELIMINAR para confirmar.`;
-  if (prompt(warning) !== 'ELIMINAR') return;
+  const message = document.getElementById('tripMessage');
+  if (itemCount > 0) return setInlineMessage(message, `Este viaje todavía tiene ${itemCount} items. Debe borrarlos primero.`, true);
+  if (days.length > 0) return setInlineMessage(message, `Este viaje todavía tiene ${days.length} días. Debe borrarlos primero.`, true);
+  if (!confirm(`Eliminar viaje ${trip.TripID}? Esta acción no se puede deshacer.`)) return;
   await createDataSnapshot('Antes de eliminar viaje');
-  for (const day of days) await deleteTripDay(day.TripDayID);
-  await replaceItemsByPredicate([], item => item.TripID === trip.TripID);
   await deleteTrip(trip.TripID);
   state.trips = await getAllTrips();
   await setActiveTripId(selectDefaultTrip(state.trips) || '');
@@ -586,7 +586,11 @@ function renderTripDayAdminList() {
 }
 
 function bindDayManager() {
-  document.getElementById('addTripDayButton').addEventListener('click', () => openDayEditor());
+  document.getElementById('toggleDaysPanel').addEventListener('click', async () => {
+    state.daysPanelOpen = !state.daysPanelOpen;
+    await renderSettings();
+  });
+  document.getElementById('addTripDayButton')?.addEventListener('click', () => openDayEditor());
   document.querySelectorAll('[data-edit-day]').forEach(button => button.addEventListener('click', () => openDayEditor(state.days.find(day => day.TripDayID === button.dataset.editDay))));
   document.querySelectorAll('[data-delete-day]').forEach(button => button.addEventListener('click', () => deleteDay(button.dataset.deleteDay)));
 }
@@ -635,19 +639,151 @@ async function deleteDay(TripDayID) {
   const day = state.days.find(row => row.TripDayID === TripDayID);
   if (!day) return;
   const date = day.Date || day.DayDate;
-  const count = state.items.filter(item => (item.DayDate || item.StartDate) === date).length;
-  const choice = prompt(`Eliminar día ${date}? Items en esa fecha: ${count}. Escribe DIA para eliminar solo el día o TODO para eliminar día + items.`);
-  if (choice !== 'DIA' && choice !== 'TODO') return;
+  const assigned = getItemsAssignedToDate(date);
+  const message = document.getElementById('dayMessage');
+  if (assigned.length) {
+    return setInlineMessage(message, `Primero debe borrar o mover todos los items asignados a este día. (${assigned.length}: ${assigned.map(item => `${getLogicalKey(item)} ${item.Title || ''}`).join(', ')})`, true);
+  }
+  if (!confirm(`Eliminar día ${date}?`)) return;
   await createDataSnapshot('Antes de eliminar día');
   await deleteTripDay(TripDayID);
-  if (choice === 'TODO') await replaceItemsByPredicate([], item => item.TripID === state.activeTripId && (item.DayDate || item.StartDate) === date);
   await refreshTripsAndDays();
   await loadState();
   await render();
 }
 
+function getItemsAssignedToDate(date) {
+  return uniqueFinancialItems(state.items).filter(item => dateInItemRange(date, item));
+}
+
+function dateInItemRange(date, item) {
+  const start = item.StartDate || item.DayDate || '';
+  const end = item.EndDate || start;
+  if (!start || !end || end < start) return false;
+  return start <= date && date <= end;
+}
+
 function makeTripDayId(tripId, date) {
   return `TD_${tripId}_${String(date || '').replaceAll('-', '_')}`;
+}
+
+function buildTripAudit() {
+  const errors = [];
+  const warnings = [];
+  const info = [];
+  const dayDates = new Set(state.days.map(day => day.Date || day.DayDate));
+  const dayIds = new Set();
+  const seenDayDates = new Set();
+  for (const day of state.days) {
+    const date = day.Date || day.DayDate;
+    if (dayIds.has(day.TripDayID)) warnings.push(dayIssue(day, 'TripDayID duplicado.'));
+    dayIds.add(day.TripDayID);
+    if (seenDayDates.has(date)) warnings.push(dayIssue(day, 'Fecha duplicada en TripDays.'));
+    seenDayDates.add(date);
+    if (getItemsAssignedToDate(date).length === 0) info.push(dayIssue(day, 'Día sin items.'));
+  }
+  const physicalIds = new Set();
+  for (const item of state.items) {
+    const key = getLogicalKey(item);
+    if (!item.ItemID) errors.push(itemIssue(item, 'ItemID faltante.'));
+    if (physicalIds.has(item.ItemID)) errors.push(itemIssue(item, 'ItemID físico duplicado.'));
+    physicalIds.add(item.ItemID);
+    if (item.TripID !== state.activeTripId) errors.push(itemIssue(item, 'TripID inconsistente.'));
+    ['TripID', 'Title', 'StartDate', 'ItemType'].forEach(field => {
+      if (!item[field]) errors.push(itemIssue(item, `${field} faltante.`));
+    });
+    const start = item.StartDate || item.DayDate || '';
+    const end = item.EndDate || start;
+    if (end && start && end < start) errors.push(itemIssue(item, 'EndDate anterior a StartDate.'));
+    if (start && !dayDates.has(start)) errors.push(itemIssue(item, 'StartDate sin TripDay válido.'));
+    for (const date of enumerateDates(start, end)) {
+      if (!dayDates.has(date)) errors.push(itemIssue(item, `Rango multiday con fecha faltante: ${date}.`));
+    }
+    if (item.AmountUSD === '' || item.AmountUSD === null || item.AmountUSD === undefined || Number.isNaN(Number(item.AmountUSD)) || Number(item.AmountUSD) < 0) errors.push(itemIssue(item, 'AmountUSD inválido.'));
+    if (Number(item.AmountUSD) === 0) warnings.push(itemIssue(item, 'Precio $0.00 — confirmar si es gratuito.'));
+    if (!PLANNING_STATUSES.includes(getItemPlanningStatus(item))) errors.push(itemIssue(item, 'PlanningStatus inválido.'));
+    if (!isAllowedItemId(key)) errors.push(itemIssue(item, 'Formato ItemID inválido.'));
+    if (ALLOWED_LEGACY_ITEM_IDS.has(key)) warnings.push(itemIssue(item, 'ItemID legacy permitido; no modificar automáticamente.'));
+    const trip = state.trips.find(row => row.TripID === state.activeTripId);
+    if (trip && start && (start < trip.StartDate || start > trip.EndDate)) warnings.push(itemIssue(item, 'Item fuera del rango del Trip.'));
+  }
+  return { errors, warnings, info };
+}
+
+function itemIssue(item, problem) {
+  return { type: 'item', id: getLogicalKey(item), title: item.Title || 'Sin título', problem, detail: `${item.StartDate || item.DayDate || 'Sin fecha'} · ${item.ItemType || 'Sin tipo'}` };
+}
+
+function dayIssue(day, problem) {
+  return { type: 'day', id: day.TripDayID, date: day.Date || day.DayDate, title: day.Title || day.DayLabel || 'Día', problem, detail: day.PrimaryCity || day.City || '' };
+}
+
+function enumerateDates(start, end) {
+  if (!isValidDate(start) || !isValidDate(end) || end < start) return [];
+  const dates = [];
+  const cursor = new Date(`${start}T00:00:00`);
+  const last = new Date(`${end}T00:00:00`);
+  while (cursor <= last) {
+    dates.push(cursor.toISOString().slice(0, 10));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return dates;
+}
+
+function renderAudit(audit) {
+  return ['errors', 'warnings', 'info'].map(group => renderAuditGroup(group, audit[group])).join('');
+}
+
+function renderAuditGroup(group, issues) {
+  const label = { errors: 'Errores', warnings: 'Advertencias', info: 'Informativos' }[group];
+  if (!issues.length) return `<section class="audit-group"><h3>${label}</h3><p class="placeholder-note">Sin registros.</p></section>`;
+  return `<section class="audit-group"><h3>${label}</h3>${issues.map(issue => `
+    <details class="audit-issue" data-issue-type="${issue.type}" data-issue-id="${escapeHtml(issue.id)}">
+      <summary><strong>${escapeHtml(issue.id || issue.date)}</strong><span>${escapeHtml(issue.title)} · ${escapeHtml(issue.problem)}</span></summary>
+      <div class="breakdown-meta"><span>${escapeHtml(issue.detail || '')}</span></div>
+      <div class="settings-actions">
+        ${issue.type === 'item' ? `<button type="button" data-audit-edit-item="${escapeHtml(issue.id)}">Editar</button><button class="danger-button" type="button" data-audit-delete-item="${escapeHtml(issue.id)}">Eliminar item</button>` : ''}
+        ${issue.type === 'day' ? `<button type="button" data-audit-edit-day="${escapeHtml(issue.id)}">Editar día</button><button class="danger-button" type="button" data-audit-delete-day="${escapeHtml(issue.id)}">Eliminar día</button>` : ''}
+      </div>
+    </details>`).join('')}</section>`;
+}
+
+function bindAuditManager() {
+  document.getElementById('toggleAuditPanel').addEventListener('click', async () => {
+    state.auditPanelOpen = !state.auditPanelOpen;
+    await renderSettings();
+  });
+  document.getElementById('refreshAuditButton')?.addEventListener('click', () => renderSettings());
+  document.querySelectorAll('[data-audit-edit-item]').forEach(button => button.addEventListener('click', () => {
+    const item = state.items.find(row => getLogicalKey(row) === button.dataset.auditEditItem);
+    if (item) openEditModal(item);
+  }));
+  document.querySelectorAll('[data-audit-delete-item]').forEach(button => button.addEventListener('click', () => {
+    const item = state.items.find(row => getLogicalKey(row) === button.dataset.auditDeleteItem);
+    if (item) deleteLogicalItem(item);
+  }));
+  document.querySelectorAll('[data-audit-edit-day]').forEach(button => button.addEventListener('click', () => {
+    state.daysPanelOpen = true;
+    document.getElementById('daysPanelBody')?.classList.remove('hidden');
+    const day = state.days.find(row => row.TripDayID === button.dataset.auditEditDay);
+    if (day) openDayEditor(day);
+  }));
+  document.querySelectorAll('[data-audit-delete-day]').forEach(button => button.addEventListener('click', () => deleteDay(button.dataset.auditDeleteDay)));
+  document.querySelectorAll('.audit-issue[data-issue-type="item"]').forEach(el => {
+    let timer = null;
+    const open = () => {
+      const item = state.items.find(row => getLogicalKey(row) === el.dataset.issueId);
+      if (item) openEditModal(item);
+    };
+    el.addEventListener('contextmenu', event => {
+      event.preventDefault();
+      open();
+    });
+    el.addEventListener('pointerdown', () => {
+      timer = window.setTimeout(open, 600);
+    });
+    ['pointerup', 'pointerleave', 'pointercancel'].forEach(type => el.addEventListener(type, () => window.clearTimeout(timer)));
+  });
 }
 
 function bindBackupManager() {
@@ -1168,12 +1304,21 @@ async function duplicateDataRow(rowEl) {
 
 async function deleteDataRow(rowEl) {
   const key = rowEl.dataset.key;
-  if (!confirm('Eliminar este ItemID lógico y sus apariciones visuales?')) return;
-  await createDataSnapshot('Antes de eliminar ItemID lógico');
-  await replaceItemsByPredicate([], item => item.TripID === state.activeTripId && getLogicalKey(item) === key);
+  const item = state.items.find(row => getLogicalKey(row) === key) || { ItemID: key, Title: key };
+  await deleteLogicalItem(item);
+}
+
+async function deleteLogicalItem(item, modal = null) {
+  const key = getLogicalKey(item);
+  const title = item.Title || 'Sin título';
+  if (!confirm(`Eliminar item ${key} - ${title}? Se borrarán todas sus apariciones.`)) return;
+  await createDataSnapshot('Antes de eliminar item');
+  await replaceItemsByPredicate([], row => row.TripID === state.activeTripId && getLogicalKey(row) === key);
+  if (modal) closeModal(modal);
   await loadState();
-  setDataMessage('Fila eliminada.');
-  renderSettings();
+  state.openItemId = null;
+  els.statusSync.textContent = 'Item eliminado';
+  await render();
 }
 
 async function upsertLogicalRow(originalKey, data) {
@@ -1435,6 +1580,7 @@ function openEditModal(item) {
   state.editingItem = item;
   fillForm(editModal.form, item);
   state.editInitialValue = getFormSnapshot(editModal.form);
+  editModal.el.querySelector('[data-delete-item]')?.classList.remove('hidden');
   editModal.el.classList.remove('hidden');
   editModal.form.elements.Title.focus();
 }
@@ -1458,6 +1604,7 @@ function openNewItemModal() {
     IsPaid: false
   });
   state.newInitialValue = getFormSnapshot(newItemModal.form);
+  newItemModal.el.querySelector('[data-delete-item]')?.classList.add('hidden');
   newItemModal.el.classList.remove('hidden');
   newItemModal.form.elements.Title.focus();
 }
@@ -1556,7 +1703,7 @@ function createItemModal(id, title, submitHandler) {
         <label>GoogleMapsUrl<input name="GoogleMapsUrl" type="url" /></label>
         <label>Notes<textarea name="Notes" rows="3"></textarea></label>
         <div class="edit-checks"><label><input name="IsAllDay" type="checkbox" /> IsAllDay</label><label><input name="IsPaid" type="checkbox" /> IsPaid</label></div>
-        <footer class="edit-actions"><button type="button" class="secondary-button" data-cancel>Cancelar</button><button type="submit" class="primary-button">Guardar</button></footer>
+        <footer class="edit-actions"><button type="button" class="secondary-button danger-button hidden" data-delete-item>Eliminar item</button><button type="button" class="secondary-button" data-cancel>Cancelar</button><button type="submit" class="primary-button">Guardar</button></footer>
       </form>
     </div>
   `;
@@ -1567,6 +1714,9 @@ function createItemModal(id, title, submitHandler) {
     if (event.target === modal) requestCloseModal(api);
   });
   modal.querySelectorAll('[data-cancel]').forEach(button => button.addEventListener('click', () => requestCloseModal(api)));
+  modal.querySelector('[data-delete-item]').addEventListener('click', () => {
+    if (state.editingItem) deleteLogicalItem(state.editingItem, api);
+  });
   form.addEventListener('submit', submitHandler);
   return api;
 }
