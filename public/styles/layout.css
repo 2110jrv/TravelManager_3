@@ -730,6 +730,67 @@ h1 {
   gap: 14px;
 }
 
+.inline-editor {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.inline-editor label,
+.inline-check {
+  display: grid;
+  gap: 6px;
+  font-weight: 800;
+  color: #334155;
+}
+
+.inline-check {
+  display: flex;
+  align-items: center;
+}
+
+.inline-editor input,
+.inline-editor select,
+.inline-editor textarea,
+.settings-panel select {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 10px 11px;
+  background: #fff;
+  color: #111827;
+  font: inherit;
+}
+
+.day-admin-list {
+  display: grid;
+  gap: 8px;
+}
+
+.admin-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fbfdff;
+}
+
+.admin-row div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.admin-row span {
+  color: #64748b;
+  font-weight: 700;
+}
+
 .backup-panel {
   display: grid;
   gap: 12px;
@@ -1030,7 +1091,8 @@ h1 {
   }
 
   .data-manager-header,
-  .data-actions {
+  .data-actions,
+  .admin-row {
     display: grid;
     justify-content: stretch;
   }

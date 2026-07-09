@@ -1,10 +1,13 @@
-import { addItem, getActiveTripId, getAllItems, getAllTrips, getSetting, getTrip, getTripDays, migrateLegacyTravelData, openDatabase, replaceDatasetItems, replaceItemsByPredicate, saveTrip, saveTripDay, setActiveTripId, setSetting, updateItem } from './db.js';
+import { addItem, deleteTrip, deleteTripDay, getActiveTripId, getAllItems, getAllTrips, getSetting, getTrip, getTripDays, migrateLegacyTravelData, openDatabase, replaceDatasetItems, replaceItemsByPredicate, saveTrip, saveTripDay, selectDefaultTrip, setActiveTripId, setSetting, updateItem } from './db.js';
 import { ITALY_DATASET_ID, ITALY_DATASET_MARK_KEY, ITALY_DAYS_KEY, getPlanningStatus, loadItalyItinerary } from './italyAdapter.js';
 
 const state = {
   activeView: 'home',
   activeTab: 'CONFIRMED',
+  activeTripId: '',
+  trips: [],
   days: [],
+  allItems: [],
   items: [],
   openDayKey: null,
   openItemId: null,
@@ -47,7 +50,7 @@ async function initApp() {
   await openDatabase();
   const itinerary = await loadItalyItinerary();
   await migrateLegacyTravelData(itinerary);
-  state.days = toAppDays(await getTripDays(await getActiveTripId()), itinerary.days);
+  await refreshTripsAndDays(itinerary.days);
   localStorage.setItem(ITALY_DAYS_KEY, JSON.stringify(state.days));
   await migrateToItalyItineraryIfNeeded(itinerary);
   await migratePlanningStatus();
@@ -73,6 +76,10 @@ function bindEvents() {
   });
   els.tabs.forEach(button => {
     button.addEventListener('click', () => {
+      if (button.dataset.action === 'new-item') {
+        openNewItemModal();
+        return;
+      }
       state.activeTab = button.dataset.tab;
       state.openItemId = null;
       render();
@@ -93,7 +100,19 @@ function bindEvents() {
 }
 
 async function loadState() {
-  state.items = await getAllItems();
+  state.allItems = await getAllItems();
+  state.items = state.allItems.filter(item => !state.activeTripId || item.TripID === state.activeTripId);
+}
+
+async function refreshTripsAndDays(fallbackDays = []) {
+  state.trips = await getAllTrips();
+  state.activeTripId = await getActiveTripId();
+  if (!state.trips.some(trip => trip.TripID === state.activeTripId)) {
+    state.activeTripId = selectDefaultTrip(state.trips) || 'TRIP_ITALY_2026';
+    await setActiveTripId(state.activeTripId);
+  }
+  state.days = toAppDays(await getTripDays(state.activeTripId), fallbackDays);
+  localStorage.setItem(ITALY_DAYS_KEY, JSON.stringify(state.days));
 }
 
 function toAppDays(tripDays, fallback = []) {
@@ -168,14 +187,14 @@ async function render() {
   els.homeSection.classList.toggle('hidden', state.activeView !== 'home');
   els.budgetSection.classList.toggle('hidden', state.activeView !== 'budget');
   els.settingsSection.classList.toggle('hidden', state.activeView !== 'settings');
-  els.viewTitle.textContent = state.activeView === 'budget' ? 'Presupuesto' : state.activeView === 'settings' ? 'Configuración' : 'Agenda de viaje';
+  els.viewTitle.textContent = state.activeView === 'budget' ? 'Presupuesto' : state.activeView === 'settings' ? 'Configuración' : 'Inicio';
   if (state.activeView === 'home') renderHome();
   if (state.activeView === 'budget') await renderBudget();
   if (state.activeView === 'settings') await renderSettings();
 }
 
 function renderHome() {
-  els.tabs.forEach(tab => tab.classList.toggle('active', tab.dataset.tab === state.activeTab));
+  els.tabs.forEach(tab => tab.classList.toggle('active', tab.dataset.tab === state.activeTab && !tab.dataset.action));
   const visibleItems = state.items.filter(item => getItemPlanningStatus(item) === state.activeTab);
   renderDays(visibleItems);
 }
@@ -368,7 +387,19 @@ async function renderSettings() {
   const budget = await getActiveTripBudget();
   const rows = getLogicalRows();
   const snapshots = getSnapshots();
+  const trip = state.trips.find(row => row.TripID === state.activeTripId) || null;
   els.settingsSection.innerHTML = `
+    <section class="settings-panel">
+      <h2>Viaje activo</h2>
+      <label>Seleccionar viaje<select id="activeTripSelect">${state.trips.map(row => `<option value="${escapeHtml(row.TripID)}"${row.TripID === state.activeTripId ? ' selected' : ''}>${escapeHtml(getTripOptionLabel(row))}</option>`).join('')}</select></label>
+      <div class="settings-actions">
+        <button id="newTripButton" class="secondary-button" type="button">Nuevo viaje</button>
+        <button id="editTripButton" class="secondary-button" type="button">Editar viaje</button>
+        <button id="deleteTripButton" class="secondary-button danger-button" type="button">Eliminar viaje</button>
+      </div>
+      <div id="tripEditor" class="inline-editor hidden"></div>
+      <p id="tripMessage" class="settings-message"></p>
+    </section>
     <div class="settings-panel">
       <label>Presupuesto total del viaje (USD)<input id="budgetInput" type="number" min="0" step="0.01" value="${Number(budget || 0)}" /></label>
       <div class="settings-actions">
@@ -377,6 +408,18 @@ async function renderSettings() {
       </div>
       <p id="settingsMessage" class="settings-message"></p>
     </div>
+    <section class="data-manager">
+      <header class="data-manager-header">
+        <div>
+          <h2>Días del viaje</h2>
+          <p>${state.days.length} días en ${escapeHtml(trip?.TripTitle || trip?.TripName || state.activeTripId)}</p>
+        </div>
+        <button id="addTripDayButton" class="secondary-button" type="button">Añadir día</button>
+      </header>
+      <div id="dayMessage" class="settings-message"></div>
+      <div id="dayEditor" class="inline-editor hidden"></div>
+      <div class="day-admin-list">${renderTripDayAdminList()}</div>
+    </section>
     <section class="backup-panel">
       <header class="data-manager-header">
         <div>
@@ -386,6 +429,7 @@ async function renderSettings() {
       </header>
       <div class="settings-actions">
         <button id="exportBackupButton" class="primary-button" type="button">Exportar backup completo</button>
+        <button id="exportActiveTripBackupButton" class="secondary-button" type="button">Exportar viaje activo</button>
         <button id="importBackupButton" class="secondary-button" type="button">Importar backup</button>
         <button id="showSnapshotsButton" class="secondary-button" type="button">Ver snapshots locales</button>
         <button id="restoreSnapshotButton" class="secondary-button danger-button" type="button">Restaurar snapshot</button>
@@ -422,12 +466,193 @@ async function renderSettings() {
     message.textContent = 'Presupuesto guardado';
   });
   document.getElementById('newItemButton').addEventListener('click', openNewItemModal);
+  bindTripManager();
+  bindDayManager();
   bindBackupManager();
   bindDataManager();
 }
 
+function getTripOptionLabel(trip) {
+  const current = isTripCurrent(trip) ? ' · en curso' : '';
+  return `${trip.TripTitle || trip.TripName || trip.TripID} · ${trip.StartDate || '?'} / ${trip.EndDate || '?'}${current}`;
+}
+
+function isTripCurrent(trip) {
+  const today = new Date().toISOString().slice(0, 10);
+  return (trip.StartDate || '') <= today && today <= (trip.EndDate || '');
+}
+
+function bindTripManager() {
+  document.getElementById('activeTripSelect').addEventListener('change', async event => {
+    await setActiveTripId(event.target.value);
+    await refreshTripsAndDays();
+    await loadState();
+    state.openDayKey = null;
+    state.openItemId = null;
+    await render();
+  });
+  document.getElementById('newTripButton').addEventListener('click', () => openTripEditor());
+  document.getElementById('editTripButton').addEventListener('click', () => openTripEditor(state.trips.find(trip => trip.TripID === state.activeTripId)));
+  document.getElementById('deleteTripButton').addEventListener('click', deleteActiveTrip);
+}
+
+function openTripEditor(trip = null) {
+  const editor = document.getElementById('tripEditor');
+  const today = new Date().toISOString().slice(0, 10);
+  const draft = trip || { TripID: suggestTripId('Nuevo viaje', today), TripName: '', TripTitle: '', StartDate: today, EndDate: today, BudgetAmountUSD: 0, BudgetCurrencyCode: 'USD', Notes: '', IsActive: true };
+  const hasRelated = trip && (state.allItems.some(item => item.TripID === trip.TripID) || state.days.some(day => day.TripID === trip.TripID));
+  editor.classList.remove('hidden');
+  editor.innerHTML = `
+    <div class="edit-grid">
+      <label>TripID<input id="tripIdInput" value="${escapeHtml(draft.TripID)}"${hasRelated ? ' readonly' : ''} /></label>
+      <label>TripName<input id="tripNameInput" value="${escapeHtml(draft.TripName || '')}" /></label>
+    </div>
+    <label>TripTitle<input id="tripTitleInput" value="${escapeHtml(draft.TripTitle || '')}" /></label>
+    <div class="edit-grid">
+      <label>StartDate<input id="tripStartInput" type="date" value="${escapeHtml(draft.StartDate || '')}" /></label>
+      <label>EndDate<input id="tripEndInput" type="date" value="${escapeHtml(draft.EndDate || '')}" /></label>
+    </div>
+    <div class="edit-grid">
+      <label>BudgetAmountUSD<input id="tripBudgetInput" type="number" min="0" step="0.01" value="${Number(draft.BudgetAmountUSD || 0)}" /></label>
+      <label>BudgetCurrencyCode<input id="tripCurrencyInput" value="${escapeHtml(draft.BudgetCurrencyCode || 'USD')}" /></label>
+    </div>
+    <label>Notes<textarea id="tripNotesInput" rows="2">${escapeHtml(draft.Notes || '')}</textarea></label>
+    <label class="inline-check"><input id="tripActiveInput" type="checkbox"${draft.IsActive !== false ? ' checked' : ''} /> IsActive</label>
+    <div class="settings-actions"><button id="saveTripButton" class="primary-button" type="button">Guardar viaje</button><button id="cancelTripEdit" class="secondary-button" type="button">Cancelar</button></div>
+  `;
+  document.getElementById('cancelTripEdit').addEventListener('click', () => editor.classList.add('hidden'));
+  document.getElementById('saveTripButton').addEventListener('click', () => saveTripEditor(trip?.TripID || ''));
+}
+
+async function saveTripEditor(originalTripId = '') {
+  const TripID = document.getElementById('tripIdInput').value.trim();
+  const TripName = document.getElementById('tripNameInput').value.trim();
+  const TripTitle = document.getElementById('tripTitleInput').value.trim();
+  const StartDate = document.getElementById('tripStartInput').value;
+  const EndDate = document.getElementById('tripEndInput').value;
+  const BudgetAmountUSD = Number(document.getElementById('tripBudgetInput').value || 0);
+  const message = document.getElementById('tripMessage');
+  const existing = state.trips.find(trip => trip.TripID === TripID);
+  if (!TripID) return setInlineMessage(message, 'TripID requerido.', true);
+  if (!TripName && !TripTitle) return setInlineMessage(message, 'Nombre requerido.', true);
+  if (existing && TripID !== originalTripId) return setInlineMessage(message, 'TripID duplicado.', true);
+  if (!isValidDate(StartDate)) return setInlineMessage(message, 'StartDate inválida.', true);
+  if (!isValidDate(EndDate) || EndDate < StartDate) return setInlineMessage(message, 'EndDate inválida.', true);
+  if (Number.isNaN(BudgetAmountUSD) || BudgetAmountUSD < 0) return setInlineMessage(message, 'Presupuesto inválido.', true);
+  const now = new Date().toISOString();
+  await saveTrip({ ...(existing || {}), TripID, TripName, TripTitle, StartDate, EndDate, BudgetAmount: BudgetAmountUSD, BudgetAmountUSD, BudgetCurrencyCode: document.getElementById('tripCurrencyInput').value.trim() || 'USD', Notes: document.getElementById('tripNotesInput').value.trim(), IsActive: document.getElementById('tripActiveInput').checked, CreatedAt: existing?.CreatedAt || now, LastUpdatedAt: now });
+  await setActiveTripId(TripID);
+  await refreshTripsAndDays();
+  await loadState();
+  await render();
+}
+
+function suggestTripId(name, date) {
+  const clean = String(name || 'VIAJE').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_|_$/g, '').toUpperCase() || 'VIAJE';
+  return `TRIP_${clean}_${String(date || new Date().toISOString()).slice(0, 4)}`;
+}
+
+async function deleteActiveTrip() {
+  const trip = state.trips.find(row => row.TripID === state.activeTripId);
+  if (!trip) return;
+  const itemCount = state.allItems.filter(item => item.TripID === trip.TripID).length;
+  const days = await getTripDays(trip.TripID);
+  const warning = `Eliminar ${trip.TripID}? Items: ${itemCount}. Días: ${days.length}. Escribe ELIMINAR para confirmar.`;
+  if (prompt(warning) !== 'ELIMINAR') return;
+  await createDataSnapshot('Antes de eliminar viaje');
+  for (const day of days) await deleteTripDay(day.TripDayID);
+  await replaceItemsByPredicate([], item => item.TripID === trip.TripID);
+  await deleteTrip(trip.TripID);
+  state.trips = await getAllTrips();
+  await setActiveTripId(selectDefaultTrip(state.trips) || '');
+  await refreshTripsAndDays();
+  await loadState();
+  await render();
+}
+
+function setInlineMessage(el, message, isError = false) {
+  el.textContent = message;
+  el.classList.toggle('data-error', isError);
+}
+
+function renderTripDayAdminList() {
+  if (!state.days.length) return '<p class="placeholder-note">Este viaje no tiene días todavía.</p>';
+  return state.days.map(day => `
+    <article class="admin-row">
+      <div><strong>${escapeHtml(day.Date || day.DayDate)}</strong><span>${escapeHtml(day.DayLabel || 'Día')} · ${escapeHtml(day.Title || '')} · ${escapeHtml(day.PrimaryCity || day.City || '')}</span></div>
+      <div class="settings-actions"><button type="button" data-edit-day="${escapeHtml(day.TripDayID)}">Editar</button><button class="danger-button" type="button" data-delete-day="${escapeHtml(day.TripDayID)}">Eliminar</button></div>
+    </article>
+  `).join('');
+}
+
+function bindDayManager() {
+  document.getElementById('addTripDayButton').addEventListener('click', () => openDayEditor());
+  document.querySelectorAll('[data-edit-day]').forEach(button => button.addEventListener('click', () => openDayEditor(state.days.find(day => day.TripDayID === button.dataset.editDay))));
+  document.querySelectorAll('[data-delete-day]').forEach(button => button.addEventListener('click', () => deleteDay(button.dataset.deleteDay)));
+}
+
+function openDayEditor(day = null) {
+  const editor = document.getElementById('dayEditor');
+  const trip = state.trips.find(row => row.TripID === state.activeTripId);
+  const nextDate = day?.Date || day?.DayDate || trip?.StartDate || new Date().toISOString().slice(0, 10);
+  const draft = day || { TripDayID: makeTripDayId(state.activeTripId, nextDate), TripID: state.activeTripId, DayOrder: state.days.length + 1, Date: nextDate, DayLabel: `Día ${state.days.length + 1}`, Title: '', PrimaryCity: '', PrimaryCountryCode: '', DayNotes: '', DayImageUrl: '' };
+  editor.classList.remove('hidden');
+  editor.innerHTML = `
+    <label>TripDayID<input id="dayIdInput" value="${escapeHtml(draft.TripDayID)}" readonly /></label>
+    <div class="edit-grid">
+      <label>DayOrder<input id="dayOrderInput" type="number" min="0" value="${Number(draft.DayOrder || 0)}" /></label>
+      <label>Date<input id="dayDateInput" type="date" value="${escapeHtml(draft.Date || draft.DayDate || '')}" /></label>
+    </div>
+    <div class="edit-grid">
+      <label>DayLabel<input id="dayLabelInput" value="${escapeHtml(draft.DayLabel || '')}" /></label>
+      <label>Title<input id="dayTitleInput" value="${escapeHtml(draft.Title || '')}" /></label>
+    </div>
+    <div class="edit-grid">
+      <label>PrimaryCity<input id="dayCityInput" value="${escapeHtml(draft.PrimaryCity || draft.City || '')}" /></label>
+      <label>PrimaryCountryCode<input id="dayCountryInput" value="${escapeHtml(draft.PrimaryCountryCode || draft.CountryCode || '')}" /></label>
+    </div>
+    <label>DayNotes<textarea id="dayNotesInput" rows="2">${escapeHtml(draft.DayNotes || draft.Notes || '')}</textarea></label>
+    <label>DayImageUrl<input id="dayImageInput" value="${escapeHtml(draft.DayImageUrl || '')}" /></label>
+    <div class="settings-actions"><button id="saveDayButton" class="primary-button" type="button">Guardar día</button><button id="cancelDayEdit" class="secondary-button" type="button">Cancelar</button></div>
+  `;
+  document.getElementById('cancelDayEdit').addEventListener('click', () => editor.classList.add('hidden'));
+  document.getElementById('saveDayButton').addEventListener('click', () => saveDayEditor(day?.TripDayID || ''));
+}
+
+async function saveDayEditor(originalDayId = '') {
+  const DateValue = document.getElementById('dayDateInput').value;
+  const message = document.getElementById('dayMessage');
+  if (!isValidDate(DateValue)) return setInlineMessage(message, 'Fecha inválida.', true);
+  const TripDayID = originalDayId || makeTripDayId(state.activeTripId, DateValue);
+  if (!originalDayId && state.days.some(day => day.TripDayID === TripDayID)) return setInlineMessage(message, 'TripDayID duplicado.', true);
+  const now = new Date().toISOString();
+  await saveTripDay({ TripDayID, TripID: state.activeTripId, DayOrder: Number(document.getElementById('dayOrderInput').value || 0), Date: DateValue, DayLabel: document.getElementById('dayLabelInput').value.trim(), Title: document.getElementById('dayTitleInput').value.trim(), PrimaryCity: document.getElementById('dayCityInput').value.trim(), PrimaryCountryCode: document.getElementById('dayCountryInput').value.trim(), DayNotes: document.getElementById('dayNotesInput').value.trim(), DayImageUrl: document.getElementById('dayImageInput').value.trim(), CreatedAt: state.days.find(day => day.TripDayID === originalDayId)?.CreatedAt || now, LastUpdatedAt: now });
+  await refreshTripsAndDays();
+  await render();
+}
+
+async function deleteDay(TripDayID) {
+  const day = state.days.find(row => row.TripDayID === TripDayID);
+  if (!day) return;
+  const date = day.Date || day.DayDate;
+  const count = state.items.filter(item => (item.DayDate || item.StartDate) === date).length;
+  const choice = prompt(`Eliminar día ${date}? Items en esa fecha: ${count}. Escribe DIA para eliminar solo el día o TODO para eliminar día + items.`);
+  if (choice !== 'DIA' && choice !== 'TODO') return;
+  await createDataSnapshot('Antes de eliminar día');
+  await deleteTripDay(TripDayID);
+  if (choice === 'TODO') await replaceItemsByPredicate([], item => item.TripID === state.activeTripId && (item.DayDate || item.StartDate) === date);
+  await refreshTripsAndDays();
+  await loadState();
+  await render();
+}
+
+function makeTripDayId(tripId, date) {
+  return `TD_${tripId}_${String(date || '').replaceAll('-', '_')}`;
+}
+
 function bindBackupManager() {
   document.getElementById('exportBackupButton').addEventListener('click', exportBackup);
+  document.getElementById('exportActiveTripBackupButton').addEventListener('click', exportActiveTripBackup);
   document.getElementById('importBackupButton').addEventListener('click', () => document.getElementById('backupFileInput').click());
   document.getElementById('backupFileInput').addEventListener('change', readBackupFile);
   document.getElementById('showSnapshotsButton').addEventListener('click', renderSnapshotList);
@@ -440,9 +665,16 @@ async function exportBackup() {
   setBackupMessage('Backup completo exportado.');
 }
 
-async function buildBackupPayload() {
+async function exportActiveTripBackup() {
+  const backup = await buildBackupPayload(true);
+  downloadJson(backup, `travelmanager3-${state.activeTripId}-backup-${formatBackupStamp(new Date())}.json`);
+  setBackupMessage('Backup del viaje activo exportado.');
+}
+
+async function buildBackupPayload(activeOnly = false) {
   const activeTripId = await getActiveTripId();
-  const trips = await getAllTrips();
+  const allTrips = await getAllTrips();
+  const trips = activeOnly ? allTrips.filter(trip => trip.TripID === activeTripId) : allTrips;
   const tripDays = (await Promise.all(trips.map(trip => getTripDays(trip.TripID)))).flat();
   return {
     schemaVersion: BACKUP_SCHEMA_VERSION,
@@ -453,7 +685,7 @@ async function buildBackupPayload() {
     trips,
     tripDays,
     trip: await getTripMetadata(),
-    items: getLogicalExportItems(),
+    items: getLogicalExportItems(activeOnly ? state.items : state.allItems),
     budget: { tripBudgetUSD: await getActiveTripBudget() },
     preferences: {
       activeDatasetMark: localStorage.getItem(ITALY_DATASET_MARK_KEY) || '',
@@ -469,8 +701,13 @@ async function buildBackupPayload() {
   };
 }
 
-function getLogicalExportItems() {
-  return uniqueFinancialItems(state.items).map(item => ({ ...item, ItemID: getLogicalKey(item), SourceItemID: getLogicalKey(item) }));
+function getLogicalExportItems(items = state.items) {
+  const unique = new Map();
+  for (const item of items) {
+    const key = getLogicalKey(item);
+    if (!unique.has(key)) unique.set(key, item);
+  }
+  return [...unique.values()].map(item => ({ ...item, ItemID: getLogicalKey(item), SourceItemID: getLogicalKey(item) }));
 }
 
 async function getTripMetadata() {
@@ -661,7 +898,7 @@ function normalizeImportedItem(item, reservedIds = new Set()) {
   const key = getLogicalKey(item) || getNextItemId(reservedIds);
   return {
     ItemID: key,
-    TripID: item.TripID || 'TRIP_ITALY_2026',
+    TripID: item.TripID || state.activeTripId || 'TRIP_ITALY_2026',
     StartDate: item.StartDate || item.DayDate,
     EndDate: item.EndDate || item.StartDate || item.DayDate,
     StartTime: item.StartTime || '',
@@ -822,7 +1059,7 @@ function getLogicalRows() {
 
 function getUsedItemNumbers(extraIds = new Set()) {
   const numbers = new Set();
-  [...getLogicalRows().map(row => row.ItemID), ...extraIds].forEach(id => {
+  [...state.allItems.map(item => getLogicalKey(item)), ...extraIds].forEach(id => {
     if (!ITEM_ID_PATTERN.test(id || '')) return;
     numbers.add(Number(id.slice(5)));
   });
@@ -891,6 +1128,7 @@ async function addLogicalRow() {
   }
   const data = {
     ItemID: itemId,
+    TripID: state.activeTripId,
     StartDate: date,
     EndDate: date,
     StartTime: '',
@@ -916,6 +1154,7 @@ async function duplicateDataRow(rowEl) {
   let data;
   try {
     data = readDataRow(rowEl);
+    data.TripID = state.activeTripId;
     data.ItemID = getNextItemId();
   } catch (error) {
     return setDataMessage(error.message, true);
@@ -931,7 +1170,7 @@ async function deleteDataRow(rowEl) {
   const key = rowEl.dataset.key;
   if (!confirm('Eliminar este ItemID lógico y sus apariciones visuales?')) return;
   await createDataSnapshot('Antes de eliminar ItemID lógico');
-  await replaceItemsByPredicate([], item => getLogicalKey(item) === key);
+  await replaceItemsByPredicate([], item => item.TripID === state.activeTripId && getLogicalKey(item) === key);
   await loadState();
   setDataMessage('Fila eliminada.');
   renderSettings();
@@ -1063,6 +1302,7 @@ function parseTsvRows(text) {
 async function importTsvRows(rows) {
   await createDataSnapshot('Antes de importar TSV');
   for (const row of rows) {
+    row.TripID = row.TripID || state.activeTripId;
     if (getLogicalRows().some(existing => existing.ItemID === row.ItemID)) {
       setDataMessage(`Conflicto: ${row.ItemID} ya existe. No se importó TSV.`, true);
       return;
@@ -1179,7 +1419,8 @@ async function restoreOriginalItinerary() {
   const itinerary = await loadItalyItinerary();
   await createDataSnapshot('Antes de restaurar originales del viaje');
   await migrateLegacyTravelData(itinerary);
-  state.days = itinerary.days;
+  await setActiveTripId('TRIP_ITALY_2026');
+  await refreshTripsAndDays(itinerary.days);
   await replaceItemsByPredicate(itinerary.items, item => item.DatasetID === ITALY_DATASET_ID || item.TripID === 'TRIP_ITALY_2026');
   localStorage.setItem(ITALY_DATASET_MARK_KEY, ITALY_DATASET_ID);
   localStorage.setItem(ITALY_DAYS_KEY, JSON.stringify(state.days));
@@ -1259,7 +1500,7 @@ async function saveNewItemForm(event) {
     ...data,
     ItemID: itemId,
     DatasetID: ITALY_DATASET_ID,
-    TripID: 'TRIP_ITALY_2026',
+    TripID: state.activeTripId,
     AmountUSD: Number(data.AmountUSD),
     Currency: 'USD',
     Status: data.PlanningStatus === 'CONFIRMED' ? 'CONFIRMED' : 'PLANNED',
