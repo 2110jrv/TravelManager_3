@@ -6,6 +6,7 @@
   <title>TravelManager 3.0</title>
   <link rel="stylesheet" href="./styles/base.css" />
   <link rel="stylesheet" href="./styles/layout.css" />
+  <link rel="stylesheet" href="./vendor/leaflet/leaflet.css" />
   <link rel="manifest" href="./manifest.webmanifest" />
 </head>
 <body>
@@ -22,6 +23,7 @@
       <nav class="menu-panel" aria-label="Principal">
         <button type="button" data-view="home">Inicio</button>
         <button type="button" data-view="calendar">Calendario</button>
+        <button type="button" data-view="map">Mapa</button>
         <button type="button" data-view="budget">Presupuesto</button>
         <button type="button" data-view="settings">Configuración</button>
       </nav>
@@ -49,11 +51,13 @@
         <div id="dayList" class="card-list"></div>
       </section>
       <section class="section hidden" id="calendarSection"></section>
+      <section class="section hidden" id="mapSection"></section>
       <section class="section hidden" id="budgetSection"></section>
       <section class="section hidden" id="settingsSection"></section>
     </main>
   </div>
 
+  <script src="./vendor/leaflet/leaflet.js"></script>
   <script type="module" src="./src/app2.js"></script>
 </body>
 </html>

@@ -18,7 +18,11 @@ const state = {
   daysPanelOpen: false,
   auditPanelOpen: false,
   calendarMonth: '',
-  calendarMessage: ''
+  calendarMessage: '',
+  mapFilters: { planning: 'ALL', type: 'ALL', city: 'ALL', date: 'ALL' },
+  map: null,
+  mapLayer: null,
+  tileLayer: null
 };
 
 const els = {
@@ -30,6 +34,7 @@ const els = {
   menuOverlay: document.getElementById('menuOverlay'),
   homeSection: document.getElementById('homeSection'),
   calendarSection: document.getElementById('calendarSection'),
+  mapSection: document.getElementById('mapSection'),
   budgetSection: document.getElementById('budgetSection'),
   settingsSection: document.getElementById('settingsSection'),
   resetButton: document.getElementById('resetSeedButton'),
@@ -197,7 +202,7 @@ function isSampleItem(item) {
 
 function getStoredView() {
   const view = localStorage.getItem(VIEW_STATE_KEY);
-  return ['home', 'calendar', 'budget', 'settings'].includes(view) ? view : 'home';
+  return ['home', 'calendar', 'map', 'budget', 'settings'].includes(view) ? view : 'home';
 }
 
 function persistViewState() {
@@ -208,12 +213,15 @@ function persistViewState() {
 async function render() {
   els.homeSection.classList.toggle('hidden', state.activeView !== 'home');
   els.calendarSection.classList.toggle('hidden', state.activeView !== 'calendar');
+  els.mapSection.classList.toggle('hidden', state.activeView !== 'map');
   els.budgetSection.classList.toggle('hidden', state.activeView !== 'budget');
   els.settingsSection.classList.toggle('hidden', state.activeView !== 'settings');
   els.viewTitle.textContent = state.activeView === 'budget' ? 'Presupuesto' : state.activeView === 'settings' ? 'Configuración' : 'Inicio';
   if (state.activeView === 'calendar') els.viewTitle.textContent = 'Calendario';
+  if (state.activeView === 'map') els.viewTitle.textContent = 'Mapa';
   if (state.activeView === 'home') renderHome();
   if (state.activeView === 'calendar') renderCalendar();
+  if (state.activeView === 'map') renderMapView();
   if (state.activeView === 'budget') await renderBudget();
   if (state.activeView === 'settings') await renderSettings();
 }
@@ -320,6 +328,169 @@ function renderCalendarDay(date) {
   `;
 }
 
+function renderMapView() {
+  if (state.map) {
+    state.map.remove();
+    state.map = null;
+    state.mapLayer = null;
+    state.tileLayer = null;
+  }
+  const stats = getMapLocationStats();
+  const pins = getFilteredMapItems();
+  els.mapSection.innerHTML = `
+    <div class="map-panel">
+      <div class="map-filter-grid">
+        <label>Estado<select data-map-filter="planning">${renderMapOptions([
+          ['ALL', 'Todos'],
+          ['CONFIRMED', 'Confirmado'],
+          ['PROPOSED', 'Propuesto']
+        ], state.mapFilters.planning)}</select></label>
+        <label>Categoría<select data-map-filter="type">${renderMapOptions([['ALL', 'Todos'], ...getMapItemTypes().map(value => [value, getCategoryLabel(value)])], state.mapFilters.type)}</select></label>
+        <label>Ciudad<select data-map-filter="city">${renderMapOptions([['ALL', 'Todas'], ...getMapCities().map(value => [value, value])], state.mapFilters.city)}</select></label>
+        <label>Día<select data-map-filter="date">${renderMapOptions([['ALL', 'Todos'], ...state.days.map(day => [day.DayDate, `${day.DayDate} ${day.City || day.Title || ''}`.trim()])], state.mapFilters.date)}</select></label>
+      </div>
+      <div class="map-status">
+        <span>${pins.length} pins visibles</span>
+        <span>${stats.withLocation} de ${stats.total} items tienen ubicación</span>
+      </div>
+      <div id="tripMap" class="trip-map" aria-label="Mapa del viaje"></div>
+      <p class="placeholder-note${pins.length ? ' hidden' : ''}">No hay ubicaciones para los filtros seleccionados.</p>
+      <div class="map-legend">${getMapItemTypes().map(type => `<span><i style="background:${getMarkerColor(type)}"></i>${escapeHtml(getCategoryLabel(type))}</span>`).join('')}</div>
+    </div>
+  `;
+  els.mapSection.querySelectorAll('[data-map-filter]').forEach(select => {
+    select.addEventListener('change', () => {
+      state.mapFilters[select.dataset.mapFilter] = select.value;
+      renderMapView();
+    });
+  });
+  window.setTimeout(() => updateLeafletMap(pins), 0);
+}
+
+function renderMapOptions(options, selected) {
+  return options.map(([value, label]) => `<option value="${escapeHtml(value)}"${value === selected ? ' selected' : ''}>${escapeHtml(label)}</option>`).join('');
+}
+
+function getMapSourceItems() {
+  return uniqueFinancialItems(state.items).filter(item => item.TripID === state.activeTripId);
+}
+
+function getMapLocationStats() {
+  const items = getMapSourceItems();
+  return { total: items.length, withLocation: items.filter(hasValidCoordinates).length };
+}
+
+function getMapItemTypes() {
+  return [...new Set(getMapSourceItems().map(item => item.ItemType || 'OTHER'))].sort();
+}
+
+function getMapCities() {
+  return [...new Set(getMapSourceItems().map(item => item.City || '').filter(Boolean))].sort((a, b) => a.localeCompare(b));
+}
+
+function getFilteredMapItems() {
+  return getMapSourceItems().filter(item => {
+    if (!hasValidCoordinates(item)) return false;
+    if (state.mapFilters.planning !== 'ALL' && getItemPlanningStatus(item) !== state.mapFilters.planning) return false;
+    if (state.mapFilters.type !== 'ALL' && (item.ItemType || 'OTHER') !== state.mapFilters.type) return false;
+    if (state.mapFilters.city !== 'ALL' && (item.City || '') !== state.mapFilters.city) return false;
+    if (state.mapFilters.date !== 'ALL' && !dateInItemRange(state.mapFilters.date, item)) return false;
+    return true;
+  });
+}
+
+function hasValidCoordinates(item) {
+  const latitude = Number(item.Latitude);
+  const longitude = Number(item.Longitude);
+  return Number.isFinite(latitude) && Number.isFinite(longitude) && !(latitude === 0 && longitude === 0);
+}
+
+function updateLeafletMap(items) {
+  if (!window.L) {
+    els.mapSection.querySelector('#tripMap').innerHTML = '<div class="map-empty">Mapa no disponible.</div>';
+    return;
+  }
+  state.map = L.map('tripMap', { scrollWheelZoom: true, dragging: true, touchZoom: true });
+  state.tileLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; OpenStreetMap'
+  }).addTo(state.map);
+  state.mapLayer = L.layerGroup().addTo(state.map);
+  state.mapLayer.clearLayers();
+  const bounds = [];
+  items.forEach(item => {
+    const point = [Number(item.Latitude), Number(item.Longitude)];
+    bounds.push(point);
+    const marker = L.marker(point, { icon: createMapIcon(item.ItemType) }).addTo(state.mapLayer);
+    marker.bindPopup(renderMapPopup(item));
+    marker.on('popupopen', event => {
+      event.popup.getElement()?.querySelector('[data-map-open-item]')?.addEventListener('click', () => openMapItemInHome(item));
+    });
+  });
+  state.map.invalidateSize();
+  if (bounds.length > 1) state.map.fitBounds(bounds, { padding: [28, 28], maxZoom: 16 });
+  if (bounds.length === 1) state.map.setView(bounds[0], 15);
+  if (bounds.length === 0) state.map.setView([41.9028, 12.4964], 6);
+}
+
+function createMapIcon(type) {
+  return L.divIcon({
+    className: 'map-marker',
+    html: `<span style="background:${getMarkerColor(type)}"></span>`,
+    iconSize: [24, 24],
+    iconAnchor: [12, 12],
+    popupAnchor: [0, -12]
+  });
+}
+
+function getMarkerColor(type = 'OTHER') {
+  return {
+    ACTIVITY: '#15803d',
+    FOOD: '#c2410c',
+    LODGING: '#6d28d9',
+    TRANSPORT: '#0e7490',
+    FLIGHT: '#1d4ed8',
+    SHOPPING: '#be123c',
+    OTHER: '#64748b'
+  }[type] || '#64748b';
+}
+
+function renderMapPopup(item) {
+  return `
+    <div class="map-popup">
+      <strong>${escapeHtml(getDisplayTitle(item))}</strong>
+      <span>${escapeHtml(getCategoryLabel(item.ItemType))} · ${escapeHtml(item.City || 'Sin ciudad')}</span>
+      <span>${escapeHtml(getItemDateTimeSummary(item))}</span>
+      <span>${escapeHtml(getItemPlanningStatus(item))}</span>
+      <button class="primary-button" type="button" data-map-open-item="${escapeHtml(getLogicalKey(item))}">Ver en Inicio</button>
+    </div>
+  `;
+}
+
+function getItemDateTimeSummary(item) {
+  const start = item.StartDate || item.DayDate || '';
+  const end = item.EndDate && item.EndDate !== start ? ` / ${item.EndDate}` : '';
+  const time = [item.StartTime, item.EndTime].filter(Boolean).join(' - ');
+  return `${start}${end}${time ? ` · ${time}` : ''}`;
+}
+
+async function openMapItemInHome(item) {
+  const key = getLogicalKey(item);
+  const targetDate = item.DayDate || item.StartDate || '';
+  const target = state.items.find(row => getLogicalKey(row) === key && row.TripID === state.activeTripId && (row.DayDate || row.StartDate) === targetDate)
+    || state.items.find(row => getLogicalKey(row) === key && row.TripID === state.activeTripId && dateInItemRange(targetDate, row))
+    || item;
+  state.activeTab = getItemPlanningStatus(target);
+  state.openDayKey = target.DayDate || target.StartDate || targetDate;
+  state.openItemId = target.ItemID;
+  state.activeView = 'home';
+  persistViewState();
+  await render();
+  window.setTimeout(() => {
+    document.querySelector(`[data-item-id="${CSS.escape(target.ItemID)}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, 0);
+}
+
 function buildCalendarDates(monthKey) {
   const first = new Date(`${monthKey}-01T00:00:00`);
   const start = new Date(first);
@@ -374,6 +545,7 @@ function renderItem(item) {
   const isOpen = state.openItemId === item.ItemID;
   const itemEl = document.createElement('article');
   itemEl.className = 'agenda-item';
+  itemEl.dataset.itemId = item.ItemID;
   const time = item.IsAllDay ? 'Todo el día' : (item.StartTime || '');
   itemEl.innerHTML = `
     <div class="item-summary" role="button" tabindex="0" aria-expanded="${isOpen}">
@@ -627,6 +799,7 @@ function bindTripManager() {
     state.openItemId = null;
     state.calendarMonth = getInitialCalendarMonth();
     state.calendarMessage = '';
+    state.mapFilters = { planning: 'ALL', type: 'ALL', city: 'ALL', date: 'ALL' };
     persistViewState();
     await render();
   });
@@ -1973,7 +2146,7 @@ function renderDetails(item) {
 }
 
 function getCategoryLabel(type = 'OTHER') {
-  return { ACTIVITY: 'Actividad', FLIGHT: 'Vuelo', FOOD: 'Comida', LODGING: 'Hospedaje', TRANSPORT: 'Transporte' }[type] || 'Otro';
+  return { ACTIVITY: 'Actividad', FLIGHT: 'Vuelo', FOOD: 'Comida', LODGING: 'Hospedaje', TRANSPORT: 'Transporte', SHOPPING: 'Compras' }[type] || 'Otro';
 }
 
 function getMapUrl(item) {

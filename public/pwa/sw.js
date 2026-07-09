@@ -1,10 +1,18 @@
-const CACHE_NAME = 'travelmanager3-cache-v5';
+const CACHE_NAME = 'travelmanager3-cache-v6';
+const TILE_CACHE_NAME = 'travelmanager3-tiles-v1';
 const ASSETS = [
   './',
   './index.html',
   './manifest.webmanifest',
   './styles/base.css',
   './styles/layout.css',
+  './vendor/leaflet/leaflet.css',
+  './vendor/leaflet/leaflet.js',
+  './vendor/leaflet/images/layers-2x.png',
+  './vendor/leaflet/images/layers.png',
+  './vendor/leaflet/images/marker-icon-2x.png',
+  './vendor/leaflet/images/marker-icon.png',
+  './vendor/leaflet/images/marker-shadow.png',
   './src/app.js',
   './src/app2.js',
   './src/db.js',
@@ -29,6 +37,18 @@ self.addEventListener('activate', event => {
 });
 
 self.addEventListener('fetch', event => {
+  const url = new URL(event.request.url);
+  if (url.hostname.endsWith('tile.openstreetmap.org')) {
+    event.respondWith(
+      caches.open(TILE_CACHE_NAME).then(cache => (
+        cache.match(event.request).then(cached => cached || fetch(event.request).then(response => {
+          if (response.ok) cache.put(event.request, response.clone());
+          return response;
+        }).catch(() => cached || new Response('', { status: 504, statusText: 'Tile unavailable offline' })))
+      ))
+    );
+    return;
+  }
   event.respondWith(
     caches.match(event.request).then(response => response || fetch(event.request))
   );
