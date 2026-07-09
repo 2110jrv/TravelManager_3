@@ -1087,6 +1087,14 @@ h1 {
   text-align: left;
 }
 
+.calendar-day.empty {
+  background: #fff7e6;
+}
+
+.calendar-day.populated {
+  background: #fff;
+}
+
 .calendar-day.muted {
   background: #f8fafc;
   color: #94a3b8;
@@ -1107,8 +1115,19 @@ h1 {
   font-weight: 900;
 }
 
-.calendar-count {
-  font-weight: 800;
+.calendar-confirmed-count {
+  align-self: center;
+  justify-self: center;
+  color: #2563eb;
+  font-size: 2.45rem;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.calendar-day.muted .calendar-confirmed-count {
+  color: #94a3b8;
+  font-size: 1.1rem;
+  justify-self: start;
 }
 
 @media (max-width: 640px) {
@@ -1158,6 +1177,14 @@ h1 {
     min-height: 76px;
     padding: 6px;
     font-size: .72rem;
+  }
+
+  .calendar-confirmed-count {
+    font-size: 1.9rem;
+  }
+
+  .calendar-day.muted .calendar-confirmed-count {
+    font-size: .9rem;
   }
 }
 

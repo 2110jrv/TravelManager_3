@@ -311,12 +311,11 @@ function renderCalendarDay(date) {
   const counts = getCalendarCounts(date);
   const inMonth = date.slice(0, 7) === state.calendarMonth;
   const hasTripDay = state.days.some(day => day.DayDate === date);
+  const hasItems = counts.total > 0;
   return `
-    <button class="calendar-day${inMonth ? '' : ' muted'}${hasTripDay ? '' : ' no-trip-day'}" type="button" data-calendar-date="${escapeHtml(date)}">
+    <button class="calendar-day${inMonth ? '' : ' muted'}${hasTripDay ? '' : ' no-trip-day'}${inMonth && !hasItems ? ' empty' : ''}${inMonth && hasItems ? ' populated' : ''}" type="button" data-calendar-date="${escapeHtml(date)}">
       <span class="calendar-number">${Number(date.slice(8, 10))}</span>
-      <span class="calendar-count">Total ${counts.total}</span>
-      <span>Confirmado ${counts.confirmed}</span>
-      <span>Propuesto ${counts.proposed}</span>
+      ${hasItems ? `<span class="calendar-confirmed-count">${counts.confirmed}</span>` : ''}
     </button>
   `;
 }
