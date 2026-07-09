@@ -1,4 +1,4 @@
-import { addItem, getAllItems, getSetting, openDatabase, replaceItemsByPredicate, setSetting, updateItem } from './db.js';
+import { addItem, getAllItems, getSetting, openDatabase, replaceDatasetItems, replaceItemsByPredicate, setSetting, updateItem } from './db.js';
 import { ITALY_DATASET_ID, ITALY_DATASET_MARK_KEY, ITALY_DAYS_KEY, getPlanningStatus, loadItalyItinerary } from './italyAdapter.js';
 
 const state = {
@@ -10,7 +10,8 @@ const state = {
   openItemId: null,
   editingItem: null,
   editInitialValue: '',
-  newInitialValue: ''
+  newInitialValue: '',
+  pendingBackup: null
 };
 
 const els = {
@@ -35,6 +36,8 @@ const ITEM_TYPES = ['ACTIVITY', 'FLIGHT', 'FOOD', 'LODGING', 'TRANSPORT', 'OTHER
 const PLANNING_STATUSES = ['CONFIRMED', 'PROPOSED'];
 const PAYMENT_STATUSES = ['PAID', 'NOT_PAID', 'PARTIAL', 'RESERVED', 'ESTIMATED'];
 const SNAPSHOT_KEY = 'tm3.dataSnapshots';
+const BACKUP_SCHEMA_VERSION = 1;
+const APP_VERSION = '0.1.0';
 
 await initApp();
 
@@ -48,7 +51,7 @@ async function initApp() {
   bindEvents();
   await loadState();
   updateOnlineStatus();
-  render();
+  await render();
 }
 
 function bindEvents() {
@@ -74,7 +77,7 @@ function bindEvents() {
   });
   els.refreshButton.addEventListener('click', async () => {
     await loadState();
-    render();
+    await render();
   });
   els.resetButton.addEventListener('click', restoreOriginalItinerary);
   document.addEventListener('keydown', event => {
@@ -114,14 +117,14 @@ function isSampleItem(item) {
   return item.TripID === 'trip-001' || /^item-00\d$/.test(item.ItemID || '');
 }
 
-function render() {
+async function render() {
   els.homeSection.classList.toggle('hidden', state.activeView !== 'home');
   els.budgetSection.classList.toggle('hidden', state.activeView !== 'budget');
   els.settingsSection.classList.toggle('hidden', state.activeView !== 'settings');
   els.viewTitle.textContent = state.activeView === 'budget' ? 'Presupuesto' : state.activeView === 'settings' ? 'Configuración' : 'Agenda de viaje';
   if (state.activeView === 'home') renderHome();
-  if (state.activeView === 'budget') renderBudget();
-  if (state.activeView === 'settings') renderSettings();
+  if (state.activeView === 'budget') await renderBudget();
+  if (state.activeView === 'settings') await renderSettings();
 }
 
 function renderHome() {
@@ -246,7 +249,7 @@ async function updatePlanningStatus(item, PlanningStatus) {
   state.openItemId = updated.ItemID;
   els.statusSync.textContent = 'Cambios locales pendientes';
   await loadState();
-  render();
+  await render();
 }
 
 async function renderBudget() {
@@ -317,6 +320,7 @@ async function renderBudget() {
 async function renderSettings() {
   const budget = await getSetting('tripBudgetUSD', 6000);
   const rows = getLogicalRows();
+  const snapshots = getSnapshots();
   els.settingsSection.innerHTML = `
     <div class="settings-panel">
       <label>Presupuesto total del viaje (USD)<input id="budgetInput" type="number" min="0" step="0.01" value="${Number(budget || 0)}" /></label>
@@ -326,6 +330,23 @@ async function renderSettings() {
       </div>
       <p id="settingsMessage" class="settings-message"></p>
     </div>
+    <section class="backup-panel">
+      <header class="data-manager-header">
+        <div>
+          <h2>Backup y restauración</h2>
+          <p>${snapshots.length} snapshots locales guardados</p>
+        </div>
+      </header>
+      <div class="settings-actions">
+        <button id="exportBackupButton" class="primary-button" type="button">Exportar backup completo</button>
+        <button id="importBackupButton" class="secondary-button" type="button">Importar backup</button>
+        <button id="showSnapshotsButton" class="secondary-button" type="button">Ver snapshots locales</button>
+        <button id="restoreSnapshotButton" class="secondary-button danger-button" type="button">Restaurar snapshot</button>
+        <input id="backupFileInput" class="hidden" type="file" accept="application/json,.json" />
+      </div>
+      <div id="backupMessage" class="settings-message"></div>
+      <div id="backupPreview" class="backup-preview hidden"></div>
+    </section>
     <section class="data-manager">
       <header class="data-manager-header">
         <div>
@@ -354,7 +375,233 @@ async function renderSettings() {
     message.textContent = 'Presupuesto guardado';
   });
   document.getElementById('newItemButton').addEventListener('click', openNewItemModal);
+  bindBackupManager();
   bindDataManager();
+}
+
+function bindBackupManager() {
+  document.getElementById('exportBackupButton').addEventListener('click', exportBackup);
+  document.getElementById('importBackupButton').addEventListener('click', () => document.getElementById('backupFileInput').click());
+  document.getElementById('backupFileInput').addEventListener('change', readBackupFile);
+  document.getElementById('showSnapshotsButton').addEventListener('click', renderSnapshotList);
+  document.getElementById('restoreSnapshotButton').addEventListener('click', renderSnapshotList);
+}
+
+async function exportBackup() {
+  const backup = await buildBackupPayload();
+  downloadJson(backup, `travelmanager3-backup-${formatBackupStamp(new Date())}.json`);
+  setBackupMessage('Backup completo exportado.');
+}
+
+async function buildBackupPayload() {
+  return {
+    schemaVersion: BACKUP_SCHEMA_VERSION,
+    exportedAt: new Date().toISOString(),
+    appVersion: APP_VERSION,
+    datasetId: getActiveDatasetId(),
+    trip: getTripMetadata(),
+    items: getLogicalExportItems(),
+    budget: { tripBudgetUSD: Number(await getSetting('tripBudgetUSD', 6000) || 0) },
+    preferences: {
+      activeDatasetMark: localStorage.getItem(ITALY_DATASET_MARK_KEY) || '',
+      days: state.days
+    },
+    snapshots: getSnapshots().map(snapshot => ({
+      id: snapshot.id,
+      timestamp: snapshot.timestamp,
+      reason: snapshot.reason,
+      itemCount: snapshot.items?.length || 0,
+      datasetId: snapshot.datasetId
+    }))
+  };
+}
+
+function getLogicalExportItems() {
+  return uniqueFinancialItems(state.items).map(item => ({ ...item, ItemID: getLogicalKey(item), SourceItemID: getLogicalKey(item) }));
+}
+
+function getTripMetadata() {
+  return {
+    tripId: 'TRIP_ITALY_2026',
+    title: 'Italy 2026',
+    dayCount: state.days.length,
+    startDate: state.days[0]?.DayDate || '',
+    endDate: state.days[state.days.length - 1]?.DayDate || ''
+  };
+}
+
+function downloadJson(data, filename) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+async function readBackupFile(event) {
+  const file = event.target.files?.[0];
+  event.target.value = '';
+  state.pendingBackup = null;
+  if (!file) return;
+  try {
+    const data = JSON.parse(await file.text());
+    const validation = validateBackupPayload(data);
+    state.pendingBackup = validation.errors.length ? null : data;
+    renderBackupPreview(data, validation);
+  } catch (error) {
+    renderBackupPreview(null, { errors: ['JSON corrupto o ilegible.'], warnings: [], summary: null, conflicts: [] });
+  }
+}
+
+function validateBackupPayload(data) {
+  const errors = [];
+  const warnings = [];
+  const conflicts = [];
+  if (!data || typeof data !== 'object') errors.push('El archivo no contiene un objeto JSON válido.');
+  if (data?.schemaVersion !== BACKUP_SCHEMA_VERSION) errors.push(`schemaVersion inválido. Esperado: ${BACKUP_SCHEMA_VERSION}.`);
+  if (!Array.isArray(data?.items)) errors.push('items debe ser una lista.');
+  if (data?.exportedAt && Number.isNaN(new Date(data.exportedAt).getTime())) errors.push('exportedAt inválido.');
+  const seen = new Set();
+  const localKeys = new Set(getLogicalRows().map(row => row.ItemID));
+  (data?.items || []).forEach((item, index) => {
+    const key = getLogicalKey(item);
+    if (!key) errors.push(`items[${index}]: ItemID requerido.`);
+    if (seen.has(key)) errors.push(`items[${index}]: ItemID duplicado (${key}).`);
+    seen.add(key);
+    if (localKeys.has(key)) conflicts.push(key);
+    if (!isValidDate(item.StartDate || item.DayDate)) errors.push(`items[${index}]: fecha inválida.`);
+    if (item.EndDate && !isValidDate(item.EndDate)) errors.push(`items[${index}]: EndDate inválida.`);
+    const amount = Number(item.AmountUSD || 0);
+    if (Number.isNaN(amount) || amount < 0) errors.push(`items[${index}]: AmountUSD inválido.`);
+    if (!PLANNING_STATUSES.includes(item.PlanningStatus || getPlanningStatus(item.Status))) errors.push(`items[${index}]: PlanningStatus inválido.`);
+    if (item.PaymentStatus && !PAYMENT_STATUSES.includes(item.PaymentStatus)) errors.push(`items[${index}]: PaymentStatus inválido.`);
+  });
+  const budget = Number(data?.budget?.tripBudgetUSD ?? 0);
+  if (Number.isNaN(budget) || budget < 0) errors.push('Presupuesto inválido.');
+  if (!data?.datasetId) warnings.push('datasetId no incluido.');
+  return { errors, warnings, conflicts: [...new Set(conflicts)], summary: getBackupSummary(data) };
+}
+
+function getBackupSummary(data) {
+  const items = Array.isArray(data?.items) ? data.items : [];
+  return {
+    items: items.length,
+    confirmed: items.filter(item => (item.PlanningStatus || getPlanningStatus(item.Status)) === 'CONFIRMED').length,
+    proposed: items.filter(item => (item.PlanningStatus || getPlanningStatus(item.Status)) === 'PROPOSED').length,
+    budget: Number(data?.budget?.tripBudgetUSD || 0),
+    exportedAt: data?.exportedAt || '',
+    datasetId: data?.datasetId || ''
+  };
+}
+
+function renderBackupPreview(data, validation) {
+  const preview = document.getElementById('backupPreview');
+  preview.classList.remove('hidden');
+  const summary = validation.summary;
+  preview.innerHTML = `
+    <h3>Resumen previo</h3>
+    ${summary ? `<div class="backup-summary">
+      <span>Items: <strong>${summary.items}</strong></span>
+      <span>Confirmados: <strong>${summary.confirmed}</strong></span>
+      <span>Propuestos: <strong>${summary.proposed}</strong></span>
+      <span>Presupuesto: <strong>${formatMoney(summary.budget)}</strong></span>
+      <span>Fecha backup: <strong>${escapeHtml(formatDateTime(summary.exportedAt))}</strong></span>
+      <span>datasetId: <strong>${escapeHtml(summary.datasetId || 'Sin dato')}</strong></span>
+    </div>` : ''}
+    ${renderIssueList('Errores', validation.errors)}
+    ${renderIssueList('Advertencias', validation.warnings)}
+    ${renderIssueList('Conflictos ItemID', validation.conflicts)}
+    ${validation.errors.length ? '' : renderImportActions(validation.conflicts)}
+  `;
+  preview.querySelector('[data-import-replace]')?.addEventListener('click', () => applyBackupReplace(data));
+  preview.querySelector('[data-import-merge]')?.addEventListener('click', () => applyBackupMerge(data));
+}
+
+function renderIssueList(title, items) {
+  if (!items.length) return '';
+  return `<div class="${title === 'Errores' ? 'data-error' : 'backup-warn'}"><strong>${title}</strong><ul>${items.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul></div>`;
+}
+
+function renderImportActions(conflicts) {
+  return `
+    <div class="import-actions">
+      <button class="primary-button danger-button" type="button" data-import-replace>Reemplazar data actual</button>
+      <button class="secondary-button" type="button" data-import-merge>Combinar</button>
+    </div>
+    ${conflicts.length ? `<div class="conflict-list">${conflicts.map(key => `
+      <label><span>${escapeHtml(key)}</span><select data-conflict-key="${escapeHtml(key)}"><option value="local">Conservar local</option><option value="imported">Usar importado</option></select></label>
+    `).join('')}</div>` : ''}
+  `;
+}
+
+async function applyBackupReplace(data) {
+  if (!state.pendingBackup || !confirm('Reemplazar data actual con este backup? Se creará un snapshot antes.')) return;
+  await createDataSnapshot('Antes de reemplazar por backup');
+  await restoreDatasetPayload(data);
+  setBackupMessage('Backup restaurado en modo reemplazar.');
+}
+
+async function applyBackupMerge(data) {
+  if (!state.pendingBackup || !confirm('Combinar backup con la data actual? Se creará un snapshot antes.')) return;
+  await createDataSnapshot('Antes de combinar backup');
+  const choices = getConflictChoices();
+  const localKeys = new Set(getLogicalRows().map(row => row.ItemID));
+  for (const imported of data.items) {
+    const key = getLogicalKey(imported);
+    if (!localKeys.has(key) || choices.get(key) === 'imported') {
+      await upsertLogicalRow(localKeys.has(key) ? key : '', normalizeImportedItem(imported));
+      await loadState();
+    }
+  }
+  await loadState();
+  els.statusSync.textContent = 'Backup combinado';
+  await render();
+  setBackupMessage('Backup combinado. Los conflictos se resolvieron según tu selección.');
+}
+
+function getConflictChoices() {
+  return new Map([...document.querySelectorAll('[data-conflict-key]')].map(select => [select.dataset.conflictKey, select.value]));
+}
+
+async function restoreDatasetPayload(payload) {
+  const items = payload.items || [];
+  const budget = payload.budget?.tripBudgetUSD;
+  const restored = items.map(normalizeImportedItem).map(item => buildItemFromData(item, new Date().toISOString()));
+  await replaceDatasetItems(restored, isActiveDatasetItem);
+  if (budget !== undefined) await setSetting('tripBudgetUSD', Number(budget || 0));
+  if (Array.isArray(payload.preferences?.days)) {
+    state.days = payload.preferences.days;
+    localStorage.setItem(ITALY_DAYS_KEY, JSON.stringify(state.days));
+  }
+  localStorage.setItem(ITALY_DATASET_MARK_KEY, payload.datasetId || getActiveDatasetId());
+  await loadState();
+  state.openDayKey = null;
+  state.openItemId = null;
+  els.statusSync.textContent = 'Data local restaurada';
+  await render();
+}
+
+function normalizeImportedItem(item) {
+  const key = getLogicalKey(item);
+  return {
+    ItemID: key,
+    StartDate: item.StartDate || item.DayDate,
+    EndDate: item.EndDate || item.StartDate || item.DayDate,
+    StartTime: item.StartTime || '',
+    EndTime: item.EndTime || '',
+    ItemType: ITEM_TYPES.includes(item.ItemType) ? item.ItemType : 'OTHER',
+    Title: item.Title || 'Sin título',
+    City: item.City || '',
+    AmountUSD: Number(item.AmountUSD || 0),
+    PlanningStatus: item.PlanningStatus || getPlanningStatus(item.Status),
+    PaymentStatus: item.PaymentStatus || 'NOT_PAID',
+    IsPaid: item.IsPaid === true || item.PaymentStatus === 'PAID',
+    GooglePlusCode: item.GooglePlusCode || '',
+    GoogleMapsUrl: item.GoogleMapsUrl || '',
+    Notes: item.Notes || ''
+  };
 }
 
 function bindDataManager() {
@@ -504,7 +751,7 @@ async function duplicateDataRow(rowEl) {
 async function deleteDataRow(rowEl) {
   const key = rowEl.dataset.key;
   if (!confirm('Eliminar este ItemID lógico y sus apariciones visuales?')) return;
-  await createDataSnapshot();
+  await createDataSnapshot('Antes de eliminar ItemID lógico');
   await replaceItemsByPredicate([], item => getLogicalKey(item) === key);
   await loadState();
   setDataMessage('Fila eliminada.');
@@ -626,7 +873,7 @@ function parseTsvRows(text) {
 }
 
 async function importTsvRows(rows) {
-  await createDataSnapshot();
+  await createDataSnapshot('Antes de importar TSV');
   for (const row of rows) {
     await upsertLogicalRow(getLogicalRows().some(existing => existing.ItemID === row.ItemID) ? row.ItemID : '', row);
     await loadState();
@@ -636,10 +883,70 @@ async function importTsvRows(rows) {
   renderSettings();
 }
 
-async function createDataSnapshot() {
-  const snapshots = JSON.parse(localStorage.getItem(SNAPSHOT_KEY) || '[]');
-  snapshots.unshift({ createdAt: new Date().toISOString(), items: state.items });
+async function createDataSnapshot(reason = 'Snapshot automático') {
+  const snapshots = getSnapshots();
+  snapshots.unshift({
+    id: `snapshot-${Date.now()}`,
+    timestamp: new Date().toISOString(),
+    reason,
+    datasetId: getActiveDatasetId(),
+    items: getLogicalExportItems(),
+    budget: { tripBudgetUSD: Number(await getSetting('tripBudgetUSD', 6000) || 0) },
+    preferences: { days: state.days }
+  });
   localStorage.setItem(SNAPSHOT_KEY, JSON.stringify(snapshots.slice(0, 5)));
+}
+
+function getSnapshots() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(SNAPSHOT_KEY) || '[]');
+    return Array.isArray(raw) ? raw.map(normalizeSnapshot).filter(Boolean) : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function normalizeSnapshot(snapshot) {
+  if (!snapshot || !Array.isArray(snapshot.items)) return null;
+  return {
+    id: snapshot.id || `snapshot-${snapshot.createdAt || snapshot.timestamp || Date.now()}`,
+    timestamp: snapshot.timestamp || snapshot.createdAt || new Date().toISOString(),
+    reason: snapshot.reason || 'Snapshot local',
+    datasetId: snapshot.datasetId || getActiveDatasetId(),
+    items: snapshot.items,
+    budget: snapshot.budget || { tripBudgetUSD: 6000 },
+    preferences: snapshot.preferences || null
+  };
+}
+
+function renderSnapshotList() {
+  const preview = document.getElementById('backupPreview');
+  const snapshots = getSnapshots();
+  preview.classList.remove('hidden');
+  preview.innerHTML = `
+    <h3>Snapshots locales</h3>
+    ${snapshots.length ? `<div class="snapshot-list">${snapshots.map(snapshot => `
+      <article class="snapshot-card">
+        <div>
+          <strong>${escapeHtml(formatDateTime(snapshot.timestamp))}</strong>
+          <span>${escapeHtml(snapshot.reason)} · ${snapshot.items.length} items · ${escapeHtml(snapshot.datasetId)}</span>
+        </div>
+        <button class="secondary-button danger-button" type="button" data-restore-snapshot="${escapeHtml(snapshot.id)}">Restaurar</button>
+      </article>
+    `).join('')}</div>` : '<p class="placeholder-note">No hay snapshots locales todavía.</p>'}
+  `;
+  preview.querySelectorAll('[data-restore-snapshot]').forEach(button => {
+    button.addEventListener('click', () => restoreSnapshot(button.dataset.restoreSnapshot));
+  });
+}
+
+async function restoreSnapshot(id) {
+  const snapshot = getSnapshots().find(row => row.id === id);
+  if (!snapshot) return setBackupMessage('Snapshot no encontrado.', true);
+  if (!confirm('Restaurar este snapshot? Se creará un snapshot del estado actual antes.')) return;
+  await createDataSnapshot('Antes de restaurar snapshot');
+  await restoreDatasetPayload(snapshot);
+  setBackupMessage('Snapshot restaurado.');
 }
 
 function setDataMessage(message, isError = false) {
@@ -649,9 +956,36 @@ function setDataMessage(message, isError = false) {
   el.classList.toggle('data-error', isError);
 }
 
+function setBackupMessage(message, isError = false) {
+  const el = document.getElementById('backupMessage');
+  if (!el) return;
+  el.textContent = message;
+  el.classList.toggle('data-error', isError);
+}
+
+function getActiveDatasetId() {
+  return localStorage.getItem(ITALY_DATASET_MARK_KEY) || ITALY_DATASET_ID;
+}
+
+function isActiveDatasetItem(item) {
+  return item.DatasetID === getActiveDatasetId() || item.TripID === 'TRIP_ITALY_2026';
+}
+
+function formatBackupStamp(date) {
+  const pad = value => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}`;
+}
+
+function formatDateTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value || 'Sin fecha';
+  return date.toLocaleString('es-ES', { dateStyle: 'medium', timeStyle: 'short' });
+}
+
 async function restoreOriginalItinerary() {
   if (!confirm('Restaurar datos originales del viaje? Esto elimina modificaciones locales de los items de Italy 2026.')) return;
   const itinerary = await loadItalyItinerary();
+  await createDataSnapshot('Antes de restaurar originales del viaje');
   state.days = itinerary.days;
   await replaceItemsByPredicate(itinerary.items, item => item.DatasetID === ITALY_DATASET_ID || item.TripID === 'TRIP_ITALY_2026');
   localStorage.setItem(ITALY_DATASET_MARK_KEY, ITALY_DATASET_ID);
@@ -660,7 +994,7 @@ async function restoreOriginalItinerary() {
   state.openItemId = null;
   await loadState();
   els.statusSync.textContent = 'Datos originales del viaje restaurados';
-  render();
+  await render();
 }
 
 function openEditModal(item) {
@@ -714,7 +1048,7 @@ async function saveEditForm(event) {
   closeModal(editModal);
   await loadState();
   els.statusSync.textContent = 'Cambios locales pendientes';
-  render();
+  await render();
 }
 
 async function saveNewItemForm(event) {
@@ -748,7 +1082,7 @@ async function saveNewItemForm(event) {
   closeModal(newItemModal);
   await loadState();
   els.statusSync.textContent = 'Nuevo item guardado';
-  render();
+  await render();
 }
 
 function createItemModal(id, title, submitHandler) {

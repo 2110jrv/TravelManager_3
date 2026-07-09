@@ -480,7 +480,8 @@ h1 {
 }
 
 .summary-card,
-.settings-panel {
+.settings-panel,
+.backup-panel {
   background: #fff;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
@@ -729,6 +730,12 @@ h1 {
   gap: 14px;
 }
 
+.backup-panel {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
 .settings-panel label {
   display: grid;
   gap: 6px;
@@ -897,6 +904,65 @@ h1 {
   font-weight: 800;
 }
 
+.danger-button {
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.backup-preview {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.backup-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.backup-summary span,
+.snapshot-card span {
+  color: #64748b;
+}
+
+.backup-warn {
+  color: #92400e;
+  font-weight: 800;
+}
+
+.import-actions,
+.snapshot-card,
+.conflict-list label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.conflict-list,
+.snapshot-list {
+  display: grid;
+  gap: 8px;
+}
+
+.conflict-list label,
+.snapshot-card {
+  padding: 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.snapshot-card div {
+  display: grid;
+  gap: 4px;
+}
+
 .empty-day {
   color: #64748b;
   padding: 12px;
@@ -905,6 +971,17 @@ h1 {
 @media (max-width: 640px) {
   .summary-grid {
     grid-template-columns: 1fr;
+  }
+
+  .backup-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .import-actions,
+  .snapshot-card,
+  .conflict-list label {
+    display: grid;
+    align-items: stretch;
   }
 
   .planning-toggle {

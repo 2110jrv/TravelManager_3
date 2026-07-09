@@ -128,6 +128,19 @@ export async function replaceItemsByPredicate(items, predicate) {
   });
 }
 
+export async function replaceDatasetItems(items, predicate) {
+  const db = await openDatabase();
+  const existing = await getAllItems();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_ITEMS, 'readwrite');
+    const store = transaction.objectStore(STORE_ITEMS);
+    existing.filter(predicate).forEach(item => store.delete(item.ItemID));
+    items.forEach(item => store.put(item));
+    transaction.oncomplete = () => resolve(items.length);
+    transaction.onerror = () => reject(transaction.error);
+  });
+}
+
 export async function getSetting(key, fallback = null) {
   const db = await openDatabase();
   return new Promise((resolve, reject) => {
