@@ -38,6 +38,7 @@ const PAYMENT_STATUSES = ['PAID', 'NOT_PAID', 'PARTIAL', 'RESERVED', 'ESTIMATED'
 const SNAPSHOT_KEY = 'tm3.dataSnapshots';
 const BACKUP_SCHEMA_VERSION = 1;
 const APP_VERSION = '0.1.0';
+const ITEM_ID_PATTERN = /^ITEM_\d{3}$/;
 
 await initApp();
 
@@ -464,13 +465,22 @@ function validateBackupPayload(data) {
   if (!Array.isArray(data?.items)) errors.push('items debe ser una lista.');
   if (data?.exportedAt && Number.isNaN(new Date(data.exportedAt).getTime())) errors.push('exportedAt inválido.');
   const seen = new Set();
+  const reservedIds = new Set();
   const localKeys = new Set(getLogicalRows().map(row => row.ItemID));
   (data?.items || []).forEach((item, index) => {
     const key = getLogicalKey(item);
-    if (!key) errors.push(`items[${index}]: ItemID requerido.`);
-    if (seen.has(key)) errors.push(`items[${index}]: ItemID duplicado (${key}).`);
-    seen.add(key);
-    if (localKeys.has(key)) conflicts.push(key);
+    if (!key) {
+      try {
+        reservedIds.add(getNextItemId(reservedIds));
+      } catch (error) {
+        errors.push(`items[${index}]: ${error.message}`);
+      }
+    } else {
+      if (!ITEM_ID_PATTERN.test(key)) errors.push(`items[${index}]: ItemID debe usar formato ITEM_XXX.`);
+      if (seen.has(key)) errors.push(`items[${index}]: ItemID duplicado (${key}).`);
+      seen.add(key);
+      if (localKeys.has(key)) conflicts.push(key);
+    }
     if (!isValidDate(item.StartDate || item.DayDate)) errors.push(`items[${index}]: fecha inválida.`);
     if (item.EndDate && !isValidDate(item.EndDate)) errors.push(`items[${index}]: EndDate inválida.`);
     const amount = Number(item.AmountUSD || 0);
@@ -548,10 +558,13 @@ async function applyBackupMerge(data) {
   await createDataSnapshot('Antes de combinar backup');
   const choices = getConflictChoices();
   const localKeys = new Set(getLogicalRows().map(row => row.ItemID));
+  const reservedIds = new Set();
   for (const imported of data.items) {
     const key = getLogicalKey(imported);
     if (!localKeys.has(key) || choices.get(key) === 'imported') {
-      await upsertLogicalRow(localKeys.has(key) ? key : '', normalizeImportedItem(imported));
+      const normalized = normalizeImportedItem(imported, reservedIds);
+      reservedIds.add(normalized.ItemID);
+      await upsertLogicalRow(localKeys.has(normalized.ItemID) ? normalized.ItemID : '', normalized);
       await loadState();
     }
   }
@@ -568,7 +581,12 @@ function getConflictChoices() {
 async function restoreDatasetPayload(payload) {
   const items = payload.items || [];
   const budget = payload.budget?.tripBudgetUSD;
-  const restored = items.map(normalizeImportedItem).map(item => buildItemFromData(item, new Date().toISOString()));
+  const reservedIds = new Set();
+  const restored = items.map(item => {
+    const normalized = normalizeImportedItem(item, reservedIds);
+    reservedIds.add(normalized.ItemID);
+    return buildItemFromData(normalized, new Date().toISOString());
+  });
   await replaceDatasetItems(restored, isActiveDatasetItem);
   if (budget !== undefined) await setSetting('tripBudgetUSD', Number(budget || 0));
   if (Array.isArray(payload.preferences?.days)) {
@@ -583,8 +601,8 @@ async function restoreDatasetPayload(payload) {
   await render();
 }
 
-function normalizeImportedItem(item) {
-  const key = getLogicalKey(item);
+function normalizeImportedItem(item, reservedIds = new Set()) {
+  const key = getLogicalKey(item) || getNextItemId(reservedIds);
   return {
     ItemID: key,
     StartDate: item.StartDate || item.DayDate,
@@ -688,13 +706,40 @@ function getLogicalRows() {
   }));
 }
 
+function getUsedItemNumbers(extraIds = new Set()) {
+  const numbers = new Set();
+  [...getLogicalRows().map(row => row.ItemID), ...extraIds].forEach(id => {
+    if (!ITEM_ID_PATTERN.test(id || '')) return;
+    numbers.add(Number(id.slice(5)));
+  });
+  return numbers;
+}
+
+function getNextItemId(extraIds = new Set()) {
+  const used = getUsedItemNumbers(extraIds);
+  for (let number = 1; number <= 999; number += 1) {
+    if (!used.has(number)) return `ITEM_${String(number).padStart(3, '0')}`;
+  }
+  throw new Error('Se superó ITEM_999; se requiere decisión de CHATGPT+.');
+}
+
+function getItemIdGapSummary() {
+  const used = [...getUsedItemNumbers()].sort((a, b) => a - b);
+  if (used.length === 0) return [];
+  const gaps = [];
+  for (let number = 1; number < used[used.length - 1]; number += 1) {
+    if (!used.includes(number)) gaps.push(`ITEM_${String(number).padStart(3, '0')}`);
+  }
+  return gaps;
+}
+
 function readDataRow(rowEl) {
   const data = {};
   DATA_COLUMNS.forEach(column => {
     const input = rowEl.querySelector(`[data-field="${column}"]`);
     data[column] = input ? input.value.trim() : '';
   });
-  if (!data.ItemID) data.ItemID = `local-${crypto.randomUUID()}`;
+  if (!data.ItemID) data.ItemID = getNextItemId();
   data.AmountUSD = Number(data.AmountUSD || 0);
   data.IsPaid = data.IsPaid === 'true';
   return data;
@@ -702,7 +747,12 @@ function readDataRow(rowEl) {
 
 async function saveDataRow(rowEl) {
   const originalKey = rowEl.dataset.key;
-  const data = readDataRow(rowEl);
+  let data;
+  try {
+    data = readDataRow(rowEl);
+  } catch (error) {
+    return setDataMessage(error.message, true);
+  }
   const error = validateDataRow(data, originalKey);
   if (error) return setDataMessage(error, true);
   await upsertLogicalRow(originalKey, data);
@@ -715,8 +765,14 @@ async function saveDataRow(rowEl) {
 
 async function addLogicalRow() {
   const date = state.days[0]?.DayDate || new Date().toISOString().slice(0, 10);
+  let itemId = '';
+  try {
+    itemId = getNextItemId();
+  } catch (error) {
+    return setDataMessage(error.message, true);
+  }
   const data = {
-    ItemID: `local-${crypto.randomUUID()}`,
+    ItemID: itemId,
     StartDate: date,
     EndDate: date,
     StartTime: '',
@@ -739,8 +795,13 @@ async function addLogicalRow() {
 }
 
 async function duplicateDataRow(rowEl) {
-  const data = readDataRow(rowEl);
-  data.ItemID = `local-${crypto.randomUUID()}`;
+  let data;
+  try {
+    data = readDataRow(rowEl);
+    data.ItemID = getNextItemId();
+  } catch (error) {
+    return setDataMessage(error.message, true);
+  }
   data.Title = `${data.Title} copia`;
   await upsertLogicalRow('', data);
   await loadState();
@@ -804,6 +865,7 @@ function buildItemFromData(data, now) {
 function validateDataRow(data, originalKey = '') {
   const keys = getLogicalRows().map(row => row.ItemID);
   if (!data.ItemID) return 'ItemID requerido.';
+  if (!ITEM_ID_PATTERN.test(data.ItemID) && data.ItemID !== originalKey) return 'ItemID debe usar formato ITEM_XXX.';
   if (keys.includes(data.ItemID) && data.ItemID !== originalKey) return 'ItemID duplicado.';
   if (!isValidDate(data.StartDate)) return 'StartDate inválida.';
   if (!isValidDate(data.EndDate)) return 'EndDate inválida.';
@@ -835,15 +897,21 @@ function openPastePreview() {
 
 function previewTsvImport() {
   const text = document.getElementById('tsvInput').value.trim();
-  const rows = parseTsvRows(text);
+  let rows = [];
   const errors = [];
+  try {
+    rows = parseTsvRows(text);
+  } catch (error) {
+    errors.push(error.message);
+  }
   const seen = new Set();
   rows.forEach((row, index) => {
     if (row._columnCount !== DATA_COLUMNS.length) errors.push(`Fila ${index + 1}: columnas ${row._columnCount}/${DATA_COLUMNS.length}.`);
     if (seen.has(row.ItemID)) errors.push(`Fila ${index + 1}: ItemID duplicado en pegado.`);
     seen.add(row.ItemID);
+    if (getLogicalRows().some(existing => existing.ItemID === row.ItemID)) errors.push(`Fila ${index + 1}: ItemID existente; resolver como conflicto fuera del TSV.`);
     const error = validateDataRow(row, row.ItemID);
-    if (error && !getLogicalRows().some(existing => existing.ItemID === row.ItemID)) errors.push(`Fila ${index + 1}: ${error}`);
+    if (error) errors.push(`Fila ${index + 1}: ${error}`);
   });
   const result = document.getElementById('tsvResult');
   if (errors.length) {
@@ -858,13 +926,15 @@ function parseTsvRows(text) {
   if (!text) return [];
   const lines = text.split(/\r?\n/).filter(Boolean);
   if (lines[0]?.split('\t').map(cell => cell.trim()).join('|') === DATA_COLUMNS.join('|')) lines.shift();
+  const reservedIds = new Set();
   return lines.map(line => {
     const cells = line.split('\t');
     const row = {};
     DATA_COLUMNS.forEach((column, index) => {
       row[column] = (cells[index] || '').trim();
     });
-    if (!row.ItemID) row.ItemID = `local-${crypto.randomUUID()}`;
+    if (!row.ItemID) row.ItemID = getNextItemId(reservedIds);
+    reservedIds.add(row.ItemID);
     row.AmountUSD = Number(row.AmountUSD || 0);
     row.IsPaid = String(row.IsPaid).toLowerCase() === 'true';
     row._columnCount = cells.length;
@@ -875,7 +945,11 @@ function parseTsvRows(text) {
 async function importTsvRows(rows) {
   await createDataSnapshot('Antes de importar TSV');
   for (const row of rows) {
-    await upsertLogicalRow(getLogicalRows().some(existing => existing.ItemID === row.ItemID) ? row.ItemID : '', row);
+    if (getLogicalRows().some(existing => existing.ItemID === row.ItemID)) {
+      setDataMessage(`Conflicto: ${row.ItemID} ya existe. No se importó TSV.`, true);
+      return;
+    }
+    await upsertLogicalRow('', row);
     await loadState();
   }
   await loadState();
@@ -1056,9 +1130,15 @@ async function saveNewItemForm(event) {
   const data = formData(event.currentTarget);
   const error = validateItemForm(data);
   if (error) return setModalError(newItemModal, error);
+  let itemId = '';
+  try {
+    itemId = getNextItemId();
+  } catch (idError) {
+    return setModalError(newItemModal, idError.message);
+  }
   const item = {
     ...data,
-    ItemID: `local-${crypto.randomUUID()}`,
+    ItemID: itemId,
     DatasetID: ITALY_DATASET_ID,
     TripID: 'TRIP_ITALY_2026',
     AmountUSD: Number(data.AmountUSD),
