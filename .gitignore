@@ -11,3 +11,4 @@ logs/
 .idea/
 .vscode/
 coverage/
+AGENTS.backup-*.md
