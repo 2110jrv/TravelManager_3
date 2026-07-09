@@ -10,16 +10,24 @@ export async function loadItalyItinerary() {
 
 export function adaptItalyItinerary(source) {
   const trip = source?.trips?.[0] || {};
+  const tripId = trip.id || trip.raw?.TripID || 'TRIP_ITALY_2026';
   const days = (trip.days || [])
-    .map(day => ({
+    .map((day, index) => ({
       DayID: day.id || day.raw?.TripDayID || `day-${day.date}`,
-      TripID: trip.id || trip.raw?.TripID || 'TRIP_ITALY_2026',
+      TripDayID: day.id || day.raw?.TripDayID || `TD_${tripId}_${day.date}`,
+      TripID: tripId,
+      DayOrder: index + 1,
       DayDate: day.date || day.raw?.Date || '',
+      Date: day.date || day.raw?.Date || '',
       DayLabel: cleanText(day.raw?.DayLabel || day.label || ''),
       Title: cleanText(day.raw?.Title || day.title || ''),
       City: cleanText(day.raw?.PrimaryCity || day.city || ''),
+      PrimaryCity: cleanText(day.raw?.PrimaryCity || day.city || ''),
       CountryCode: day.raw?.PrimaryCountryCode || '',
-      Notes: cleanText(day.raw?.DayNotes || '')
+      PrimaryCountryCode: day.raw?.PrimaryCountryCode || '',
+      Notes: cleanText(day.raw?.DayNotes || ''),
+      DayNotes: cleanText(day.raw?.DayNotes || ''),
+      DayImageUrl: day.raw?.DayImageUrl || ''
     }))
     .sort((a, b) => a.DayDate.localeCompare(b.DayDate));
 
@@ -34,9 +42,28 @@ export function adaptItalyItinerary(source) {
   return {
     datasetId: ITALY_DATASET_ID,
     trip: {
-      TripID: trip.id || trip.raw?.TripID || 'TRIP_ITALY_2026',
-      TripName: cleanText(trip.raw?.TripTitle || trip.name || 'Italy 2026')
+      TripID: tripId,
+      TripName: cleanText(trip.raw?.TripName || trip.name || 'Italy_2026'),
+      TripTitle: cleanText(trip.raw?.TripTitle || trip.name || 'Italy 2026'),
+      StartDate: trip.startDate || '',
+      EndDate: trip.endDate || '',
+      BudgetAmount: Number(trip.raw?.BudgetAmount ?? trip.raw?.BudgetAmountUSD ?? 6000),
+      BudgetCurrencyCode: trip.raw?.BudgetCurrencyCode || 'USD',
+      BudgetAmountUSD: Number(trip.raw?.BudgetAmountUSD ?? trip.raw?.BudgetAmount ?? 6000),
+      Notes: cleanText(trip.raw?.Notes || '')
     },
+    tripDays: days.map(day => ({
+      TripDayID: day.TripDayID,
+      TripID: day.TripID,
+      DayOrder: day.DayOrder,
+      Date: day.Date,
+      DayLabel: day.DayLabel,
+      Title: day.Title,
+      PrimaryCity: day.PrimaryCity,
+      PrimaryCountryCode: day.PrimaryCountryCode,
+      DayNotes: day.DayNotes,
+      DayImageUrl: day.DayImageUrl
+    })),
     days,
     items
   };

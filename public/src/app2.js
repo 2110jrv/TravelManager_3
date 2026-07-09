@@ -1,4 +1,4 @@
-import { addItem, getAllItems, getSetting, openDatabase, replaceDatasetItems, replaceItemsByPredicate, setSetting, updateItem } from './db.js';
+import { addItem, getActiveTripId, getAllItems, getAllTrips, getSetting, getTrip, getTripDays, migrateLegacyTravelData, openDatabase, replaceDatasetItems, replaceItemsByPredicate, saveTrip, saveTripDay, setActiveTripId, setSetting, updateItem } from './db.js';
 import { ITALY_DATASET_ID, ITALY_DATASET_MARK_KEY, ITALY_DAYS_KEY, getPlanningStatus, loadItalyItinerary } from './italyAdapter.js';
 
 const state = {
@@ -39,13 +39,15 @@ const SNAPSHOT_KEY = 'tm3.dataSnapshots';
 const BACKUP_SCHEMA_VERSION = 1;
 const APP_VERSION = '0.1.0';
 const ITEM_ID_PATTERN = /^ITEM_\d{3}$/;
+const ALLOWED_LEGACY_ITEM_IDS = new Set(['ITEM_121_B']);
 
 await initApp();
 
 async function initApp() {
   await openDatabase();
   const itinerary = await loadItalyItinerary();
-  state.days = itinerary.days;
+  await migrateLegacyTravelData(itinerary);
+  state.days = toAppDays(await getTripDays(await getActiveTripId()), itinerary.days);
   localStorage.setItem(ITALY_DAYS_KEY, JSON.stringify(state.days));
   await migrateToItalyItineraryIfNeeded(itinerary);
   await migratePlanningStatus();
@@ -92,6 +94,50 @@ function bindEvents() {
 
 async function loadState() {
   state.items = await getAllItems();
+}
+
+function toAppDays(tripDays, fallback = []) {
+  const rows = tripDays.length ? tripDays : fallback;
+  return rows.map(day => ({
+    DayID: day.DayID || day.TripDayID,
+    TripDayID: day.TripDayID || day.DayID,
+    TripID: day.TripID || 'TRIP_ITALY_2026',
+    DayOrder: day.DayOrder || 0,
+    DayDate: day.DayDate || day.Date,
+    Date: day.Date || day.DayDate,
+    DayLabel: day.DayLabel || '',
+    Title: day.Title || '',
+    City: day.City || day.PrimaryCity || '',
+    PrimaryCity: day.PrimaryCity || day.City || '',
+    CountryCode: day.CountryCode || day.PrimaryCountryCode || '',
+    PrimaryCountryCode: day.PrimaryCountryCode || day.CountryCode || '',
+    Notes: day.Notes || day.DayNotes || '',
+    DayNotes: day.DayNotes || day.Notes || '',
+    DayImageUrl: day.DayImageUrl || ''
+  }));
+}
+
+async function getActiveTripBudget() {
+  const activeTripId = await getActiveTripId();
+  const trip = activeTripId ? await getTrip(activeTripId) : null;
+  if (trip && trip.BudgetAmountUSD !== undefined) return Number(trip.BudgetAmountUSD || 0);
+  return Number(await getSetting('tripBudgetUSD', 6000) || 0);
+}
+
+async function setActiveTripBudget(value) {
+  const activeTripId = await getActiveTripId();
+  const trip = activeTripId ? await getTrip(activeTripId) : null;
+  if (!trip) {
+    await setSetting('tripBudgetUSD', value);
+    return;
+  }
+  await saveTrip({
+    ...trip,
+    BudgetAmount: value,
+    BudgetAmountUSD: value,
+    BudgetCurrencyCode: trip.BudgetCurrencyCode || 'USD',
+    LastUpdatedAt: new Date().toISOString()
+  });
 }
 
 async function migrateToItalyItineraryIfNeeded(itinerary) {
@@ -257,7 +303,7 @@ async function renderBudget() {
   const confirmed = state.items.filter(item => getItemPlanningStatus(item) === 'CONFIRMED');
   const uniqueConfirmed = uniqueFinancialItems(confirmed);
   const proposed = uniqueFinancialItems(state.items.filter(item => getItemPlanningStatus(item) === 'PROPOSED'));
-  const budget = Number(await getSetting('tripBudgetUSD', 6000) || 0);
+  const budget = await getActiveTripBudget();
   const total = sumAmount(uniqueConfirmed);
   const paid = sumAmount(uniqueConfirmed.filter(isPaidFinancial));
   const pending = total - paid;
@@ -319,7 +365,7 @@ async function renderBudget() {
 }
 
 async function renderSettings() {
-  const budget = await getSetting('tripBudgetUSD', 6000);
+  const budget = await getActiveTripBudget();
   const rows = getLogicalRows();
   const snapshots = getSnapshots();
   els.settingsSection.innerHTML = `
@@ -372,7 +418,7 @@ async function renderSettings() {
       message.textContent = 'El presupuesto no puede ser negativo.';
       return;
     }
-    await setSetting('tripBudgetUSD', value);
+    await setActiveTripBudget(value);
     message.textContent = 'Presupuesto guardado';
   });
   document.getElementById('newItemButton').addEventListener('click', openNewItemModal);
@@ -395,14 +441,20 @@ async function exportBackup() {
 }
 
 async function buildBackupPayload() {
+  const activeTripId = await getActiveTripId();
+  const trips = await getAllTrips();
+  const tripDays = (await Promise.all(trips.map(trip => getTripDays(trip.TripID)))).flat();
   return {
     schemaVersion: BACKUP_SCHEMA_VERSION,
     exportedAt: new Date().toISOString(),
     appVersion: APP_VERSION,
     datasetId: getActiveDatasetId(),
-    trip: getTripMetadata(),
+    activeTripId,
+    trips,
+    tripDays,
+    trip: await getTripMetadata(),
     items: getLogicalExportItems(),
-    budget: { tripBudgetUSD: Number(await getSetting('tripBudgetUSD', 6000) || 0) },
+    budget: { tripBudgetUSD: await getActiveTripBudget() },
     preferences: {
       activeDatasetMark: localStorage.getItem(ITALY_DATASET_MARK_KEY) || '',
       days: state.days
@@ -421,13 +473,15 @@ function getLogicalExportItems() {
   return uniqueFinancialItems(state.items).map(item => ({ ...item, ItemID: getLogicalKey(item), SourceItemID: getLogicalKey(item) }));
 }
 
-function getTripMetadata() {
-  return {
-    tripId: 'TRIP_ITALY_2026',
-    title: 'Italy 2026',
+async function getTripMetadata() {
+  const activeTripId = await getActiveTripId();
+  const trip = activeTripId ? await getTrip(activeTripId) : null;
+  return trip || {
+    TripID: 'TRIP_ITALY_2026',
+    TripTitle: 'Italy 2026',
     dayCount: state.days.length,
-    startDate: state.days[0]?.DayDate || '',
-    endDate: state.days[state.days.length - 1]?.DayDate || ''
+    StartDate: state.days[0]?.DayDate || '',
+    EndDate: state.days[state.days.length - 1]?.DayDate || ''
   };
 }
 
@@ -476,7 +530,7 @@ function validateBackupPayload(data) {
         errors.push(`items[${index}]: ${error.message}`);
       }
     } else {
-      if (!ITEM_ID_PATTERN.test(key)) errors.push(`items[${index}]: ItemID debe usar formato ITEM_XXX.`);
+      if (!isAllowedItemId(key)) errors.push(`items[${index}]: ItemID debe usar formato ITEM_XXX.`);
       if (seen.has(key)) errors.push(`items[${index}]: ItemID duplicado (${key}).`);
       seen.add(key);
       if (localKeys.has(key)) conflicts.push(key);
@@ -488,7 +542,7 @@ function validateBackupPayload(data) {
     if (!PLANNING_STATUSES.includes(item.PlanningStatus || getPlanningStatus(item.Status))) errors.push(`items[${index}]: PlanningStatus inválido.`);
     if (item.PaymentStatus && !PAYMENT_STATUSES.includes(item.PaymentStatus)) errors.push(`items[${index}]: PaymentStatus inválido.`);
   });
-  const budget = Number(data?.budget?.tripBudgetUSD ?? 0);
+  const budget = Number(data?.budget?.tripBudgetUSD ?? data?.trips?.[0]?.BudgetAmountUSD ?? 0);
   if (Number.isNaN(budget) || budget < 0) errors.push('Presupuesto inválido.');
   if (!data?.datasetId) warnings.push('datasetId no incluido.');
   return { errors, warnings, conflicts: [...new Set(conflicts)], summary: getBackupSummary(data) };
@@ -500,7 +554,7 @@ function getBackupSummary(data) {
     items: items.length,
     confirmed: items.filter(item => (item.PlanningStatus || getPlanningStatus(item.Status)) === 'CONFIRMED').length,
     proposed: items.filter(item => (item.PlanningStatus || getPlanningStatus(item.Status)) === 'PROPOSED').length,
-    budget: Number(data?.budget?.tripBudgetUSD || 0),
+    budget: Number(data?.budget?.tripBudgetUSD ?? data?.trips?.[0]?.BudgetAmountUSD ?? 0),
     exportedAt: data?.exportedAt || '',
     datasetId: data?.datasetId || ''
   };
@@ -556,6 +610,7 @@ async function applyBackupReplace(data) {
 async function applyBackupMerge(data) {
   if (!state.pendingBackup || !confirm('Combinar backup con la data actual? Se creará un snapshot antes.')) return;
   await createDataSnapshot('Antes de combinar backup');
+  await restoreTripMetadata(data);
   const choices = getConflictChoices();
   const localKeys = new Set(getLogicalRows().map(row => row.ItemID));
   const reservedIds = new Set();
@@ -580,7 +635,7 @@ function getConflictChoices() {
 
 async function restoreDatasetPayload(payload) {
   const items = payload.items || [];
-  const budget = payload.budget?.tripBudgetUSD;
+  await restoreTripMetadata(payload);
   const reservedIds = new Set();
   const restored = items.map(item => {
     const normalized = normalizeImportedItem(item, reservedIds);
@@ -588,11 +643,12 @@ async function restoreDatasetPayload(payload) {
     return buildItemFromData(normalized, new Date().toISOString());
   });
   await replaceDatasetItems(restored, isActiveDatasetItem);
-  if (budget !== undefined) await setSetting('tripBudgetUSD', Number(budget || 0));
   if (Array.isArray(payload.preferences?.days)) {
     state.days = payload.preferences.days;
     localStorage.setItem(ITALY_DAYS_KEY, JSON.stringify(state.days));
   }
+  state.days = toAppDays(await getTripDays(await getActiveTripId()), state.days);
+  localStorage.setItem(ITALY_DAYS_KEY, JSON.stringify(state.days));
   localStorage.setItem(ITALY_DATASET_MARK_KEY, payload.datasetId || getActiveDatasetId());
   await loadState();
   state.openDayKey = null;
@@ -605,6 +661,7 @@ function normalizeImportedItem(item, reservedIds = new Set()) {
   const key = getLogicalKey(item) || getNextItemId(reservedIds);
   return {
     ItemID: key,
+    TripID: item.TripID || 'TRIP_ITALY_2026',
     StartDate: item.StartDate || item.DayDate,
     EndDate: item.EndDate || item.StartDate || item.DayDate,
     StartTime: item.StartTime || '',
@@ -620,6 +677,63 @@ function normalizeImportedItem(item, reservedIds = new Set()) {
     GoogleMapsUrl: item.GoogleMapsUrl || '',
     Notes: item.Notes || ''
   };
+}
+
+async function restoreTripMetadata(payload) {
+  const trips = getBackupTrips(payload);
+  const tripDays = getBackupTripDays(payload, trips[0]?.TripID || 'TRIP_ITALY_2026');
+  for (const trip of trips) {
+    const existing = await getTrip(trip.TripID);
+    await saveTrip({
+      ...existing,
+      ...trip,
+      CreatedAt: existing?.CreatedAt || trip.CreatedAt || new Date().toISOString(),
+      LastUpdatedAt: new Date().toISOString(),
+      IsActive: trip.IsActive !== false
+    });
+  }
+  for (const day of tripDays) {
+    await saveTripDay({
+      ...day,
+      CreatedAt: day.CreatedAt || new Date().toISOString(),
+      LastUpdatedAt: new Date().toISOString()
+    });
+  }
+  await setActiveTripId(payload.activeTripId || trips[0]?.TripID || 'TRIP_ITALY_2026');
+}
+
+function getBackupTrips(payload) {
+  if (Array.isArray(payload.trips) && payload.trips.length) return payload.trips;
+  const budget = Number(payload.budget?.tripBudgetUSD ?? payload.trip?.BudgetAmountUSD ?? payload.trip?.BudgetAmount ?? 6000);
+  return [{
+    TripID: payload.trip?.TripID || payload.trip?.tripId || 'TRIP_ITALY_2026',
+    TripName: payload.trip?.TripName || 'Italy_2026',
+    TripTitle: payload.trip?.TripTitle || payload.trip?.title || 'Italy 2026',
+    StartDate: payload.trip?.StartDate || payload.trip?.startDate || state.days[0]?.DayDate || '',
+    EndDate: payload.trip?.EndDate || payload.trip?.endDate || state.days[state.days.length - 1]?.DayDate || '',
+    BudgetAmount: budget,
+    BudgetCurrencyCode: payload.trip?.BudgetCurrencyCode || 'USD',
+    BudgetAmountUSD: budget,
+    Notes: payload.trip?.Notes || '',
+    IsActive: true
+  }];
+}
+
+function getBackupTripDays(payload, tripId) {
+  if (Array.isArray(payload.tripDays) && payload.tripDays.length) return payload.tripDays;
+  const sourceDays = Array.isArray(payload.preferences?.days) ? payload.preferences.days : state.days;
+  return sourceDays.map((day, index) => ({
+    TripDayID: day.TripDayID || day.DayID || `TD_${tripId}_${day.DayDate || day.Date}`,
+    TripID: day.TripID || tripId,
+    DayOrder: day.DayOrder || index + 1,
+    Date: day.Date || day.DayDate,
+    DayLabel: day.DayLabel || '',
+    Title: day.Title || '',
+    PrimaryCity: day.PrimaryCity || day.City || '',
+    PrimaryCountryCode: day.PrimaryCountryCode || day.CountryCode || '',
+    DayNotes: day.DayNotes || day.Notes || '',
+    DayImageUrl: day.DayImageUrl || ''
+  }));
 }
 
 function bindDataManager() {
@@ -713,6 +827,10 @@ function getUsedItemNumbers(extraIds = new Set()) {
     numbers.add(Number(id.slice(5)));
   });
   return numbers;
+}
+
+function isAllowedItemId(id) {
+  return ITEM_ID_PATTERN.test(id || '') || ALLOWED_LEGACY_ITEM_IDS.has(id);
 }
 
 function getNextItemId(extraIds = new Set()) {
@@ -849,7 +967,7 @@ function buildItemFromData(data, now) {
     ...data,
     SourceItemID: data.ItemID,
     DatasetID: ITALY_DATASET_ID,
-    TripID: 'TRIP_ITALY_2026',
+    TripID: data.TripID || 'TRIP_ITALY_2026',
     DayDate: data.StartDate,
     Currency: 'USD',
     Status: data.PlanningStatus === 'CONFIRMED' ? 'CONFIRMED' : 'PLANNED',
@@ -965,7 +1083,7 @@ async function createDataSnapshot(reason = 'Snapshot automático') {
     reason,
     datasetId: getActiveDatasetId(),
     items: getLogicalExportItems(),
-    budget: { tripBudgetUSD: Number(await getSetting('tripBudgetUSD', 6000) || 0) },
+    budget: { tripBudgetUSD: await getActiveTripBudget() },
     preferences: { days: state.days }
   });
   localStorage.setItem(SNAPSHOT_KEY, JSON.stringify(snapshots.slice(0, 5)));
@@ -1060,6 +1178,7 @@ async function restoreOriginalItinerary() {
   if (!confirm('Restaurar datos originales del viaje? Esto elimina modificaciones locales de los items de Italy 2026.')) return;
   const itinerary = await loadItalyItinerary();
   await createDataSnapshot('Antes de restaurar originales del viaje');
+  await migrateLegacyTravelData(itinerary);
   state.days = itinerary.days;
   await replaceItemsByPredicate(itinerary.items, item => item.DatasetID === ITALY_DATASET_ID || item.TripID === 'TRIP_ITALY_2026');
   localStorage.setItem(ITALY_DATASET_MARK_KEY, ITALY_DATASET_ID);

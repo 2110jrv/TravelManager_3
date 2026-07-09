@@ -1,7 +1,9 @@
 const DB_NAME = 'TravelManager3';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const STORE_ITEMS = 'items';
 const STORE_SETTINGS = 'settings';
+const STORE_TRIPS = 'trips';
+const STORE_TRIP_DAYS = 'tripDays';
 
 export function openDatabase() {
   return new Promise((resolve, reject) => {
@@ -17,6 +19,15 @@ export function openDatabase() {
       }
       if (!db.objectStoreNames.contains(STORE_SETTINGS)) {
         db.createObjectStore(STORE_SETTINGS, { keyPath: 'key' });
+      }
+      if (!db.objectStoreNames.contains(STORE_TRIPS)) {
+        db.createObjectStore(STORE_TRIPS, { keyPath: 'TripID' });
+      }
+      if (!db.objectStoreNames.contains(STORE_TRIP_DAYS)) {
+        const store = db.createObjectStore(STORE_TRIP_DAYS, { keyPath: 'TripDayID' });
+        store.createIndex('TripID', 'TripID', { unique: false });
+        store.createIndex('Date', 'Date', { unique: false });
+        store.createIndex('TripID_Date', ['TripID', 'Date'], { unique: true });
       }
     };
 
@@ -161,4 +172,136 @@ export async function setSetting(key, value) {
     request.onsuccess = () => resolve(value);
     request.onerror = () => reject(request.error);
   });
+}
+
+export async function getAllTrips() {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_TRIPS, 'readonly');
+    const store = transaction.objectStore(STORE_TRIPS);
+    const request = store.getAll();
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function getTrip(TripID) {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_TRIPS, 'readonly');
+    const store = transaction.objectStore(STORE_TRIPS);
+    const request = store.get(TripID);
+    request.onsuccess = () => resolve(request.result || null);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function saveTrip(trip) {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_TRIPS, 'readwrite');
+    const store = transaction.objectStore(STORE_TRIPS);
+    const request = store.put(trip);
+    request.onsuccess = () => resolve(trip);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function deleteTrip(TripID) {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_TRIPS, 'readwrite');
+    const store = transaction.objectStore(STORE_TRIPS);
+    const request = store.delete(TripID);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function getTripDays(TripID) {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_TRIP_DAYS, 'readonly');
+    const store = transaction.objectStore(STORE_TRIP_DAYS);
+    const request = TripID ? store.index('TripID').getAll(TripID) : store.getAll();
+    request.onsuccess = () => resolve(request.result.sort((a, b) => (a.Date || '').localeCompare(b.Date || '') || Number(a.DayOrder || 0) - Number(b.DayOrder || 0)));
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function saveTripDay(day) {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_TRIP_DAYS, 'readwrite');
+    const store = transaction.objectStore(STORE_TRIP_DAYS);
+    const request = store.put(day);
+    request.onsuccess = () => resolve(day);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function deleteTripDay(TripDayID) {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_TRIP_DAYS, 'readwrite');
+    const store = transaction.objectStore(STORE_TRIP_DAYS);
+    const request = store.delete(TripDayID);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function getActiveTripId() {
+  return getSetting('activeTripId', null);
+}
+
+export async function setActiveTripId(TripID) {
+  return setSetting('activeTripId', TripID);
+}
+
+export function selectDefaultTrip(trips, today = new Date()) {
+  const list = [...(trips || [])].filter(trip => trip.TripID);
+  if (list.length === 0) return null;
+  const todayKey = today.toISOString().slice(0, 10);
+  const current = list
+    .filter(trip => (trip.StartDate || '') <= todayKey && todayKey <= (trip.EndDate || ''))
+    .sort((a, b) => (a.StartDate || '').localeCompare(b.StartDate || ''))[0];
+  if (current) return current.TripID;
+  const future = list
+    .filter(trip => (trip.StartDate || '') > todayKey)
+    .sort((a, b) => (a.StartDate || '').localeCompare(b.StartDate || ''))[0];
+  if (future) return future.TripID;
+  return list
+    .filter(trip => (trip.EndDate || '') < todayKey)
+    .sort((a, b) => (b.EndDate || '').localeCompare(a.EndDate || ''))[0]?.TripID || list[0].TripID;
+}
+
+export async function migrateLegacyTravelData(seed) {
+  const now = new Date().toISOString();
+  const existingTrip = await getTrip(seed.trip.TripID);
+  const legacyBudget = await getSetting('tripBudgetUSD', null);
+  const budget = Number(existingTrip?.BudgetAmountUSD ?? seed.trip.BudgetAmountUSD ?? legacyBudget ?? 0);
+  await saveTrip({
+    ...seed.trip,
+    BudgetAmount: budget,
+    BudgetCurrencyCode: seed.trip.BudgetCurrencyCode || 'USD',
+    BudgetAmountUSD: budget,
+    CreatedAt: existingTrip?.CreatedAt || now,
+    LastUpdatedAt: now,
+    IsActive: true
+  });
+  const existingDays = await getTripDays(seed.trip.TripID);
+  const existingCreatedAt = new Map(existingDays.map(day => [day.TripDayID, day.CreatedAt]));
+  for (const day of seed.tripDays) {
+    await saveTripDay({
+      ...day,
+      CreatedAt: existingCreatedAt.get(day.TripDayID) || now,
+      LastUpdatedAt: now
+    });
+  }
+  const trips = await getAllTrips();
+  const activeTripId = await getActiveTripId();
+  const selected = trips.some(trip => trip.TripID === activeTripId) ? activeTripId : (selectDefaultTrip(trips) || seed.trip.TripID);
+  await setActiveTripId(selected);
+  return selected;
 }
