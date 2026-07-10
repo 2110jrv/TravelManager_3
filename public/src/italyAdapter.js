@@ -31,13 +31,14 @@ export function adaptItalyItinerary(source) {
     }))
     .sort((a, b) => a.DayDate.localeCompare(b.DayDate));
 
-  const items = [];
+  const sourceItems = [];
   days.forEach((day, dayIndex) => {
     const sourceDay = (trip.days || []).find(row => (row.date || row.raw?.Date) === day.DayDate);
     (sourceDay?.items || []).forEach((entry, itemIndex) => {
-      items.push(adaptItem(entry, day, dayIndex, itemIndex));
+      sourceItems.push(adaptItem(entry, day, dayIndex, itemIndex));
     });
   });
+  const items = expandItemOccurrences(sourceItems, days);
 
   return {
     datasetId: ITALY_DATASET_ID,
@@ -119,6 +120,106 @@ function adaptItem(entry, day, dayIndex, itemIndex) {
     LastUpdatedAt: new Date().toISOString(),
     SyncStatus: 'SYNCED'
   };
+}
+
+function expandItemOccurrences(sourceItems, days) {
+  const daysByDate = new Map(days.map(day => [day.DayDate, day]));
+  const groups = new Map();
+  sourceItems.forEach(item => {
+    const key = item.SourceItemID || item.ItemID;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(item);
+  });
+
+  const occurrences = [];
+  groups.forEach(group => {
+    const first = pickSourceRow(group);
+    const start = first.StartDate || first.DayDate;
+    const end = first.EndDate || start;
+    const dates = getDateRange(start, end).filter(date => daysByDate.has(date));
+    const occurrenceDates = dates.length ? dates : [first.DayDate || start];
+
+    occurrenceDates.forEach(date => {
+      const day = daysByDate.get(date) || daysByDate.get(first.DayDate) || {};
+      const sourceForDate = group.find(item => item.DayDate === date) || first;
+      const meta = getOccurrenceMeta(first, date);
+      occurrences.push({
+        ...first,
+        ...sourceForDate,
+        ItemID: `${ITALY_DATASET_ID}:${date}:${first.SourceItemID}`,
+        DayID: day.DayID || sourceForDate.DayID,
+        DayDate: date,
+        City: sourceForDate.City || day.City || first.City,
+        CountryCode: sourceForDate.CountryCode || day.CountryCode || first.CountryCode,
+        StartTime: meta.startTime,
+        EndTime: meta.endTime,
+        AmountUSD: meta.amount,
+        IsAllDay: meta.isAllDay,
+        LodgingDisplayMode: meta.lodgingMode,
+        OccurrenceRole: meta.role,
+        IncludedLabel: meta.includedLabel,
+        SortOrder: Number(first.SortOrder || 0) + meta.sortOffset
+      });
+    });
+  });
+
+  const unique = new Map();
+  occurrences.forEach(item => {
+    const key = `${item.SourceItemID || item.ItemID}:${item.DayDate}`;
+    if (!unique.has(key)) unique.set(key, item);
+  });
+  return [...unique.values()].sort((a, b) => (a.DayDate || '').localeCompare(b.DayDate || '') || Number(a.SortOrder || 0) - Number(b.SortOrder || 0));
+}
+
+function pickSourceRow(group) {
+  const sorted = [...group].sort((a, b) => Number(a.SortOrder || 0) - Number(b.SortOrder || 0));
+  const start = sorted[0]?.StartDate || sorted[0]?.DayDate;
+  return sorted.find(item => item.DayDate === start) || sorted[0];
+}
+
+function getOccurrenceMeta(item, date) {
+  const start = item.StartDate || item.DayDate;
+  const end = item.EndDate || start;
+  const isMultiDay = end > start;
+  const isLodging = item.ItemType === 'LODGING';
+  const isStart = date === start;
+  const isEnd = date === end;
+  const amount = isStart ? Number(item.AmountUSD || 0) : 0;
+
+  if (!isMultiDay) {
+    return {
+      role: 'SINGLE',
+      lodgingMode: isLodging ? 'NORMAL' : item.LodgingDisplayMode || 'NORMAL',
+      startTime: item.StartTime || '',
+      endTime: item.EndTime || '',
+      amount,
+      isAllDay: item.IsAllDay === true,
+      includedLabel: '',
+      sortOffset: 0
+    };
+  }
+
+  if (isLodging) {
+    if (isStart) return { role: 'CHECK_IN', lodgingMode: 'CHECK_IN', startTime: item.StartTime || '', endTime: '', amount, isAllDay: false, includedLabel: '', sortOffset: 0 };
+    if (isEnd) return { role: 'CHECK_OUT', lodgingMode: 'CHECK_OUT', startTime: item.EndTime || '', endTime: '', amount, isAllDay: false, includedLabel: 'Incluido en reserva', sortOffset: 900 };
+    return { role: 'FULL_DAY', lodgingMode: 'FULL_DAY', startTime: '', endTime: '', amount, isAllDay: true, includedLabel: 'Incluido en reserva', sortOffset: 800 };
+  }
+
+  if (isStart) return { role: 'START', lodgingMode: 'NORMAL', startTime: item.StartTime || '', endTime: '', amount, isAllDay: false, includedLabel: '', sortOffset: 0 };
+  if (isEnd) return { role: 'END', lodgingMode: 'NORMAL', startTime: item.EndTime || '', endTime: '', amount, isAllDay: false, includedLabel: 'Incluido en item', sortOffset: 900 };
+  return { role: 'FULL_DAY', lodgingMode: 'NORMAL', startTime: '', endTime: '', amount, isAllDay: true, includedLabel: 'Incluido en item', sortOffset: 800 };
+}
+
+function getDateRange(start, end) {
+  if (!start || !end || end < start) return start ? [start] : [];
+  const dates = [];
+  const current = new Date(`${start}T00:00:00`);
+  const last = new Date(`${end}T00:00:00`);
+  while (current <= last) {
+    dates.push(current.toISOString().slice(0, 10));
+    current.setDate(current.getDate() + 1);
+  }
+  return dates;
 }
 
 function normalizeType(type) {

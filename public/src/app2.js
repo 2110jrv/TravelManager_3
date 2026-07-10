@@ -2131,6 +2131,9 @@ function formatDayTitle(day) {
 }
 
 function getDisplayTitle(item) {
+  if (item.OccurrenceRole === 'FULL_DAY' && item.ItemType === 'LODGING') return `Todo el día — Hospedaje: ${item.Title}`;
+  if (item.OccurrenceRole === 'FULL_DAY') return `Todo el día — ${item.Title || 'Sin título'}`;
+  if (item.OccurrenceRole === 'END') return `Finaliza: ${item.Title || 'Sin título'}`;
   if (item.ItemType !== 'LODGING') return item.Title || 'Sin título';
   if (item.LodgingDisplayMode === 'CHECK_IN') return `Check-in: ${item.Title}`;
   if (item.LodgingDisplayMode === 'CHECK_OUT') return `Check-out: ${item.Title}`;
@@ -2314,6 +2317,7 @@ function isChargeOccurrence(item) {
 }
 
 function formatItemAmount(item) {
+  if (item.IncludedLabel) return item.IncludedLabel;
   return isChargeOccurrence(item) ? formatMoney(item.AmountUSD || 0) : 'Incluido en reserva';
 }
 
