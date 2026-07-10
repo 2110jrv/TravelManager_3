@@ -134,25 +134,23 @@ export function rebuildMultidayOccurrences(sourceItems, days, options = {}) {
 
   const occurrences = [];
   groups.forEach(group => {
-    const first = pickSourceRow(group);
-    const logicalAmount = Number(group.find(item => Number(item.AmountUSD || 0) > 0)?.AmountUSD || first.AmountUSD || 0);
-    const start = first.StartDate || first.DayDate;
-    const end = first.EndDate || start;
+    const canonical = getCanonicalLogicalItem(group);
+    const logicalAmount = Number(group.find(item => Number(item.AmountUSD || 0) > 0)?.AmountUSD || canonical.AmountUSD || 0);
+    const start = canonical.StartDate || canonical.DayDate;
+    const end = canonical.EndDate || start;
     const dates = getDateRange(start, end).filter(date => daysByDate.has(date));
-    const occurrenceDates = dates.length ? dates : [first.DayDate || start];
+    const occurrenceDates = dates.length ? dates : [canonical.DayDate || start];
 
     occurrenceDates.forEach(date => {
-      const day = daysByDate.get(date) || daysByDate.get(first.DayDate) || {};
-      const sourceForDate = group.find(item => item.DayDate === date) || first;
-      const meta = getOccurrenceMeta({ ...first, AmountUSD: logicalAmount }, date);
+      const day = daysByDate.get(date) || daysByDate.get(canonical.DayDate) || {};
+      const meta = getOccurrenceMeta({ ...canonical, AmountUSD: logicalAmount }, date);
       occurrences.push({
-        ...first,
-        ...sourceForDate,
-        ItemID: getOccurrenceItemId(first, date, datasetId),
-        DayID: day.DayID || sourceForDate.DayID,
+        ...canonical,
+        ItemID: getOccurrenceItemId(canonical, date, datasetId),
+        DayID: day.DayID || canonical.DayID,
         DayDate: date,
-        City: sourceForDate.City || day.City || first.City,
-        CountryCode: sourceForDate.CountryCode || day.CountryCode || first.CountryCode,
+        City: canonical.City || day.City || '',
+        CountryCode: canonical.CountryCode || day.CountryCode || '',
         StartTime: meta.startTime,
         EndTime: meta.endTime,
         AmountUSD: meta.amount,
@@ -160,7 +158,7 @@ export function rebuildMultidayOccurrences(sourceItems, days, options = {}) {
         LodgingDisplayMode: meta.lodgingMode,
         OccurrenceRole: meta.role,
         IncludedLabel: meta.includedLabel,
-        SortOrder: Number(first.SortOrder || 0) + meta.sortOffset
+        SortOrder: Number(canonical.SortOrder || 0) + meta.sortOffset
       });
     });
   });
@@ -179,10 +177,22 @@ function getOccurrenceItemId(item, date, datasetId) {
   return `${datasetId}:${date}:${logicalId}`;
 }
 
-function pickSourceRow(group) {
+function getCanonicalLogicalItem(group) {
   const sorted = [...group].sort((a, b) => Number(a.SortOrder || 0) - Number(b.SortOrder || 0));
-  const start = sorted[0]?.StartDate || sorted[0]?.DayDate;
-  return sorted.find(item => item.DayDate === start) || sorted[0];
+  const starts = sorted.map(item => item.StartDate || item.DayDate || '').filter(Boolean).sort();
+  const ends = sorted.map(item => item.EndDate || item.StartDate || item.DayDate || '').filter(Boolean).sort();
+  const rangeStart = starts[0] || sorted[0]?.DayDate || '';
+  const rangeEnd = ends[ends.length - 1] || rangeStart;
+  const startCharged = sorted.find(item => (item.DayDate || item.StartDate) === rangeStart && Number(item.AmountUSD || 0) > 0);
+  const charged = startCharged || sorted.find(item => Number(item.AmountUSD || 0) > 0);
+  const startRow = sorted.find(item => (item.DayDate || item.StartDate) === rangeStart);
+  const canonical = charged || startRow || sorted[0];
+  return {
+    ...canonical,
+    SourceItemID: canonical.SourceItemID || canonical.ItemID,
+    StartDate: rangeStart,
+    EndDate: rangeEnd
+  };
 }
 
 function getOccurrenceMeta(item, date) {

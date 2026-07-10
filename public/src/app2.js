@@ -53,7 +53,7 @@ const VIEW_STATE_KEY = 'tm3.activeView';
 const CALENDAR_MONTH_KEY = 'tm3.calendarMonth';
 const BACKUP_SCHEMA_VERSION = 1;
 const APP_VERSION = '0.1.0';
-const MULTIDAY_OCCURRENCE_MIGRATION_VERSION = '2026-07-10-v1';
+const MULTIDAY_OCCURRENCE_MIGRATION_VERSION = '2026-07-10-v2-stale-repair';
 const ITEM_ID_PATTERN = /^ITEM_\d{3}$/;
 const ALLOWED_LEGACY_ITEM_IDS = new Set(['ITEM_121_B']);
 
@@ -200,20 +200,39 @@ async function migratePlanningStatus() {
 
 async function migrateLocalMultidayOccurrences() {
   const datasetId = getActiveDatasetId();
-  const settingKey = `tm3.migration.multidayOccurrences.${datasetId}`;
+  const settingKey = `tm3.migration.staleMultidayOccurrenceRepair.${datasetId}`;
   if (await getSetting(settingKey, '') === MULTIDAY_OCCURRENCE_MIGRATION_VERSION) return;
 
   const allItems = await getAllItems();
   const candidates = allItems.filter(item => isActiveDatasetItem(item));
-  const relatedKeys = new Set(candidates.map(getLogicalKey).filter(Boolean));
+  const relatedKeys = getStaleMultidayMigrationKeys(candidates);
   if (relatedKeys.size === 0) {
     await setSetting(settingKey, MULTIDAY_OCCURRENCE_MIGRATION_VERSION);
     return;
   }
 
-  const rebuilt = rebuildMultidayOccurrences(candidates.map(normalizeMigrationSourceItem), state.days, { datasetId });
+  const rebuilt = rebuildMultidayOccurrences(
+    candidates.filter(item => relatedKeys.has(getLogicalKey(item))).map(normalizeMigrationSourceItem),
+    state.days,
+    { datasetId }
+  );
   await replaceItemsByPredicate(rebuilt, item => isActiveDatasetItem(item) && relatedKeys.has(getLogicalKey(item)));
   await setSetting(settingKey, MULTIDAY_OCCURRENCE_MIGRATION_VERSION);
+}
+
+function getStaleMultidayMigrationKeys(items) {
+  const groups = new Map();
+  items.forEach(item => {
+    const key = getLogicalKey(item);
+    if (!key) return;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(item);
+  });
+  const keys = new Set();
+  groups.forEach((group, key) => {
+    if (group.some(item => (item.EndDate || item.StartDate || item.DayDate || '') > (item.StartDate || item.DayDate || ''))) keys.add(key);
+  });
+  return keys;
 }
 
 function normalizeMigrationSourceItem(item) {
