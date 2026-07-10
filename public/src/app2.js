@@ -53,7 +53,7 @@ const VIEW_STATE_KEY = 'tm3.activeView';
 const CALENDAR_MONTH_KEY = 'tm3.calendarMonth';
 const BACKUP_SCHEMA_VERSION = 1;
 const APP_VERSION = '0.1.0';
-const MULTIDAY_OCCURRENCE_MIGRATION_VERSION = '2026-07-10-v2-stale-repair';
+const MULTIDAY_OCCURRENCE_MIGRATION_VERSION = '2026-07-10-v3-legacy-derived-cleanup';
 const ITEM_ID_PATTERN = /^ITEM_\d{3}$/;
 const ALLOWED_LEGACY_ITEM_IDS = new Set(['ITEM_121_B']);
 
@@ -200,7 +200,7 @@ async function migratePlanningStatus() {
 
 async function migrateLocalMultidayOccurrences() {
   const datasetId = getActiveDatasetId();
-  const settingKey = `tm3.migration.staleMultidayOccurrenceRepair.${datasetId}`;
+  const settingKey = `tm3.migration.legacyDerivedOccurrenceCleanup.${datasetId}`;
   if (await getSetting(settingKey, '') === MULTIDAY_OCCURRENCE_MIGRATION_VERSION) return;
 
   const allItems = await getAllItems();
@@ -2348,7 +2348,15 @@ function uniqueFinancialItems(items) {
 }
 
 function getLogicalKey(item) {
-  return item.SourceItemID || item.ItemID;
+  return getCanonicalLogicalItemId(item);
+}
+
+function getCanonicalLogicalItemId(item, datasetId = getActiveDatasetId()) {
+  if (item.SourceItemID) return item.SourceItemID;
+  const itemId = String(item.ItemID || '');
+  const legacyMatch = itemId.match(/^([^:]+):(\d{4}-\d{2}-\d{2}):(.+)$/);
+  if (legacyMatch && (!datasetId || legacyMatch[1] === datasetId)) return legacyMatch[3];
+  return item.ItemID;
 }
 
 function getFinancialAmount(item) {

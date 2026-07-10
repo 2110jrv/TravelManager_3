@@ -127,7 +127,7 @@ export function rebuildMultidayOccurrences(sourceItems, days, options = {}) {
   const daysByDate = new Map(days.map(day => [day.DayDate, day]));
   const groups = new Map();
   sourceItems.forEach(item => {
-    const key = item.SourceItemID || item.ItemID;
+    const key = getCanonicalLogicalItemId(item, datasetId);
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(item);
   });
@@ -165,7 +165,7 @@ export function rebuildMultidayOccurrences(sourceItems, days, options = {}) {
 
   const unique = new Map();
   occurrences.forEach(item => {
-    const key = `${item.SourceItemID || item.ItemID}:${item.DayDate}`;
+    const key = `${getCanonicalLogicalItemId(item, datasetId)}:${item.DayDate}`;
     if (!unique.has(key)) unique.set(key, item);
   });
   return [...unique.values()].sort((a, b) => (a.DayDate || '').localeCompare(b.DayDate || '') || Number(a.SortOrder || 0) - Number(b.SortOrder || 0));
@@ -189,10 +189,18 @@ function getCanonicalLogicalItem(group) {
   const canonical = charged || startRow || sorted[0];
   return {
     ...canonical,
-    SourceItemID: canonical.SourceItemID || canonical.ItemID,
+    SourceItemID: getCanonicalLogicalItemId(canonical),
     StartDate: rangeStart,
     EndDate: rangeEnd
   };
+}
+
+function getCanonicalLogicalItemId(item, datasetId = ITALY_DATASET_ID) {
+  if (item.SourceItemID) return item.SourceItemID;
+  const itemId = String(item.ItemID || '');
+  const legacyMatch = itemId.match(/^([^:]+):(\d{4}-\d{2}-\d{2}):(.+)$/);
+  if (legacyMatch && (!datasetId || legacyMatch[1] === datasetId)) return legacyMatch[3];
+  return item.ItemID;
 }
 
 function getOccurrenceMeta(item, date) {
