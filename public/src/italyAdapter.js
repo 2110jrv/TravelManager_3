@@ -38,7 +38,7 @@ export function adaptItalyItinerary(source) {
       sourceItems.push(adaptItem(entry, day, dayIndex, itemIndex));
     });
   });
-  const items = expandItemOccurrences(sourceItems, days);
+  const items = rebuildMultidayOccurrences(sourceItems, days);
 
   return {
     datasetId: ITALY_DATASET_ID,
@@ -122,7 +122,8 @@ function adaptItem(entry, day, dayIndex, itemIndex) {
   };
 }
 
-function expandItemOccurrences(sourceItems, days) {
+export function rebuildMultidayOccurrences(sourceItems, days, options = {}) {
+  const datasetId = options.datasetId || ITALY_DATASET_ID;
   const daysByDate = new Map(days.map(day => [day.DayDate, day]));
   const groups = new Map();
   sourceItems.forEach(item => {
@@ -134,6 +135,7 @@ function expandItemOccurrences(sourceItems, days) {
   const occurrences = [];
   groups.forEach(group => {
     const first = pickSourceRow(group);
+    const logicalAmount = Number(group.find(item => Number(item.AmountUSD || 0) > 0)?.AmountUSD || first.AmountUSD || 0);
     const start = first.StartDate || first.DayDate;
     const end = first.EndDate || start;
     const dates = getDateRange(start, end).filter(date => daysByDate.has(date));
@@ -142,11 +144,11 @@ function expandItemOccurrences(sourceItems, days) {
     occurrenceDates.forEach(date => {
       const day = daysByDate.get(date) || daysByDate.get(first.DayDate) || {};
       const sourceForDate = group.find(item => item.DayDate === date) || first;
-      const meta = getOccurrenceMeta(first, date);
+      const meta = getOccurrenceMeta({ ...first, AmountUSD: logicalAmount }, date);
       occurrences.push({
         ...first,
         ...sourceForDate,
-        ItemID: `${ITALY_DATASET_ID}:${date}:${first.SourceItemID}`,
+        ItemID: getOccurrenceItemId(first, date, datasetId),
         DayID: day.DayID || sourceForDate.DayID,
         DayDate: date,
         City: sourceForDate.City || day.City || first.City,
@@ -169,6 +171,12 @@ function expandItemOccurrences(sourceItems, days) {
     if (!unique.has(key)) unique.set(key, item);
   });
   return [...unique.values()].sort((a, b) => (a.DayDate || '').localeCompare(b.DayDate || '') || Number(a.SortOrder || 0) - Number(b.SortOrder || 0));
+}
+
+function getOccurrenceItemId(item, date, datasetId) {
+  const logicalId = item.SourceItemID || item.ItemID;
+  if ((item.DayDate || item.StartDate) === date && item.ItemID && item.ItemID === logicalId) return item.ItemID;
+  return `${datasetId}:${date}:${logicalId}`;
 }
 
 function pickSourceRow(group) {

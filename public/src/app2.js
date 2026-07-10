@@ -1,5 +1,5 @@
 import { addItem, deleteTrip, deleteTripDay, enqueueDeletion, getActiveTripId, getAllItems, getAllTrips, getOrCreateDeviceId, getSetting, getTrip, getTripDays, migrateLegacyTravelData, openDatabase, replaceDatasetItems, replaceItemsByPredicate, saveTrip, saveTripDay, selectDefaultTrip, setActiveTripId, setSetting, updateItem } from './db.js';
-import { ITALY_DATASET_ID, ITALY_DATASET_MARK_KEY, ITALY_DAYS_KEY, getPlanningStatus, loadItalyItinerary } from './italyAdapter.js';
+import { ITALY_DATASET_ID, ITALY_DATASET_MARK_KEY, ITALY_DAYS_KEY, getPlanningStatus, loadItalyItinerary, rebuildMultidayOccurrences } from './italyAdapter.js';
 
 const state = {
   activeView: 'home',
@@ -53,6 +53,7 @@ const VIEW_STATE_KEY = 'tm3.activeView';
 const CALENDAR_MONTH_KEY = 'tm3.calendarMonth';
 const BACKUP_SCHEMA_VERSION = 1;
 const APP_VERSION = '0.1.0';
+const MULTIDAY_OCCURRENCE_MIGRATION_VERSION = '2026-07-10-v1';
 const ITEM_ID_PATTERN = /^ITEM_\d{3}$/;
 const ALLOWED_LEGACY_ITEM_IDS = new Set(['ITEM_121_B']);
 
@@ -69,6 +70,7 @@ async function initApp() {
   localStorage.setItem(ITALY_DAYS_KEY, JSON.stringify(state.days));
   await migrateToItalyItineraryIfNeeded(itinerary);
   await migratePlanningStatus();
+  await migrateLocalMultidayOccurrences();
   bindEvents();
   await loadState();
   updateOnlineStatus();
@@ -194,6 +196,36 @@ async function migratePlanningStatus() {
   for (const item of missing) {
     await updateItem({ ...item, PlanningStatus: getPlanningStatus(item.Status), LastUpdatedAt: item.LastUpdatedAt || new Date().toISOString() });
   }
+}
+
+async function migrateLocalMultidayOccurrences() {
+  const datasetId = getActiveDatasetId();
+  const settingKey = `tm3.migration.multidayOccurrences.${datasetId}`;
+  if (await getSetting(settingKey, '') === MULTIDAY_OCCURRENCE_MIGRATION_VERSION) return;
+
+  const allItems = await getAllItems();
+  const candidates = allItems.filter(item => isActiveDatasetItem(item));
+  const relatedKeys = new Set(candidates.map(getLogicalKey).filter(Boolean));
+  if (relatedKeys.size === 0) {
+    await setSetting(settingKey, MULTIDAY_OCCURRENCE_MIGRATION_VERSION);
+    return;
+  }
+
+  const rebuilt = rebuildMultidayOccurrences(candidates.map(normalizeMigrationSourceItem), state.days, { datasetId });
+  await replaceItemsByPredicate(rebuilt, item => isActiveDatasetItem(item) && relatedKeys.has(getLogicalKey(item)));
+  await setSetting(settingKey, MULTIDAY_OCCURRENCE_MIGRATION_VERSION);
+}
+
+function normalizeMigrationSourceItem(item) {
+  const start = item.StartDate || item.DayDate || '';
+  const end = item.EndDate || start;
+  return {
+    ...item,
+    SourceItemID: getLogicalKey(item),
+    StartDate: start,
+    EndDate: end,
+    IsMultiDay: end > start
+  };
 }
 
 function isSampleItem(item) {
