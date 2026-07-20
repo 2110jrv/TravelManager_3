@@ -679,15 +679,18 @@ async function openCalendarDate(date) {
 function renderItem(item) {
   const isOpen = state.openItemId === item.ItemID;
   const itemEl = document.createElement('article');
-  itemEl.className = 'agenda-item';
+  const categoryVisual = getHomeCategoryVisual(item);
+  itemEl.className = `agenda-item agenda-item-${categoryVisual.family}`;
   itemEl.dataset.itemId = item.ItemID;
   const time = item.IsAllDay ? 'Todo el día' : (item.StartTime || '');
+  const categoryChip = renderCategoryChip(categoryVisual);
+  const categoryIcon = renderCategoryCardIcon(categoryVisual);
   itemEl.innerHTML = `
     <div class="item-summary" role="button" tabindex="0" aria-expanded="${isOpen}">
       <span class="item-time">${escapeHtml(time)}</span>
       <span class="item-title">${escapeHtml(getDisplayTitle(item))}</span>
       <span class="item-meta">
-        <span class="category category-${escapeHtml((item.ItemType || 'OTHER').toLowerCase())}">${escapeHtml(getCategoryLabel(item.ItemType))}</span>
+        ${categoryChip}
         <span class="item-price">${formatItemAmount(item)}</span>
         ${item.GoogleMapsUrl || item.GooglePlusCode ? `<a class="map-button" target="_blank" rel="noopener" href="${escapeHtml(getMapUrl(item))}">${escapeHtml(item.GooglePlusCode || 'Mapas')}</a>` : ''}
         <span class="planning-toggle" role="group" aria-label="Estado de planificación">
@@ -695,6 +698,7 @@ function renderItem(item) {
           <button type="button" data-status="PROPOSED" aria-pressed="${getItemPlanningStatus(item) === 'PROPOSED'}" class="${getItemPlanningStatus(item) === 'PROPOSED' ? 'active' : ''}">Propuesto</button>
         </span>
       </span>
+      ${categoryIcon}
     </div>
     <div class="item-details${isOpen ? '' : ' hidden'}">${renderDetails(item)}</div>
   `;
@@ -2285,6 +2289,65 @@ function renderDetails(item) {
 
 function getCategoryLabel(type = 'OTHER') {
   return { ACTIVITY: 'Actividad', FLIGHT: 'Vuelo', FOOD: 'Comida', LODGING: 'Hospedaje', TRANSPORT: 'Transporte', SHOPPING: 'Compras' }[type] || 'Otro';
+}
+
+function renderCategoryChip(visual) {
+  return `<span class="category">${escapeHtml(visual.label)}</span>`;
+}
+
+function renderCategoryCardIcon(visual) {
+  if (!visual.icon) return '';
+  const iconClass = visual.iconClass ? ` ${escapeHtml(visual.iconClass)}` : '';
+  return `<span class="item-card-icon${iconClass}" aria-hidden="true">${visual.icon}</span>`;
+}
+
+function getHomeCategoryVisual(item) {
+  const type = item.ItemType || 'OTHER';
+  const text = getItemSearchText(item);
+
+  if (type === 'LODGING') {
+    if (matchesAny(text, ['house', 'home', 'airbnb', 'abb', 'apartment', 'apt', 'casa', 'room', 'flat'])) {
+      return { family: 'lodging', label: getCategoryLabel(type), icon: '&#8962;' };
+    }
+    return { family: 'lodging', label: getCategoryLabel(type), icon: '&#127970;' };
+  }
+
+  if (type === 'TRANSPORT' || type === 'FLIGHT') {
+    if (matchesAny(text, ['train', 'tren'])) return { family: 'transportation', label: getCategoryLabel(type), icon: '&#128646;' };
+    if (matchesAny(text, ['bus', 'flixbus', 'coach'])) return { family: 'transportation', label: getCategoryLabel(type), icon: '&#128652;' };
+    if (type === 'FLIGHT' || matchesAny(text, ['flight', 'vuelo', 'airline', 'airport'])) return { family: 'transportation', label: getCategoryLabel(type), icon: '&#9992;' };
+    if (matchesAny(text, ['taxi'])) return { family: 'transportation', label: getCategoryLabel(type), icon: '&#128661;' };
+    if (matchesAny(text, ['rental car', 'car rental', 'alquiler de vehiculo', 'alquiler de vehículo', 'vehicle rental'])) return { family: 'transportation', label: getCategoryLabel(type), icon: '&#128663;', iconClass: 'category-icon-car' };
+    return { family: 'transportation', label: getCategoryLabel(type), icon: '&#128652;' };
+  }
+
+  if (type === 'FOOD') return { family: 'food', label: getCategoryLabel(type), icon: '&#127860;' };
+  if (isTripPurchaseItem(item, text)) return { family: 'trip-purchase', label: 'Compra viaje', icon: '&#128188;' };
+  if (type === 'SHOPPING' || matchesAny(text, ['store', 'shopping', 'shop', 'compras', 'tienda'])) return { family: 'shopping', label: getCategoryLabel('SHOPPING'), icon: '&#128722;' };
+  if (isTourItem(item, text)) return { family: 'tour', label: 'Tour', icon: '&#128227;' };
+  if (type === 'ACTIVITY') return { family: 'tour', label: getCategoryLabel(type), icon: '&#128227;' };
+  return { family: 'other', label: getCategoryLabel(type), icon: '' };
+}
+
+function getItemSearchText(item) {
+  return [item.Title, item.Subtitle, item.Provider, item.ItemType, item.Description, item.Notes, item.LocationLabel]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+function matchesAny(text, terms) {
+  return terms.some(term => text.includes(term.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')));
+}
+
+function isTourItem(item, text = getItemSearchText(item)) {
+  return matchesAny(text, ['tour', 'guided', 'guia', 'visita', 'excursion']);
+}
+
+function isTripPurchaseItem(item, text = getItemSearchText(item)) {
+  return matchesAny(text, ['adapter', 'adaptador', 'poncho', 'ponchos', 'storage bag', 'storage bags', 'packing cube', 'travel prep', 'pre-trip', 'prep shopping', 'travel purchase']);
 }
 
 function getMapUrl(item) {

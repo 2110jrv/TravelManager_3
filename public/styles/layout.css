@@ -309,9 +309,20 @@ h1 {
   overflow: hidden;
 }
 
+.agenda-item-transportation,
+.agenda-item-transport { background: #dcfce7; border-color: #bbf7d0; }
+.agenda-item-lodging { background: #dbeafe; border-color: #bfdbfe; }
+.agenda-item-food { background: #ffedd5; border-color: #fed7aa; }
+.agenda-item-shopping { background: #fef9c3; border-color: #fde68a; }
+.agenda-item-tour,
+.agenda-item-activity { background: #f1f5f9; border-color: #e2e8f0; }
+.agenda-item-trip-purchase { background: #fff7ed; border-color: #fed7aa; }
+.agenda-item-other { background: #fff; border-color: #e2e8f0; }
+.agenda-item-flight { background: #dcfce7; border-color: #bbf7d0; }
+
 .item-summary {
   display: grid;
-  grid-template-columns: 82px minmax(0, 1fr);
+  grid-template-columns: 82px minmax(0, 1fr) 44px;
   gap: 8px 12px;
   align-items: start;
   padding: 12px;
@@ -334,6 +345,7 @@ h1 {
 }
 
 .item-title {
+  grid-column: 2;
   min-width: 0;
   font-weight: 700;
   color: #111827;
@@ -348,19 +360,34 @@ h1 {
 }
 
 .category {
+  display: inline-flex;
+  align-items: center;
   border-radius: 999px;
-  color: #475569;
-  background: #e2e8f0;
+  color: #334155;
+  background: rgba(255, 255, 255, 0.58);
+  border: 1px solid rgba(148, 163, 184, 0.35);
   font-size: .78rem;
   line-height: 1;
   padding: 5px 8px;
 }
 
-.category-flight { background: #dbeafe; color: #1d4ed8; }
-.category-transport { background: #cffafe; color: #0e7490; }
-.category-food { background: #ffedd5; color: #c2410c; }
-.category-activity { background: #dcfce7; color: #15803d; }
-.category-lodging { background: #ede9fe; color: #6d28d9; }
+.item-card-icon {
+  grid-column: 3;
+  grid-row: 1 / span 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  justify-self: end;
+  align-self: center;
+  width: 40px;
+  height: 40px;
+  color: #334155;
+  font-size: 34px;
+  line-height: 1;
+  filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.42));
+}
+
+.item-card-icon.category-icon-car { color: #dc2626; }
 
 .item-price {
   color: #0f766e;
@@ -1256,6 +1283,17 @@ h1 {
     flex: 1;
   }
 
+  .item-summary {
+    grid-template-columns: 68px minmax(0, 1fr) 36px;
+    gap: 8px;
+  }
+
+  .item-card-icon {
+    width: 34px;
+    height: 34px;
+    font-size: 30px;
+  }
+
   .calendar-toolbar {
     grid-template-columns: 1fr 1fr;
   }
@@ -1298,13 +1336,20 @@ h1 {
 }
 
 .item-details {
-  border-top: 1px solid #e2e8f0;
-  color: #475569;
+  border-top: 1px solid rgba(148, 163, 184, 0.36);
+  background: rgba(255, 255, 255, 0.52);
+  color: #334155;
   padding: 10px 12px 12px 106px;
 }
 
 .item-details p {
   margin: 0 0 6px;
+}
+
+@media (max-width: 640px) {
+  .item-details {
+    padding-left: 88px;
+  }
 }
 
 @media (max-width: 640px) {
