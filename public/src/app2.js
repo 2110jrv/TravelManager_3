@@ -286,7 +286,7 @@ function renderHome() {
 function renderDays(items) {
   els.dayList.innerHTML = '';
   for (const day of state.days) {
-    const dayItems = items.filter(item => dateInItemRange(day.DayDate, item)).sort(compareItems);
+    const dayItems = getHomeDayItems(items, day.DayDate).sort(compareItems);
     const total = dayItems.reduce((sum, item) => sum + getFinancialAmount(item), 0);
     const isOpen = state.openDayKey === day.DayDate;
     const card = document.createElement('article');
@@ -315,6 +315,90 @@ function renderDays(items) {
     }
     els.dayList.append(card);
   }
+}
+
+function getHomeDayItems(items, dayDate) {
+  const groups = new Map();
+  items.filter(item => dateInItemRange(dayDate, item)).forEach(item => {
+    const key = getCanonicalLogicalItemId(item);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(item);
+  });
+
+  return [...groups.values()]
+    .map(group => normalizeHomeDayOccurrence(group, dayDate))
+    .filter(Boolean);
+}
+
+function normalizeHomeDayOccurrence(group, dayDate) {
+  const representative = chooseHomeDayRepresentative(group, dayDate);
+  if (!representative) return null;
+
+  const start = representative.StartDate || representative.DayDate || '';
+  const end = representative.EndDate || start;
+  if (!start || !end || end < start || dayDate < start || dayDate > end) return null;
+
+  const amount = Number(group.find(item => Number(item.AmountUSD || 0) > 0)?.AmountUSD || representative.AmountUSD || 0);
+  const meta = getHomeOccurrenceMeta({ ...representative, AmountUSD: amount }, dayDate);
+  if (!meta) return null;
+
+  return {
+    ...representative,
+    SourceItemID: getCanonicalLogicalItemId(representative),
+    DayDate: dayDate,
+    StartDate: start,
+    EndDate: end,
+    StartTime: meta.startTime,
+    EndTime: meta.endTime,
+    AmountUSD: meta.amount,
+    IsAllDay: meta.isAllDay,
+    LodgingDisplayMode: meta.lodgingMode,
+    OccurrenceRole: meta.role,
+    IncludedLabel: meta.includedLabel,
+    SortOrder: Number(representative.SortOrder || 0) + meta.sortOffset
+  };
+}
+
+function chooseHomeDayRepresentative(group, dayDate) {
+  const sorted = [...group].sort((a, b) => Number(a.SortOrder || 0) - Number(b.SortOrder || 0));
+  return sorted.find(item => item.DayDate === dayDate && Number(item.AmountUSD || 0) > 0)
+    || sorted.find(item => item.DayDate === dayDate)
+    || sorted.find(item => (item.StartDate || item.DayDate) === dayDate)
+    || sorted.find(item => Number(item.AmountUSD || 0) > 0)
+    || sorted[0];
+}
+
+function getHomeOccurrenceMeta(item, dayDate) {
+  const start = item.StartDate || item.DayDate || '';
+  const end = item.EndDate || start;
+  const isLodging = item.ItemType === 'LODGING';
+  const isMultiDay = end > start;
+  const isStart = dayDate === start;
+  const isEnd = dayDate === end;
+  const amount = isStart ? Number(item.AmountUSD || 0) : 0;
+
+  if (!isMultiDay) {
+    return {
+      role: 'SINGLE',
+      lodgingMode: isLodging ? 'NORMAL' : item.LodgingDisplayMode || 'NORMAL',
+      startTime: item.StartTime || '',
+      endTime: item.EndTime || '',
+      amount,
+      isAllDay: item.IsAllDay === true,
+      includedLabel: '',
+      sortOffset: 0
+    };
+  }
+
+  if (isLodging) {
+    if (isStart) return { role: 'CHECK_IN', lodgingMode: 'CHECK_IN', startTime: item.StartTime || '', endTime: '', amount, isAllDay: false, includedLabel: '', sortOffset: 0 };
+    if (isEnd) return { role: 'CHECK_OUT', lodgingMode: 'CHECK_OUT', startTime: item.EndTime || '', endTime: '', amount, isAllDay: false, includedLabel: 'Incluido en reserva', sortOffset: 900 };
+    return { role: 'FULL_DAY', lodgingMode: 'FULL_DAY', startTime: '', endTime: '', amount, isAllDay: true, includedLabel: 'Incluido en reserva', sortOffset: 800 };
+  }
+
+  if (isStart) return { role: 'START', lodgingMode: 'NORMAL', startTime: item.StartTime || '', endTime: '', amount, isAllDay: false, includedLabel: '', sortOffset: 0 };
+  if (isEnd) return { role: 'END', lodgingMode: 'NORMAL', startTime: item.EndTime || '', endTime: '', amount, isAllDay: false, includedLabel: 'Incluido en item', sortOffset: 900 };
+  return { role: 'FULL_DAY', lodgingMode: 'NORMAL', startTime: '', endTime: '', amount, isAllDay: true, includedLabel: 'Incluido en item', sortOffset: 800 };
 }
 
 function ensureCalendarMonth() {
