@@ -1,0 +1,43 @@
+# Supabase Sync Plan
+
+TravelManager 3 uses Supabase Auth, row level security, Supabase cloud tables, and IndexedDB so the public GitHub Pages app can sync safely across PC, phone, and tablet browsers.
+
+## Auth and RLS
+
+The GitHub Pages app is public static code, so every browser-visible key must be treated as public. Browser code may use the Supabase project URL and a publishable key, but it must never expose a `service_role` key, database password, or any other secret.
+
+Supabase Auth is required so each browser signs in as a real user. Every synced row has `user_id uuid references auth.users(id)`, and RLS policies enforce `auth.uid() = user_id` for select, insert, update, and delete. This prevents public browser clients from reading or writing another user's sync rows.
+
+## Tables
+
+`public.tm3_trips` stores one row per trip. `trip_id` is the app-level primary key, and the trip document is stored in `payload`.
+
+`public.tm3_trip_days` stores one row per trip day. `day_id` is the app-level primary key, `trip_id` links the day to a trip, and `payload` stores the day details.
+
+`public.tm3_items` stores itinerary, packing, planning, and other trip items. `item_id` is the app-level primary key, `trip_id` links the item to a trip, `source_item_id` can preserve a source relationship, `day_date` supports day-based queries, and `payload` stores the item body.
+
+`public.tm3_settings` stores per-user settings. The primary key is `(user_id, setting_key)` so each user owns an independent value for each setting.
+
+`public.tm3_deletion_queue` stores deletion events for sync reconciliation. It records `entity_type`, `entity_id`, optional `trip_id`, metadata in `payload`, and the same sync metadata used by the other tables.
+
+## JSON payloads
+
+The first sync schema uses `payload jsonb` so the static app can evolve local object shapes without a database migration for every UI field. Stable sync metadata remains in typed columns: ownership, ids, timestamps, deletion state, version, device id, and practical query fields.
+
+## Conflict rule
+
+For the first version, conflicts are resolved by last write wins using `updated_at`. When two devices edit the same entity, the row with the newest `updated_at` is authoritative. The update trigger also increments `version` on every update so later sync versions can add stronger conflict handling.
+
+## Offline rule
+
+IndexedDB keeps the app usable while the browser is offline. Users can keep viewing and editing cached data without a network connection. When the browser is online again and the user is authenticated, sync resumes by pushing local pending changes and pulling newer Supabase rows.
+
+## Supabase SQL Editor
+
+Open the Supabase Dashboard for `https://cslludzuejkhsydqiabx.supabase.co`, go to SQL Editor, and run `supabase/schema.sql`.
+
+The SQL creates the sync tables, indexes, RLS policies, update trigger function, per-table triggers, and safe realtime publication additions when the `supabase_realtime` publication exists.
+
+## Secret handling
+
+Do not put a `service_role` key, database password, or secret key in GitHub Pages, JavaScript bundles, IndexedDB, localStorage, or documentation. Browser code should only use the Supabase project URL and a publishable browser-safe key with Auth and RLS enabled.
