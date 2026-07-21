@@ -89,6 +89,14 @@ create index if not exists tm3_deletion_queue_trip_id_idx on public.tm3_deletion
 create index if not exists tm3_deletion_queue_updated_at_idx on public.tm3_deletion_queue (updated_at);
 create index if not exists tm3_deletion_queue_deleted_at_idx on public.tm3_deletion_queue (deleted_at);
 
+grant usage on schema public to authenticated;
+
+grant select, insert, update, delete on table public.tm3_trips to authenticated;
+grant select, insert, update, delete on table public.tm3_trip_days to authenticated;
+grant select, insert, update, delete on table public.tm3_items to authenticated;
+grant select, insert, update, delete on table public.tm3_settings to authenticated;
+grant select, insert, update, delete on table public.tm3_deletion_queue to authenticated;
+
 alter table public.tm3_trips enable row level security;
 alter table public.tm3_trip_days enable row level security;
 alter table public.tm3_items enable row level security;

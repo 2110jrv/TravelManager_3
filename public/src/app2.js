@@ -67,6 +67,7 @@ const ALLOWED_LEGACY_ITEM_IDS = new Set(['ITEM_121_B']);
 await initApp();
 
 async function initApp() {
+  registerServiceWorker();
   await openDatabase();
   await getOrCreateDeviceId();
   state.activeView = getStoredView();
@@ -83,6 +84,17 @@ async function initApp() {
   await loadState();
   updateOnlineStatus();
   await render();
+}
+
+function registerServiceWorker() {
+  if (!('serviceWorker' in navigator)) return;
+  const swUrl = new URL('../pwa/sw.js', import.meta.url);
+  const scope = new URL('../', import.meta.url);
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register(swUrl, { scope }).catch(() => {
+      // Offline support is best-effort; IndexedDB still works without the service worker.
+    });
+  });
 }
 
 async function initAuth() {

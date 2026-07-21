@@ -1,20 +1,9 @@
 {
   "name": "TravelManager 3.0",
   "short_name": "TravelManager",
-  "start_url": "./index.html",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
   "background_color": "#f7f8fb",
-  "theme_color": "#2b3a5d",
-  "icons": [
-    {
-      "src": "icons/icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png"
-    },
-    {
-      "src": "icons/icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png"
-    }
-  ]
+  "theme_color": "#2b3a5d"
 }

@@ -36,7 +36,7 @@ IndexedDB keeps the app usable while the browser is offline. Users can keep view
 
 Open the Supabase Dashboard for `https://cslludzuejkhsydqiabx.supabase.co`, go to SQL Editor, and run `supabase/schema.sql`.
 
-The SQL creates the sync tables, indexes, RLS policies, update trigger function, per-table triggers, and safe realtime publication additions when the `supabase_realtime` publication exists.
+The SQL creates the sync tables, indexes, authenticated table grants, RLS policies, update trigger function, per-table triggers, and safe realtime publication additions when the `supabase_realtime` publication exists.
 
 ## Secret handling
 
@@ -84,3 +84,18 @@ Configuracion now shows signed-in user, sync state, last sync time, "Sincronizar
 - Realtime is best-effort; 60-second polling is the fallback.
 - Tombstone handling is intentionally conservative and avoids destructive bulk cleanup.
 - Manual backup/export is still recommended before travel or before large imports.
+
+## Public GitHub Pages deployment
+
+Production target: `https://2110jrv.github.io/TravelManager_3/`.
+
+GitHub Pages should use Source: GitHub Actions. The workflow at `.github/workflows/deploy-pages.yml` publishes the `public` folder directly, so Jonathan's PC does not need to stay on after the commit is pushed and GitHub Pages finishes deploying.
+
+The app is path-safe for both local development at `http://127.0.0.1:5003/` and GitHub Pages under `/TravelManager_3/`. Static assets, the manifest, Leaflet files, itinerary data, and service worker registration use relative URLs or runtime scope detection.
+
+Add these Supabase Auth redirect URLs in the Supabase Dashboard:
+
+- `http://127.0.0.1:5003/**`
+- `https://2110jrv.github.io/TravelManager_3/**`
+
+Sync remains local-first and automatic. IndexedDB is still the immediate source for the UI, local edits continue offline, and cloud sync resumes when the browser is online and signed in. Manual backup/export is still recommended before travel or before large imports.
