@@ -135,6 +135,17 @@ export async function addItem(item) {
   });
 }
 
+export async function deleteItem(ItemID) {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_ITEMS, 'readwrite');
+    const store = transaction.objectStore(STORE_ITEMS);
+    const request = store.delete(ItemID);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+}
+
 export async function replaceItemsByPredicate(items, predicate) {
   const db = await openDatabase();
   const existing = await getAllItems();
@@ -183,6 +194,28 @@ export async function setSetting(key, value) {
   });
 }
 
+export async function getAllSettings() {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_SETTINGS, 'readonly');
+    const store = transaction.objectStore(STORE_SETTINGS);
+    const request = store.getAll();
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function saveSettingRecord(record) {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_SETTINGS, 'readwrite');
+    const store = transaction.objectStore(STORE_SETTINGS);
+    const request = store.put(record);
+    request.onsuccess = () => resolve(record);
+    request.onerror = () => reject(request.error);
+  });
+}
+
 export async function getOrCreateDeviceId() {
   const existing = await getSetting('deviceId', '');
   if (existing) return existing;
@@ -207,6 +240,17 @@ export async function enqueueDeletion(record) {
       addRequest.onsuccess = () => resolve(record);
       addRequest.onerror = () => reject(addRequest.error);
     };
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function saveDeletionRecord(record) {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_DELETION_QUEUE, 'readwrite');
+    const store = transaction.objectStore(STORE_DELETION_QUEUE);
+    const request = store.put(record);
+    request.onsuccess = () => resolve(record);
     request.onerror = () => reject(request.error);
   });
 }

@@ -53,3 +53,32 @@ Local-only mode remains the default when no user is signed in or the network is 
 Signed-in mode currently confirms identity and preserves the existing local IndexedDB behavior. This phase does not upload, download, merge, or delete Supabase sync rows.
 
 The next phase will implement actual data sync: mapping IndexedDB records into the Supabase sync tables, pulling newer rows, pushing local pending changes, honoring deletion records, and resolving first-version conflicts with last `updated_at` wins.
+
+## Automatic sync v1
+
+Automatic sync v1 is implemented in `public/src/syncSupabase.js`. IndexedDB remains the immediate local source for the UI, and Supabase stores the signed-in user's cloud copy. The app starts sync after sign in, on app load when a session exists, when the browser returns online, after local edits/imports/deletions, every 60 seconds while signed in and online, and when best-effort Realtime events arrive.
+
+The sync mapping is:
+
+- IndexedDB `trips` to `public.tm3_trips`
+- IndexedDB `tripDays` to `public.tm3_trip_days`
+- IndexedDB `items` to `public.tm3_items`
+- IndexedDB `settings` to `public.tm3_settings`
+- IndexedDB `deletionQueue` to `public.tm3_deletion_queue`
+
+Every pushed cloud row includes the authenticated `user_id`, the local record as `payload`, a browser `device_id` when available, and the best available timestamp from the local record. If a local record has no known timestamp, sync generates a current timestamp before pushing.
+
+Conflict handling is last-write-wins. Cloud `updated_at` is authoritative for cloud rows. Local records use `UpdatedAt`, `updatedAt`, `UpdatedOn`, `ModifiedAt`, `LastUpdatedAt`, or deletion timestamps where available. If cloud is newer, the cloud payload is written into IndexedDB. If local is newer or the cloud row is missing, the local record is pushed. If timestamps are equal, sync does nothing.
+
+Deletion handling is conservative. Local deletion queue rows are pushed to Supabase, cloud deletion queue rows are pulled locally, and tombstones can prevent older entities from being resurrected. Sync v1 does not perform destructive bulk deletes and does not clear IndexedDB.
+
+When offline, local edits continue and sync state becomes offline or pending. When the browser returns online, sync resumes automatically. Signing out stops cloud sync but does not delete IndexedDB data.
+
+Configuracion now shows signed-in user, sync state, last sync time, "Sincronizar ahora", and the local-first explanation. Manual sync is available for debugging, but normal operation is automatic.
+
+## Sync v1 limitations
+
+- Last-write-wins only; no per-field conflict UI yet.
+- Realtime is best-effort; 60-second polling is the fallback.
+- Tombstone handling is intentionally conservative and avoids destructive bulk cleanup.
+- Manual backup/export is still recommended before travel or before large imports.

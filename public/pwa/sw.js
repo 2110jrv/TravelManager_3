@@ -1,4 +1,4 @@
-const CACHE_NAME = 'travelmanager3-cache-v7';
+const CACHE_NAME = 'travelmanager3-cache-v8';
 const TILE_CACHE_NAME = 'travelmanager3-tiles-v1';
 const ASSETS = [
   './',
@@ -16,6 +16,7 @@ const ASSETS = [
   './src/app.js',
   './src/app2.js',
   './src/supabaseClient.js',
+  './src/syncSupabase.js',
   './src/db.js',
   './src/ui.js',
   './src/italyAdapter.js',
@@ -32,7 +33,7 @@ self.addEventListener('install', event => {
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys().then(keys => Promise.all(
-      keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key))
+      keys.filter(key => key !== CACHE_NAME && key !== TILE_CACHE_NAME).map(key => caches.delete(key))
     )).then(() => self.clients.claim())
   );
 });

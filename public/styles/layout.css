@@ -793,6 +793,14 @@ h1 {
   font-weight: 700;
 }
 
+.sync-detail-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 2px;
+}
+
 .auth-form {
   display: grid;
   gap: 10px;

@@ -1,6 +1,7 @@
 import { addItem, deleteTrip, deleteTripDay, enqueueDeletion, getActiveTripId, getAllItems, getAllTrips, getOrCreateDeviceId, getSetting, getTrip, getTripDays, migrateLegacyTravelData, openDatabase, replaceDatasetItems, replaceItemsByPredicate, saveTrip, saveTripDay, selectDefaultTrip, setActiveTripId, setSetting, updateItem } from './db.js';
 import { ITALY_DATASET_ID, ITALY_DATASET_MARK_KEY, ITALY_DAYS_KEY, getPlanningStatus, loadItalyItinerary, rebuildMultidayOccurrences } from './italyAdapter.js';
 import { getCurrentSession, onAuthStateChange, signInWithEmailPassword, signOut, signUpWithEmailPassword } from './supabaseClient.js';
+import { getSyncState, queueCloudSync, runCloudSyncNow, startCloudSync, stopCloudSync } from './syncSupabase.js';
 
 const state = {
   activeView: 'home',
@@ -27,7 +28,8 @@ const state = {
   authUser: null,
   authLoading: true,
   authMessage: '',
-  authError: ''
+  authError: '',
+  sync: getSyncState()
 };
 
 const els = {
@@ -88,12 +90,23 @@ async function initAuth() {
     const session = await getCurrentSession();
     state.authUser = session?.user || null;
     state.authError = '';
-    state.authMessage = state.authUser ? 'Sesión activa. Sync automático se activará en el próximo paso.' : '';
-    await onAuthStateChange((_event, session) => {
+    state.authMessage = state.authUser ? 'Los cambios se guardan localmente y se sincronizan automáticamente cuando hay internet.' : '';
+    window.addEventListener('tm3-sync-state-change', event => {
+      state.sync = event.detail || getSyncState();
+      updateSyncStatus();
+      if (state.activeView === 'settings') renderSettings();
+    });
+    if (state.authUser) await startCloudSync({ onAppliedRemoteChanges: refreshAfterCloudPull });
+    await onAuthStateChange(async (_event, session) => {
       state.authUser = session?.user || null;
       state.authLoading = false;
       state.authError = '';
-      state.authMessage = state.authUser ? 'Sesión activa. Sync automático se activará en el próximo paso.' : 'Modo local activo. La nube requiere iniciar sesión.';
+      state.authMessage = state.authUser ? 'Los cambios se guardan localmente y se sincronizan automáticamente cuando hay internet.' : 'Modo local activo. La nube requiere iniciar sesión.';
+      if (state.authUser) {
+        await startCloudSync({ onAppliedRemoteChanges: refreshAfterCloudPull });
+      } else {
+        stopCloudSync();
+      }
       updateSyncStatus();
       if (state.activeView === 'settings') renderSettings();
     });
@@ -106,8 +119,25 @@ async function initAuth() {
   }
 }
 
+async function refreshAfterCloudPull() {
+  await refreshTripsAndDays();
+  await loadState();
+  await render();
+}
+
+function notifyLocalChange(reason) {
+  if (!state.authUser) {
+    updateSyncStatus();
+    return;
+  }
+  queueCloudSync(reason);
+}
+
 function bindEvents() {
-  window.addEventListener('online', updateOnlineStatus);
+  window.addEventListener('online', () => {
+    updateOnlineStatus();
+    if (state.authUser) queueCloudSync('online');
+  });
   window.addEventListener('offline', updateOnlineStatus);
   els.menuButton.addEventListener('click', () => els.menuOverlay.classList.remove('hidden'));
   els.menuOverlay.addEventListener('click', event => {
@@ -196,6 +226,7 @@ async function setActiveTripBudget(value) {
   const trip = activeTripId ? await getTrip(activeTripId) : null;
   if (!trip) {
     await setSetting('tripBudgetUSD', value);
+    notifyLocalChange('budget-setting');
     return;
   }
   await saveTrip({
@@ -205,6 +236,7 @@ async function setActiveTripBudget(value) {
     BudgetCurrencyCode: trip.BudgetCurrencyCode || 'USD',
     LastUpdatedAt: new Date().toISOString()
   });
+  notifyLocalChange('budget-trip');
 }
 
 async function migrateToItalyItineraryIfNeeded(itinerary) {
@@ -792,6 +824,7 @@ async function updatePlanningStatus(item, PlanningStatus) {
   state.openDayKey = updated.DayDate || updated.StartDate || null;
   state.openItemId = updated.ItemID;
   els.statusSync.textContent = 'Cambios locales pendientes';
+  notifyLocalChange('planning-status');
   await loadState();
   await render();
 }
@@ -967,8 +1000,14 @@ function renderAuthPanel() {
       <div class="signed-in-panel">
         <span>Usuario</span>
         <strong>${escapeHtml(state.authUser.email || 'Sesión activa')}</strong>
-        <p>Sync automático se activará en el próximo paso.</p>
-        <button id="authSignOutButton" class="secondary-button" type="button">Cerrar sesión</button>
+        <div class="sync-detail-row"><span>Estado</span><strong>${escapeHtml(getSyncStatusLabel())}</strong></div>
+        <div class="sync-detail-row"><span>Última sync</span><strong>${escapeHtml(state.sync.lastSyncAt ? formatDateTime(state.sync.lastSyncAt) : 'Pendiente')}</strong></div>
+        ${state.sync.lastError ? `<p class="data-error">${escapeHtml(state.sync.lastError)}</p>` : ''}
+        <p>Los cambios se guardan localmente y se sincronizan automáticamente cuando hay internet.</p>
+        <div class="settings-actions">
+          <button id="syncNowButton" class="primary-button" type="button">Sincronizar ahora</button>
+          <button id="authSignOutButton" class="secondary-button" type="button">Cerrar sesión</button>
+        </div>
       </div>
     `;
   }
@@ -992,7 +1031,7 @@ function getAuthStatusLabel() {
 }
 
 function getAuthDefaultMessage() {
-  if (state.authUser) return 'Sesión activa. Sync automático se activará en el próximo paso.';
+  if (state.authUser) return 'Los cambios se guardan localmente y se sincronizan automáticamente cuando hay internet.';
   return 'La app sigue funcionando en modo local. La sincronización en la nube requiere iniciar sesión.';
 }
 
@@ -1000,6 +1039,7 @@ function bindAuthManager() {
   document.getElementById('authForm')?.addEventListener('submit', event => handleAuthSubmit(event, 'sign-in'));
   document.getElementById('authSignUpButton')?.addEventListener('click', event => handleAuthSubmit(event, 'sign-up'));
   document.getElementById('authSignOutButton')?.addEventListener('click', handleSignOut);
+  document.getElementById('syncNowButton')?.addEventListener('click', () => runCloudSyncNow('manual'));
 }
 
 async function handleAuthSubmit(event, mode) {
@@ -1015,11 +1055,12 @@ async function handleAuthSubmit(event, mode) {
       ? await signUpWithEmailPassword(email, password)
       : await signInWithEmailPassword(email, password);
     if (result.error) throw result.error;
-    state.authUser = result.data.user || result.data.session?.user || state.authUser;
+    state.authUser = result.data.session?.user || (mode === 'sign-in' ? result.data.user : null) || state.authUser;
     state.authError = '';
     state.authMessage = mode === 'sign-up'
       ? 'Cuenta creada. Revisa tu email si Supabase solicita confirmación.'
-      : 'Sesión iniciada. Sync automático se activará en el próximo paso.';
+      : 'Sesión iniciada. Sincronizando datos locales y nube.';
+    if (state.authUser) await startCloudSync({ onAppliedRemoteChanges: refreshAfterCloudPull });
     updateSyncStatus();
     await renderSettings();
   } catch (error) {
@@ -1032,6 +1073,7 @@ async function handleSignOut() {
   try {
     const result = await signOut();
     if (result.error) throw result.error;
+    stopCloudSync();
     state.authUser = null;
     state.authError = '';
     state.authMessage = 'Sesión cerrada. Tus datos locales de IndexedDB se conservan.';
@@ -1082,6 +1124,7 @@ function bindTripManager() {
     state.calendarMessage = '';
     state.mapFilters = { planning: 'ALL', type: 'ALL', city: 'ALL', date: 'ALL' };
     persistViewState();
+    notifyLocalChange('active-trip');
     await render();
   });
   document.getElementById('newTripButton').addEventListener('click', () => openTripEditor());
@@ -1137,6 +1180,7 @@ async function saveTripEditor(originalTripId = '') {
   await setActiveTripId(TripID);
   await refreshTripsAndDays();
   await loadState();
+  notifyLocalChange('trip-save');
   await render();
 }
 
@@ -1161,6 +1205,7 @@ async function deleteActiveTrip() {
   await setActiveTripId(selectDefaultTrip(state.trips) || '');
   await refreshTripsAndDays();
   await loadState();
+  notifyLocalChange('trip-delete');
   await render();
 }
 
@@ -1226,6 +1271,7 @@ async function saveDayEditor(originalDayId = '') {
   const now = new Date().toISOString();
   await saveTripDay({ TripDayID, TripID: state.activeTripId, DayOrder: Number(document.getElementById('dayOrderInput').value || 0), Date: DateValue, DayLabel: document.getElementById('dayLabelInput').value.trim(), Title: document.getElementById('dayTitleInput').value.trim(), PrimaryCity: document.getElementById('dayCityInput').value.trim(), PrimaryCountryCode: document.getElementById('dayCountryInput').value.trim(), DayNotes: document.getElementById('dayNotesInput').value.trim(), DayImageUrl: document.getElementById('dayImageInput').value.trim(), CreatedAt: state.days.find(day => day.TripDayID === originalDayId)?.CreatedAt || now, LastUpdatedAt: now });
   await refreshTripsAndDays();
+  notifyLocalChange('day-save');
   await render();
 }
 
@@ -1244,6 +1290,7 @@ async function deleteDay(TripDayID) {
   await deleteTripDay(TripDayID);
   await refreshTripsAndDays();
   await loadState();
+  notifyLocalChange('day-delete');
   await render();
 }
 
@@ -1572,6 +1619,7 @@ async function applyBackupReplace(data) {
   if (!state.pendingBackup || !confirm('Reemplazar data actual con este backup? Se creará un snapshot antes.')) return;
   await createDataSnapshot('Antes de reemplazar por backup');
   await restoreDatasetPayload(data);
+  notifyLocalChange('backup-replace');
   setBackupMessage('Backup restaurado en modo reemplazar.');
 }
 
@@ -1593,6 +1641,7 @@ async function applyBackupMerge(data) {
   }
   await loadState();
   els.statusSync.textContent = 'Backup combinado';
+  notifyLocalChange('backup-merge');
   await render();
   setBackupMessage('Backup combinado. Los conflictos se resolvieron según tu selección.');
 }
@@ -1622,6 +1671,7 @@ async function restoreDatasetPayload(payload) {
   state.openDayKey = null;
   state.openItemId = null;
   els.statusSync.textContent = 'Data local restaurada';
+  notifyLocalChange('backup-restore');
   await render();
 }
 
@@ -1846,6 +1896,7 @@ async function saveDataRow(rowEl) {
   state.openDayKey = data.StartDate;
   state.openItemId = data.ItemID;
   setDataMessage('Fila guardada.');
+  notifyLocalChange('data-row-save');
   renderSettings();
 }
 
@@ -1878,6 +1929,7 @@ async function addLogicalRow() {
   await upsertLogicalRow('', data);
   await loadState();
   setDataMessage('Nueva fila creada.');
+  notifyLocalChange('data-row-add');
   renderSettings();
 }
 
@@ -1894,6 +1946,7 @@ async function duplicateDataRow(rowEl) {
   await upsertLogicalRow('', data);
   await loadState();
   setDataMessage('Fila duplicada.');
+  notifyLocalChange('data-row-duplicate');
   renderSettings();
 }
 
@@ -1929,6 +1982,7 @@ async function deleteLogicalItem(item, modal = null) {
   await loadState();
   state.openItemId = null;
   els.statusSync.textContent = 'Item eliminado';
+  notifyLocalChange('item-delete');
   await render();
 }
 
@@ -2184,6 +2238,7 @@ async function restoreOriginalItinerary() {
   state.openItemId = null;
   await loadState();
   els.statusSync.textContent = 'Datos originales del viaje restaurados';
+  notifyLocalChange('restore-original');
   await render();
 }
 
@@ -2240,6 +2295,7 @@ async function saveEditForm(event) {
   closeModal(editModal);
   await loadState();
   els.statusSync.textContent = 'Cambios locales pendientes';
+  notifyLocalChange('item-edit');
   await render();
 }
 
@@ -2280,6 +2336,7 @@ async function saveNewItemForm(event) {
   closeModal(newItemModal);
   await loadState();
   els.statusSync.textContent = 'Nuevo item guardado';
+  notifyLocalChange('item-new');
   await render();
 }
 
@@ -2706,11 +2763,17 @@ function updateOnlineStatus() {
 
 function updateSyncStatus() {
   if (!els.statusSync) return;
-  if (state.authUser) {
-    els.statusSync.textContent = 'Nube conectada; sync pendiente';
-    return;
-  }
-  els.statusSync.textContent = 'Modo local; inicia sesión para nube';
+  els.statusSync.textContent = getSyncStatusLabel();
+}
+
+function getSyncStatusLabel() {
+  if (!state.authUser) return 'Modo local; inicia sesión para nube';
+  if (!navigator.onLine || state.sync.status === 'offline') return 'Sin internet; guardando localmente';
+  if (state.sync.status === 'syncing') return 'Sincronizando...';
+  if (state.sync.status === 'pending') return 'Pendiente de sincronizar';
+  if (state.sync.status === 'error') return 'Error de sync';
+  if (state.sync.status === 'synced' || state.sync.status === 'idle') return 'Sincronizado';
+  return 'Nube conectada';
 }
 
 function closeMenu() {
