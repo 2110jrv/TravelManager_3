@@ -188,9 +188,24 @@ export async function setSetting(key, value) {
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(STORE_SETTINGS, 'readwrite');
     const store = transaction.objectStore(STORE_SETTINGS);
-    const request = store.put({ key, value });
-    request.onsuccess = () => resolve(value);
-    request.onerror = () => reject(request.error);
+    const getRequest = store.get(key);
+    getRequest.onsuccess = () => {
+      const now = new Date().toISOString();
+      const existing = getRequest.result || {};
+      const request = store.put({
+        ...existing,
+        key,
+        value,
+        UpdatedAt: now,
+        ModifiedAt: now,
+        updatedAt: now,
+        LastUpdatedAt: now,
+        Version: Number(existing.Version || 0) + 1
+      });
+      request.onsuccess = () => resolve(value);
+      request.onerror = () => reject(request.error);
+    };
+    getRequest.onerror = () => reject(getRequest.error);
   });
 }
 

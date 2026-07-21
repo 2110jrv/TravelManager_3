@@ -1,7 +1,7 @@
 import { addItem, deleteTrip, deleteTripDay, enqueueDeletion, getActiveTripId, getAllItems, getAllTrips, getOrCreateDeviceId, getSetting, getTrip, getTripDays, migrateLegacyTravelData, openDatabase, replaceDatasetItems, replaceItemsByPredicate, saveTrip, saveTripDay, selectDefaultTrip, setActiveTripId, setSetting, updateItem } from './db.js';
 import { ITALY_DATASET_ID, ITALY_DATASET_MARK_KEY, ITALY_DAYS_KEY, getPlanningStatus, loadItalyItinerary, rebuildMultidayOccurrences } from './italyAdapter.js';
 import { getCurrentSession, onAuthStateChange, signInWithEmailPassword, signOut, signUpWithEmailPassword } from './supabaseClient.js';
-import { getSyncState, queueCloudSync, runCloudSyncNow, startCloudSync, stopCloudSync } from './syncSupabase.js';
+import { getSyncState, queueCloudSync, recordLocalChange, runCloudSyncNow, startCloudSync, stopCloudSync } from './syncSupabase.js';
 
 const state = {
   activeView: 'home',
@@ -133,6 +133,22 @@ function notifyLocalChange(reason) {
   queueCloudSync(reason);
 }
 
+function stampLocalChange(record, timestamp = new Date().toISOString()) {
+  return {
+    ...record,
+    UpdatedAt: timestamp,
+    ModifiedAt: timestamp,
+    updatedAt: timestamp,
+    LastUpdatedAt: timestamp,
+    Version: Number(record?.Version || 0) + 1,
+    SyncStatus: 'LOCAL_PENDING'
+  };
+}
+
+function markLocalEntity(entityType, entityId) {
+  if (entityType && entityId) recordLocalChange(entityType, entityId);
+}
+
 function bindEvents() {
   window.addEventListener('online', () => {
     updateOnlineStatus();
@@ -229,13 +245,14 @@ async function setActiveTripBudget(value) {
     notifyLocalChange('budget-setting');
     return;
   }
-  await saveTrip({
+  const now = new Date().toISOString();
+  await saveTrip(stampLocalChange({
     ...trip,
     BudgetAmount: value,
     BudgetAmountUSD: value,
-    BudgetCurrencyCode: trip.BudgetCurrencyCode || 'USD',
-    LastUpdatedAt: new Date().toISOString()
-  });
+    BudgetCurrencyCode: trip.BudgetCurrencyCode || 'USD'
+  }, now));
+  markLocalEntity('TRIP', trip.TripID);
   notifyLocalChange('budget-trip');
 }
 
@@ -818,8 +835,9 @@ function renderItem(item) {
 
 async function updatePlanningStatus(item, PlanningStatus) {
   if (getItemPlanningStatus(item) === PlanningStatus) return;
-  const updated = { ...item, PlanningStatus, SyncStatus: 'LOCAL_PENDING', LastUpdatedAt: new Date().toISOString() };
+  const updated = stampLocalChange({ ...item, PlanningStatus });
   await updateItem(updated);
+  markLocalEntity('ITEM', updated.ItemID);
   state.activeTab = PlanningStatus;
   state.openDayKey = updated.DayDate || updated.StartDate || null;
   state.openItemId = updated.ItemID;
@@ -1176,7 +1194,8 @@ async function saveTripEditor(originalTripId = '') {
   if (!isValidDate(EndDate) || EndDate < StartDate) return setInlineMessage(message, 'EndDate inválida.', true);
   if (Number.isNaN(BudgetAmountUSD) || BudgetAmountUSD < 0) return setInlineMessage(message, 'Presupuesto inválido.', true);
   const now = new Date().toISOString();
-  await saveTrip({ ...(existing || {}), TripID, TripName, TripTitle, StartDate, EndDate, BudgetAmount: BudgetAmountUSD, BudgetAmountUSD, BudgetCurrencyCode: document.getElementById('tripCurrencyInput').value.trim() || 'USD', Notes: document.getElementById('tripNotesInput').value.trim(), IsActive: document.getElementById('tripActiveInput').checked, CreatedAt: existing?.CreatedAt || now, LastUpdatedAt: now });
+  await saveTrip(stampLocalChange({ ...(existing || {}), TripID, TripName, TripTitle, StartDate, EndDate, BudgetAmount: BudgetAmountUSD, BudgetAmountUSD, BudgetCurrencyCode: document.getElementById('tripCurrencyInput').value.trim() || 'USD', Notes: document.getElementById('tripNotesInput').value.trim(), IsActive: document.getElementById('tripActiveInput').checked, CreatedAt: existing?.CreatedAt || now }, now));
+  markLocalEntity('TRIP', TripID);
   await setActiveTripId(TripID);
   await refreshTripsAndDays();
   await loadState();
@@ -1201,6 +1220,7 @@ async function deleteActiveTrip() {
   await createDataSnapshot('Antes de eliminar viaje');
   await recordDeletion('TRIP', trip.TripID, trip.TripID, trip);
   await deleteTrip(trip.TripID);
+  markLocalEntity('TRIP', trip.TripID);
   state.trips = await getAllTrips();
   await setActiveTripId(selectDefaultTrip(state.trips) || '');
   await refreshTripsAndDays();
@@ -1269,7 +1289,8 @@ async function saveDayEditor(originalDayId = '') {
   const TripDayID = originalDayId || makeTripDayId(state.activeTripId, DateValue);
   if (!originalDayId && state.days.some(day => day.TripDayID === TripDayID)) return setInlineMessage(message, 'TripDayID duplicado.', true);
   const now = new Date().toISOString();
-  await saveTripDay({ TripDayID, TripID: state.activeTripId, DayOrder: Number(document.getElementById('dayOrderInput').value || 0), Date: DateValue, DayLabel: document.getElementById('dayLabelInput').value.trim(), Title: document.getElementById('dayTitleInput').value.trim(), PrimaryCity: document.getElementById('dayCityInput').value.trim(), PrimaryCountryCode: document.getElementById('dayCountryInput').value.trim(), DayNotes: document.getElementById('dayNotesInput').value.trim(), DayImageUrl: document.getElementById('dayImageInput').value.trim(), CreatedAt: state.days.find(day => day.TripDayID === originalDayId)?.CreatedAt || now, LastUpdatedAt: now });
+  await saveTripDay(stampLocalChange({ TripDayID, TripID: state.activeTripId, DayOrder: Number(document.getElementById('dayOrderInput').value || 0), Date: DateValue, DayLabel: document.getElementById('dayLabelInput').value.trim(), Title: document.getElementById('dayTitleInput').value.trim(), PrimaryCity: document.getElementById('dayCityInput').value.trim(), PrimaryCountryCode: document.getElementById('dayCountryInput').value.trim(), DayNotes: document.getElementById('dayNotesInput').value.trim(), DayImageUrl: document.getElementById('dayImageInput').value.trim(), CreatedAt: state.days.find(day => day.TripDayID === originalDayId)?.CreatedAt || now }, now));
+  markLocalEntity('TRIP_DAY', TripDayID);
   await refreshTripsAndDays();
   notifyLocalChange('day-save');
   await render();
@@ -1288,6 +1309,7 @@ async function deleteDay(TripDayID) {
   await createDataSnapshot('Antes de eliminar día');
   await recordDeletion('TRIP_DAY', TripDayID, day.TripID || state.activeTripId, day);
   await deleteTripDay(TripDayID);
+  markLocalEntity('TRIP_DAY', TripDayID);
   await refreshTripsAndDays();
   await loadState();
   notifyLocalChange('day-delete');
@@ -1657,9 +1679,11 @@ async function restoreDatasetPayload(payload) {
   const restored = items.map(item => {
     const normalized = normalizeImportedItem(item, reservedIds);
     reservedIds.add(normalized.ItemID);
-    return buildItemFromData(normalized, new Date().toISOString());
+    const now = new Date().toISOString();
+    return stampLocalChange(buildItemFromData(normalized, now), now);
   });
   await replaceDatasetItems(restored, isActiveDatasetItem);
+  restored.forEach(item => markLocalEntity('ITEM', item.ItemID));
   if (Array.isArray(payload.preferences?.days)) {
     state.days = payload.preferences.days;
     localStorage.setItem(ITALY_DAYS_KEY, JSON.stringify(state.days));
@@ -1702,20 +1726,22 @@ async function restoreTripMetadata(payload) {
   const tripDays = getBackupTripDays(payload, trips[0]?.TripID || 'TRIP_ITALY_2026');
   for (const trip of trips) {
     const existing = await getTrip(trip.TripID);
-    await saveTrip({
+    const now = new Date().toISOString();
+    await saveTrip(stampLocalChange({
       ...existing,
       ...trip,
       CreatedAt: existing?.CreatedAt || trip.CreatedAt || new Date().toISOString(),
-      LastUpdatedAt: new Date().toISOString(),
       IsActive: trip.IsActive !== false
-    });
+    }, now));
+    markLocalEntity('TRIP', trip.TripID);
   }
   for (const day of tripDays) {
-    await saveTripDay({
+    const now = new Date().toISOString();
+    await saveTripDay(stampLocalChange({
       ...day,
-      CreatedAt: day.CreatedAt || new Date().toISOString(),
-      LastUpdatedAt: new Date().toISOString()
-    });
+      CreatedAt: day.CreatedAt || now
+    }, now));
+    markLocalEntity('TRIP_DAY', day.TripDayID || day.DayID);
   }
   await setActiveTripId(payload.activeTripId || trips[0]?.TripID || 'TRIP_ITALY_2026');
 }
@@ -1957,18 +1983,19 @@ async function deleteDataRow(rowEl) {
 }
 
 async function recordDeletion(EntityType, EntityId, TripID, entity = {}) {
-  const Version = String(entity.Version || entity.LastUpdatedAt || entity.UpdatedAt || 1);
+  const now = new Date().toISOString();
+  const Version = String(Number(entity.Version || 0) + 1);
   const DeviceId = await getOrCreateDeviceId();
-  await enqueueDeletion({
+  await enqueueDeletion(stampLocalChange({
     DeletionID: [EntityType, TripID || '', EntityId, Version].map(value => encodeURIComponent(String(value))).join(':'),
     EntityType,
     EntityId,
     TripID: TripID || '',
-    DeletedAt: new Date().toISOString(),
+    DeletedAt: now,
     Version,
-    DeviceId,
-    SyncStatus: 'LOCAL_PENDING'
-  });
+    DeviceId
+  }, now));
+  markLocalEntity(EntityType, EntityId);
 }
 
 async function deleteLogicalItem(item, modal = null) {
@@ -1990,13 +2017,14 @@ async function upsertLogicalRow(originalKey, data) {
   const now = new Date().toISOString();
   const related = state.items.filter(item => getLogicalKey(item) === originalKey);
   if (related.length === 0) {
-    const item = buildItemFromData(data, now);
+    const item = stampLocalChange(buildItemFromData(data, now), now);
     await addItem(item);
+    markLocalEntity('ITEM', item.ItemID);
     return;
   }
   for (const item of related) {
     const shouldMoveDay = related.length === 1 || isChargeOccurrence(item) || item.DayDate === item.StartDate;
-    await updateItem({
+    const updated = stampLocalChange({
       ...item,
       ...data,
       ItemID: item.ItemID,
@@ -2004,10 +2032,10 @@ async function upsertLogicalRow(originalKey, data) {
       DayDate: shouldMoveDay ? data.StartDate : item.DayDate,
       StartDate: data.StartDate,
       EndDate: data.EndDate,
-      Status: data.PlanningStatus === 'CONFIRMED' ? 'CONFIRMED' : 'PLANNED',
-      LastUpdatedAt: now,
-      SyncStatus: 'LOCAL_PENDING'
-    });
+      Status: data.PlanningStatus === 'CONFIRMED' ? 'CONFIRMED' : 'PLANNED'
+    }, now);
+    await updateItem(updated);
+    markLocalEntity('ITEM', updated.ItemID);
   }
 }
 
@@ -2122,6 +2150,7 @@ async function importTsvRows(rows) {
   }
   await loadState();
   setDataMessage(`${rows.length} filas importadas.`);
+  notifyLocalChange('data-tsv-import');
   renderSettings();
 }
 
@@ -2231,7 +2260,10 @@ async function restoreOriginalItinerary() {
   await migrateLegacyTravelData(itinerary);
   await setActiveTripId('TRIP_ITALY_2026');
   await refreshTripsAndDays(itinerary.days);
-  await replaceItemsByPredicate(itinerary.items, item => item.DatasetID === ITALY_DATASET_ID || item.TripID === 'TRIP_ITALY_2026');
+  const now = new Date().toISOString();
+  const restoredItems = itinerary.items.map(item => stampLocalChange(item, now));
+  await replaceItemsByPredicate(restoredItems, item => item.DatasetID === ITALY_DATASET_ID || item.TripID === 'TRIP_ITALY_2026');
+  restoredItems.forEach(item => markLocalEntity('ITEM', item.ItemID));
   localStorage.setItem(ITALY_DATASET_MARK_KEY, ITALY_DATASET_ID);
   localStorage.setItem(ITALY_DAYS_KEY, JSON.stringify(state.days));
   state.openDayKey = null;
@@ -2280,16 +2312,16 @@ async function saveEditForm(event) {
   const data = formData(event.currentTarget);
   const error = validateItemForm(data);
   if (error) return setModalError(editModal, error);
-  const updated = {
+  const now = new Date().toISOString();
+  const updated = stampLocalChange({
     ...state.editingItem,
     ...data,
     AmountUSD: Number(data.AmountUSD),
     IsAllDay: event.currentTarget.elements.IsAllDay.checked,
-    IsPaid: event.currentTarget.elements.IsPaid.checked,
-    LastUpdatedAt: new Date().toISOString(),
-    SyncStatus: 'LOCAL_PENDING'
-  };
+    IsPaid: event.currentTarget.elements.IsPaid.checked
+  }, now);
   await updateItem(updated);
+  markLocalEntity('ITEM', updated.ItemID);
   state.openDayKey = updated.DayDate;
   state.openItemId = updated.ItemID;
   closeModal(editModal);
@@ -2310,7 +2342,8 @@ async function saveNewItemForm(event) {
   } catch (idError) {
     return setModalError(newItemModal, idError.message);
   }
-  const item = {
+  const now = new Date().toISOString();
+  const item = stampLocalChange({
     ...data,
     ItemID: itemId,
     DatasetID: ITALY_DATASET_ID,
@@ -2324,11 +2357,10 @@ async function saveNewItemForm(event) {
     StartDate: data.DayDate,
     EndDate: data.DayDate,
     LodgingDisplayMode: 'NORMAL',
-    SortOrder: Date.now(),
-    LastUpdatedAt: new Date().toISOString(),
-    SyncStatus: 'LOCAL_PENDING'
-  };
+    SortOrder: Date.now()
+  }, now);
   await addItem(item);
+  markLocalEntity('ITEM', item.ItemID);
   state.activeTab = item.PlanningStatus;
   state.activeView = 'home';
   state.openDayKey = item.DayDate;

@@ -18,6 +18,7 @@ import { getCurrentUser, getSupabaseClient } from './supabaseClient.js';
 
 const SYNC_INTERVAL_MS = 60000;
 const SYNC_DEBOUNCE_MS = 1200;
+const DIRTY_PROTECTION_MS = 5 * 60000;
 const SYNC_TABLES = ['tm3_trips', 'tm3_trip_days', 'tm3_items', 'tm3_settings', 'tm3_deletion_queue'];
 
 const state = {
@@ -34,9 +35,16 @@ let intervalId = null;
 let debounceId = null;
 let realtimeChannel = null;
 let onAppliedRemoteChanges = null;
+const localRecentlyChanged = new Map();
 
 export function getSyncState() {
   return { ...state };
+}
+
+export function recordLocalChange(entityType, entityId, changedAt = new Date().toISOString()) {
+  if (!entityType || !entityId) return;
+  localRecentlyChanged.set(entityKey(entityType, entityId), changedAt);
+  pruneRecentChanges();
 }
 
 export async function startCloudSync(options = {}) {
@@ -276,6 +284,7 @@ async function pullCollection(cloudRows, localById, options) {
     const tombstone = options.tombstones.get(tombstoneKey(options.entityType, id));
     if (tombstone && compareIso(getLocalTimestamp(tombstone), row.updated_at) >= 0) continue;
     const local = localById.get(id);
+    if (isRecentlyChanged(options.entityType, id, row.updated_at)) continue;
     if (local && compareIso(getLocalTimestamp(local), row.updated_at) >= 0) continue;
     await options.save({ ...payload, UpdatedAt: payload.UpdatedAt || row.updated_at, SyncStatus: 'SYNCED' });
     count += 1;
@@ -352,6 +361,24 @@ function buildTombstoneMap(rows) {
 
 function tombstoneKey(type, id) {
   return `${type}:${id}`;
+}
+
+function entityKey(type, id) {
+  return `${String(type || '').toUpperCase()}:${id}`;
+}
+
+function isRecentlyChanged(type, id, cloudTimestamp) {
+  pruneRecentChanges();
+  const localTimestamp = localRecentlyChanged.get(entityKey(type, id));
+  return Boolean(localTimestamp && compareIso(localTimestamp, cloudTimestamp) >= 0);
+}
+
+function pruneRecentChanges() {
+  const cutoff = Date.now() - DIRTY_PROTECTION_MS;
+  localRecentlyChanged.forEach((timestamp, key) => {
+    const time = Date.parse(timestamp || '');
+    if (Number.isNaN(time) || time < cutoff) localRecentlyChanged.delete(key);
+  });
 }
 
 function indexBy(rows, field) {

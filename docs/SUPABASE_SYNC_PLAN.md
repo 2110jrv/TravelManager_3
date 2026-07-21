@@ -70,6 +70,8 @@ Every pushed cloud row includes the authenticated `user_id`, the local record as
 
 Conflict handling is last-write-wins. Cloud `updated_at` is authoritative for cloud rows. Local records use `UpdatedAt`, `updatedAt`, `UpdatedOn`, `ModifiedAt`, `LastUpdatedAt`, or deletion timestamps where available. If cloud is newer, the cloud payload is written into IndexedDB. If local is newer or the cloud row is missing, the local record is pushed. If timestamps are equal, sync does nothing.
 
+Local edit protection is active for status toggles, item edits, trip/day edits, deletion tombstones, Data Manager saves, imports, and backup restores. Local mutation paths stamp `UpdatedAt`, `ModifiedAt`, and `updatedAt`, increment `Version`, and register the changed entity in memory for a short protection window. A queued sync pushes local changes before pulling, and pull/realtime-triggered sync skips older cloud rows when the local timestamp or recent-change marker is newer. This prevents stale Supabase payloads from reverting a fresh browser edit.
+
 Deletion handling is conservative. Local deletion queue rows are pushed to Supabase, cloud deletion queue rows are pulled locally, and tombstones can prevent older entities from being resurrected. Sync v1 does not perform destructive bulk deletes and does not clear IndexedDB.
 
 When offline, local edits continue and sync state becomes offline or pending. When the browser returns online, sync resumes automatically. Signing out stops cloud sync but does not delete IndexedDB data.
