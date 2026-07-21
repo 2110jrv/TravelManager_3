@@ -1,4 +1,4 @@
-const CACHE_NAME = 'travelmanager3-cache-v6';
+const CACHE_NAME = 'travelmanager3-cache-v7';
 const TILE_CACHE_NAME = 'travelmanager3-tiles-v1';
 const ASSETS = [
   './',
@@ -15,6 +15,7 @@ const ASSETS = [
   './vendor/leaflet/images/marker-shadow.png',
   './src/app.js',
   './src/app2.js',
+  './src/supabaseClient.js',
   './src/db.js',
   './src/ui.js',
   './src/italyAdapter.js',

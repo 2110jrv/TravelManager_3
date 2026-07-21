@@ -41,3 +41,15 @@ The SQL creates the sync tables, indexes, RLS policies, update trigger function,
 ## Secret handling
 
 Do not put a `service_role` key, database password, or secret key in GitHub Pages, JavaScript bundles, IndexedDB, localStorage, or documentation. Browser code should only use the Supabase project URL and a publishable browser-safe key with Auth and RLS enabled.
+
+## Auth client phase
+
+The auth client phase is complete. The static app now has `public/src/supabaseClient.js`, which creates the browser Supabase client with the project URL and publishable key only. It exposes helpers for session lookup, current user lookup, email/password sign up, email/password sign in, sign out, and auth state changes.
+
+Configuracion includes a "Sincronizacion en la nube" section. Signed-out users see local-only status, email/password fields, "Crear cuenta", and "Iniciar sesion". Signed-in users see their email, "Cerrar sesion", and the placeholder "Sync automatico se activara en el proximo paso."
+
+Local-only mode remains the default when no user is signed in or the network is unavailable. IndexedDB continues to hold the active trip, itinerary edits, backup/restore data, and Data Manager changes. Signing out only ends the Supabase session; it does not delete local IndexedDB data.
+
+Signed-in mode currently confirms identity and preserves the existing local IndexedDB behavior. This phase does not upload, download, merge, or delete Supabase sync rows.
+
+The next phase will implement actual data sync: mapping IndexedDB records into the Supabase sync tables, pulling newer rows, pushing local pending changes, honoring deletion records, and resolving first-version conflicts with last `updated_at` wins.

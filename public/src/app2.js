@@ -1,5 +1,6 @@
 import { addItem, deleteTrip, deleteTripDay, enqueueDeletion, getActiveTripId, getAllItems, getAllTrips, getOrCreateDeviceId, getSetting, getTrip, getTripDays, migrateLegacyTravelData, openDatabase, replaceDatasetItems, replaceItemsByPredicate, saveTrip, saveTripDay, selectDefaultTrip, setActiveTripId, setSetting, updateItem } from './db.js';
 import { ITALY_DATASET_ID, ITALY_DATASET_MARK_KEY, ITALY_DAYS_KEY, getPlanningStatus, loadItalyItinerary, rebuildMultidayOccurrences } from './italyAdapter.js';
+import { getCurrentSession, onAuthStateChange, signInWithEmailPassword, signOut, signUpWithEmailPassword } from './supabaseClient.js';
 
 const state = {
   activeView: 'home',
@@ -22,7 +23,11 @@ const state = {
   mapFilters: { planning: 'ALL', type: 'ALL', city: 'ALL', date: 'ALL' },
   map: null,
   mapLayer: null,
-  tileLayer: null
+  tileLayer: null,
+  authUser: null,
+  authLoading: true,
+  authMessage: '',
+  authError: ''
 };
 
 const els = {
@@ -72,9 +77,33 @@ async function initApp() {
   await migratePlanningStatus();
   await migrateLocalMultidayOccurrences();
   bindEvents();
+  await initAuth();
   await loadState();
   updateOnlineStatus();
   await render();
+}
+
+async function initAuth() {
+  try {
+    const session = await getCurrentSession();
+    state.authUser = session?.user || null;
+    state.authError = '';
+    state.authMessage = state.authUser ? 'Sesión activa. Sync automático se activará en el próximo paso.' : '';
+    await onAuthStateChange((_event, session) => {
+      state.authUser = session?.user || null;
+      state.authLoading = false;
+      state.authError = '';
+      state.authMessage = state.authUser ? 'Sesión activa. Sync automático se activará en el próximo paso.' : 'Modo local activo. La nube requiere iniciar sesión.';
+      updateSyncStatus();
+      if (state.activeView === 'settings') renderSettings();
+    });
+  } catch (error) {
+    state.authError = getAuthErrorMessage(error);
+    state.authMessage = 'Modo local activo. La nube requiere iniciar sesión.';
+  } finally {
+    state.authLoading = false;
+    updateSyncStatus();
+  }
 }
 
 function bindEvents() {
@@ -839,6 +868,15 @@ async function renderSettings() {
   const audit = buildTripAudit();
   const auditCount = audit.errors.length + audit.warnings.length + audit.info.length;
   els.settingsSection.innerHTML = `
+    <section class="settings-panel cloud-sync-panel">
+      <h2>Sincronización en la nube</h2>
+      <div class="cloud-status">
+        <span>Supabase</span>
+        <strong>${escapeHtml(getAuthStatusLabel())}</strong>
+      </div>
+      ${renderAuthPanel()}
+      <p id="authMessage" class="settings-message${state.authError ? ' data-error' : ''}">${escapeHtml(state.authError || state.authMessage || getAuthDefaultMessage())}</p>
+    </section>
     <section class="settings-panel">
       <h2>Viaje activo</h2>
       <label>Seleccionar viaje<select id="activeTripSelect">${state.trips.map(row => `<option value="${escapeHtml(row.TripID)}"${row.TripID === state.activeTripId ? ' selected' : ''}>${escapeHtml(getTripOptionLabel(row))}</option>`).join('')}</select></label>
@@ -914,9 +952,113 @@ async function renderSettings() {
   `;
   bindTripManager();
   bindDayManager();
+  bindAuthManager();
   bindBackupManager();
   bindDataManager();
   bindAuditManager();
+}
+
+function renderAuthPanel() {
+  if (state.authLoading) {
+    return '<p class="placeholder-note">Revisando sesión...</p>';
+  }
+  if (state.authUser) {
+    return `
+      <div class="signed-in-panel">
+        <span>Usuario</span>
+        <strong>${escapeHtml(state.authUser.email || 'Sesión activa')}</strong>
+        <p>Sync automático se activará en el próximo paso.</p>
+        <button id="authSignOutButton" class="secondary-button" type="button">Cerrar sesión</button>
+      </div>
+    `;
+  }
+  return `
+    <form id="authForm" class="auth-form" novalidate>
+      <label>Email<input id="authEmail" name="email" type="email" autocomplete="email" required /></label>
+      <label>Contraseña<input id="authPassword" name="password" type="password" autocomplete="current-password" required /></label>
+      <div class="settings-actions">
+        <button id="authSignUpButton" class="secondary-button" type="button">Crear cuenta</button>
+        <button id="authSignInButton" class="primary-button" type="submit">Iniciar sesión</button>
+      </div>
+    </form>
+  `;
+}
+
+function getAuthStatusLabel() {
+  if (state.authLoading) return 'Revisando sesión';
+  if (state.authUser) return 'Conectado';
+  if (state.authError) return 'Modo local';
+  return 'Modo local';
+}
+
+function getAuthDefaultMessage() {
+  if (state.authUser) return 'Sesión activa. Sync automático se activará en el próximo paso.';
+  return 'La app sigue funcionando en modo local. La sincronización en la nube requiere iniciar sesión.';
+}
+
+function bindAuthManager() {
+  document.getElementById('authForm')?.addEventListener('submit', event => handleAuthSubmit(event, 'sign-in'));
+  document.getElementById('authSignUpButton')?.addEventListener('click', event => handleAuthSubmit(event, 'sign-up'));
+  document.getElementById('authSignOutButton')?.addEventListener('click', handleSignOut);
+}
+
+async function handleAuthSubmit(event, mode) {
+  event.preventDefault();
+  const form = document.getElementById('authForm');
+  const email = form?.elements.email.value.trim();
+  const password = form?.elements.password.value;
+  if (!email || !password) return setAuthMessage('Ingresa email y contraseña.', true);
+  if (password.length < 6) return setAuthMessage('La contraseña debe tener al menos 6 caracteres.', true);
+  setAuthMessage(mode === 'sign-up' ? 'Creando cuenta...' : 'Iniciando sesión...');
+  try {
+    const result = mode === 'sign-up'
+      ? await signUpWithEmailPassword(email, password)
+      : await signInWithEmailPassword(email, password);
+    if (result.error) throw result.error;
+    state.authUser = result.data.user || result.data.session?.user || state.authUser;
+    state.authError = '';
+    state.authMessage = mode === 'sign-up'
+      ? 'Cuenta creada. Revisa tu email si Supabase solicita confirmación.'
+      : 'Sesión iniciada. Sync automático se activará en el próximo paso.';
+    updateSyncStatus();
+    await renderSettings();
+  } catch (error) {
+    setAuthMessage(getAuthErrorMessage(error), true);
+  }
+}
+
+async function handleSignOut() {
+  setAuthMessage('Cerrando sesión...');
+  try {
+    const result = await signOut();
+    if (result.error) throw result.error;
+    state.authUser = null;
+    state.authError = '';
+    state.authMessage = 'Sesión cerrada. Tus datos locales de IndexedDB se conservan.';
+    updateSyncStatus();
+    await renderSettings();
+  } catch (error) {
+    setAuthMessage(getAuthErrorMessage(error), true);
+  }
+}
+
+function setAuthMessage(message, isError = false) {
+  state.authError = isError ? message : '';
+  state.authMessage = isError ? '' : message;
+  const el = document.getElementById('authMessage');
+  if (!el) return;
+  el.textContent = message;
+  el.classList.toggle('data-error', isError);
+}
+
+function getAuthErrorMessage(error) {
+  const message = String(error?.message || error || '').toLowerCase();
+  if (message.includes('failed to fetch') || message.includes('network')) return 'No se pudo conectar con Supabase. La app sigue en modo local.';
+  if (message.includes('invalid login') || message.includes('invalid credentials')) return 'Email o contraseña incorrectos.';
+  if (message.includes('email not confirmed')) return 'Confirma tu email antes de iniciar sesión.';
+  if (message.includes('already registered') || message.includes('already exists')) return 'Ese email ya tiene una cuenta. Intenta iniciar sesión.';
+  if (message.includes('password')) return 'Revisa la contraseña e intenta de nuevo.';
+  return 'No se pudo completar la autenticación. Intenta de nuevo.';
 }
 
 function getTripOptionLabel(trip) {
@@ -2559,6 +2701,16 @@ function isValidDate(value) {
 
 function updateOnlineStatus() {
   els.statusOnline.textContent = navigator.onLine ? 'Online' : 'Offline';
+  updateSyncStatus();
+}
+
+function updateSyncStatus() {
+  if (!els.statusSync) return;
+  if (state.authUser) {
+    els.statusSync.textContent = 'Nube conectada; sync pendiente';
+    return;
+  }
+  els.statusSync.textContent = 'Modo local; inicia sesión para nube';
 }
 
 function closeMenu() {

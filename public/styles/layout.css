@@ -757,6 +757,47 @@ h1 {
   gap: 14px;
 }
 
+.cloud-sync-panel {
+  margin-bottom: 14px;
+}
+
+.cloud-status,
+.signed-in-panel {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.cloud-status {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.cloud-status span,
+.signed-in-panel span {
+  color: #64748b;
+  font-weight: 800;
+}
+
+.cloud-status strong,
+.signed-in-panel strong {
+  color: #111827;
+}
+
+.signed-in-panel p {
+  margin: 0;
+  color: #64748b;
+  font-weight: 700;
+}
+
+.auth-form {
+  display: grid;
+  gap: 10px;
+}
+
 .inline-editor {
   display: grid;
   gap: 10px;
@@ -782,6 +823,7 @@ h1 {
 .inline-editor input,
 .inline-editor select,
 .inline-editor textarea,
+.auth-form input,
 .settings-panel select {
   width: 100%;
   border: 1px solid #cbd5e1;
