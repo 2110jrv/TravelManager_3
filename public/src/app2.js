@@ -13,6 +13,8 @@ const state = {
   items: [],
   openDayKey: null,
   openItemId: null,
+  openItemFullId: null,
+  openDayDetailsKey: null,
   editingItem: null,
   editInitialValue: '',
   newInitialValue: '',
@@ -251,6 +253,7 @@ function bindEvents() {
       if (!canView(button.dataset.view)) return;
       state.activeView = button.dataset.view;
       if (state.activeView === 'calendar') ensureCalendarMonth();
+      state.openItemFullId = null;
       persistViewState();
       closeMenu();
       render();
@@ -267,6 +270,7 @@ function bindEvents() {
       if (shouldShowOnlyConfirmed() && button.dataset.tab !== 'CONFIRMED') return;
       state.activeTab = button.dataset.tab;
       state.openItemId = null;
+      state.openItemFullId = null;
       render();
     });
   });
@@ -342,6 +346,8 @@ async function switchAccessRole() {
   state.accessRole = '';
   state.openDayKey = null;
   state.openItemId = null;
+  state.openItemFullId = null;
+  state.openDayDetailsKey = null;
   renderAccessGate();
   updateOnlineStatus();
 }
@@ -367,6 +373,7 @@ async function refreshTripsAndDays(fallbackDays = []) {
 function toAppDays(tripDays, fallback = []) {
   const rows = tripDays.length ? tripDays : fallback;
   return rows.map(day => ({
+    ...day,
     DayID: day.DayID || day.TripDayID,
     TripDayID: day.TripDayID || day.DayID,
     TripID: day.TripID || 'TRIP_ITALY_2026',
@@ -557,10 +564,12 @@ function renderDays(items) {
   for (const day of state.days) {
     const dayItems = getHomeDayItems(items, day.DayDate).sort(compareItems);
     const total = dayItems.reduce((sum, item) => sum + getFinancialAmount(item), 0);
+    const isOpen = state.openDayKey === day.DayDate;
+    const hasDayDetails = getDayDetailEntries(day).length > 0;
+    const showDayDetails = isOpen && hasDayDetails && state.openDayDetailsKey === day.DayDate;
     const summaryText = canSeePrices()
       ? `${state.activeTab === 'CONFIRMED' ? 'Total confirmado' : 'Total propuesto'}: ${formatMoney(total)}`
       : `${dayItems.length} items confirmados`;
-    const isOpen = state.openDayKey === day.DayDate;
     const card = document.createElement('article');
     card.className = 'day-card';
     card.dataset.dayDate = day.DayDate;
@@ -568,18 +577,25 @@ function renderDays(items) {
       <button class="day-summary" type="button" aria-expanded="${isOpen}">
         <span class="day-summary-text">
           <strong>${escapeHtml(formatDayTitle(day))}</strong>
-          <span>${escapeHtml(day.City || 'Sin ciudad')} • ${state.activeTab === 'CONFIRMED' ? 'Total confirmado' : 'Total propuesto'}: ${formatMoney(total)}</span>
+          <span>${escapeHtml([day.City || 'Sin ciudad', summaryText].filter(Boolean).join(' - '))}</span>
         </span>
         <span class="expand-indicator">${isOpen ? '▾' : '▸'}</span>
       </button>
+      ${showDayDetails ? renderDayDetails(day) : ''}
       <div class="day-items${isOpen ? '' : ' hidden'}"></div>
     `;
-    if (!canSeePrices()) {
-      card.querySelector('.day-summary-text span').textContent = `${day.City || 'Sin ciudad'} - ${summaryText}`;
-    }
     card.querySelector('.day-summary').addEventListener('click', () => {
-      state.openDayKey = isOpen ? null : day.DayDate;
+      if (!isOpen) {
+        state.openDayKey = day.DayDate;
+        state.openDayDetailsKey = null;
+      } else if (hasDayDetails) {
+        state.openDayDetailsKey = showDayDetails ? null : day.DayDate;
+      } else {
+        state.openDayKey = null;
+        state.openDayDetailsKey = null;
+      }
       state.openItemId = null;
+      state.openItemFullId = null;
       renderHome();
     });
     const details = card.querySelector('.day-items');
@@ -908,6 +924,8 @@ async function openMapItemInHome(item) {
   state.activeTab = getItemPlanningStatus(target);
   state.openDayKey = target.DayDate || target.StartDate || targetDate;
   state.openItemId = target.ItemID;
+  state.openItemFullId = null;
+  state.openDayDetailsKey = null;
   state.activeView = 'home';
   persistViewState();
   await render();
@@ -957,6 +975,8 @@ async function openCalendarDate(date) {
   state.activeTab = counts.confirmed > 0 ? 'CONFIRMED' : 'PROPOSED';
   state.openDayKey = date;
   state.openItemId = null;
+  state.openItemFullId = null;
+  state.openDayDetailsKey = null;
   state.activeView = 'home';
   state.calendarMessage = '';
   persistViewState();
@@ -968,6 +988,7 @@ async function openCalendarDate(date) {
 
 function renderItem(item) {
   const isOpen = state.openItemId === item.ItemID;
+  const isFullOpen = isOpen && state.openItemFullId === item.ItemID;
   const completed = isItemCompleted(item);
   const itemEl = document.createElement('article');
   const categoryVisual = getHomeCategoryVisual(item);
@@ -995,16 +1016,13 @@ function renderItem(item) {
         ${completedBadge}
         ${priceChip}
         ${item.GoogleMapsUrl || item.GooglePlusCode ? `<a class="map-button" target="_blank" rel="noopener" href="${escapeHtml(getMapUrl(item))}">${escapeHtml(item.GooglePlusCode || 'Mapas')}</a>` : ''}
-        <span class="planning-toggle" role="group" aria-label="Estado de planificación">
-          <button type="button" data-status="CONFIRMED" aria-pressed="${getItemPlanningStatus(item) === 'CONFIRMED'}" class="${getItemPlanningStatus(item) === 'CONFIRMED' ? 'active' : ''}">Confirmado</button>
-          <button type="button" data-status="PROPOSED" aria-pressed="${getItemPlanningStatus(item) === 'PROPOSED'}" class="${getItemPlanningStatus(item) === 'PROPOSED' ? 'active' : ''}">Propuesto</button>
-        </span>
+        ${planningToggle}
         ${completionButton}
       </span>
       ${categoryIcon}
       ${completed ? '<span class="completed-watermark" aria-hidden="true">✓</span>' : ''}
     </div>
-    <div class="item-details${isOpen ? '' : ' hidden'}">${renderDetails(item)}</div>
+    <div class="item-details${isOpen ? '' : ' hidden'}" role="button" tabindex="${isOpen ? '0' : '-1'}" aria-expanded="${isFullOpen}">${renderDetails(item, isFullOpen)}</div>
   `;
 
   const summary = itemEl.querySelector('.item-summary');
@@ -1033,14 +1051,30 @@ function renderItem(item) {
       return;
     }
     if (event.target.closest('a, .planning-toggle, .completion-toggle')) return;
-    state.openItemId = isOpen ? null : item.ItemID;
+    if (!isOpen) {
+      state.openItemId = item.ItemID;
+      state.openItemFullId = null;
+    } else if (hasFullItemDetails(item)) {
+      state.openItemFullId = isFullOpen ? null : item.ItemID;
+    } else {
+      state.openItemId = null;
+      state.openItemFullId = null;
+    }
     renderHome();
   });
   summary.addEventListener('keydown', event => {
     if (event.key !== 'Enter' && event.key !== ' ') return;
     if (event.target.closest('a, .planning-toggle, .completion-toggle')) return;
     event.preventDefault();
-    state.openItemId = isOpen ? null : item.ItemID;
+    if (!isOpen) {
+      state.openItemId = item.ItemID;
+      state.openItemFullId = null;
+    } else if (hasFullItemDetails(item)) {
+      state.openItemFullId = isFullOpen ? null : item.ItemID;
+    } else {
+      state.openItemId = null;
+      state.openItemFullId = null;
+    }
     renderHome();
   });
   itemEl.querySelectorAll('.planning-toggle button').forEach(button => {
@@ -1061,6 +1095,19 @@ function renderItem(item) {
     event.stopPropagation();
     toggleItemCompletion(item);
   });
+  itemEl.querySelector('.item-details')?.addEventListener('click', event => {
+    if (event.target.closest('a, button')) return;
+    if (!hasFullItemDetails(item)) return;
+    state.openItemFullId = isFullOpen ? null : item.ItemID;
+    renderHome();
+  });
+  itemEl.querySelector('.item-details')?.addEventListener('keydown', event => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    if (!hasFullItemDetails(item)) return;
+    event.preventDefault();
+    state.openItemFullId = isFullOpen ? null : item.ItemID;
+    renderHome();
+  });
   itemEl.querySelectorAll('a').forEach(link => link.addEventListener('click', event => event.stopPropagation()));
   return itemEl;
 }
@@ -1074,6 +1121,7 @@ async function updatePlanningStatus(item, PlanningStatus) {
   state.activeTab = PlanningStatus;
   state.openDayKey = updated.DayDate || updated.StartDate || null;
   state.openItemId = updated.ItemID;
+  state.openItemFullId = null;
   els.statusSync.textContent = 'Cambios locales pendientes';
   notifyLocalChange('planning-status');
   await loadState();
@@ -1096,6 +1144,7 @@ async function toggleItemCompletion(item) {
   markLocalEntity('ITEM', updated.ItemID);
   state.openDayKey = getEffectiveAgendaDate(updated) || updated.DayDate || updated.StartDate || null;
   state.openItemId = updated.ItemID;
+  state.openItemFullId = null;
   els.statusSync.textContent = 'Cambios locales pendientes';
   notifyLocalChange('item-completion');
   await loadState();
@@ -1103,6 +1152,10 @@ async function toggleItemCompletion(item) {
 }
 
 async function renderBudget() {
+  if (!canSeePrices()) {
+    els.budgetSection.innerHTML = '<p class="placeholder-note">Presupuesto no disponible para este rol.</p>';
+    return;
+  }
   const confirmed = state.items.filter(item => getItemPlanningStatus(item) === 'CONFIRMED');
   const uniqueConfirmed = uniqueFinancialItems(confirmed);
   const proposed = uniqueFinancialItems(state.items.filter(item => getItemPlanningStatus(item) === 'PROPOSED'));
@@ -3018,11 +3071,147 @@ function getDisplayTitle(item) {
   return item.Title || 'Hospedaje';
 }
 
-function renderDetails(item) {
-  return [item.Description, item.Notes, item.GooglePlusCode ? `Plus Code: ${item.GooglePlusCode}` : '']
-    .filter(Boolean)
-    .map(value => `<p>${escapeHtml(value)}</p>`)
-    .join('');
+function renderDetails(item, isFullOpen = false) {
+  const summary = [
+    item.Description,
+    item.Notes,
+    item.GooglePlusCode ? `Plus Code: ${item.GooglePlusCode}` : ''
+  ].filter(Boolean);
+  const fullEntries = getFullItemDetailEntries(item);
+  const summaryHtml = summary.length
+    ? `<div class="detail-section-label">Resumen</div>${summary.map(value => `<p>${escapeHtml(value)}</p>`).join('')}`
+    : '';
+  const fullHtml = fullEntries.length
+    ? `<div class="detail-section-label">Datos completos</div>${isFullOpen ? renderDetailGrid(fullEntries) : '<p class="detail-expand-hint">Toca para ver datos completos.</p>'}`
+    : '';
+  return summaryHtml || fullHtml ? `${summaryHtml}${fullHtml}` : '<p class="placeholder-note">Sin detalles adicionales.</p>';
+}
+
+function hasFullItemDetails(item) {
+  return getFullItemDetailEntries(item).length > 0;
+}
+
+function renderDayDetails(day) {
+  const entries = getDayDetailEntries(day);
+  if (!entries.length) return '';
+  return `<div class="day-details"><div class="detail-section-label">Detalles del día</div>${renderDetailGrid(entries)}</div>`;
+}
+
+function renderDetailGrid(entries) {
+  return `<dl class="detail-grid">${entries.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${value}</dd></div>`).join('')}</dl>`;
+}
+
+function getFullItemDetailEntries(item) {
+  const priority = [
+    'ItemID', 'SourceItemID', 'Title', 'Category', 'ItemType', 'PlanningStatus', 'Completed', 'CompletedAt',
+    'StartDate', 'StartTime', 'EndDate', 'EndTime', 'DayDate', 'City', 'Location', 'LocationLabel',
+    'Address', 'LocationAddress', 'Latitude', 'Longitude', 'GooglePlusCode', 'Website', 'Url', 'URL',
+    'Phone', 'PhoneNumber', 'Email', 'Provider', 'Notes', 'Description', 'Reservation', 'ReservationNumber',
+    'Booking', 'BookingCode', 'ConfirmationNumber', 'Transportation', 'Transport', 'FlightNumber',
+    'Airline', 'TrainNumber', 'Lodging', 'Hotel', 'CheckIn', 'CheckOut'
+  ];
+  const entries = [];
+  const used = new Set();
+  priority.forEach(key => addDetailEntry(entries, used, item, key, { entity: 'item' }));
+  Object.keys(item).sort((a, b) => a.localeCompare(b)).forEach(key => addDetailEntry(entries, used, item, key, { entity: 'item' }));
+  return entries;
+}
+
+function getDayDetailEntries(day) {
+  const richKeys = ['Notes', 'DayNotes', 'Description', 'Route', 'From', 'To', 'Lodging', 'Hotel', 'Transport', 'Transportation', 'DayImageUrl'];
+  const hasRichValue = richKeys.some(key => hasMeaningfulDetailValue(day[key]))
+    || Object.keys(day).some(key => !isNoisyDetailKey(key) && !isBasicDayDetailKey(key) && hasMeaningfulDetailValue(day[key]));
+  if (!hasRichValue) return [];
+  const priority = ['DayOrder', 'DayLabel', 'Date', 'DayDate', 'Title', 'City', 'PrimaryCity', 'Route', 'From', 'To', 'Notes', 'DayNotes', 'Description', 'Lodging', 'Hotel', 'Transport', 'Transportation', 'DayImageUrl'];
+  const entries = [];
+  const used = new Set();
+  priority.forEach(key => addDetailEntry(entries, used, day, key, { entity: 'day' }));
+  Object.keys(day).sort((a, b) => a.localeCompare(b)).forEach(key => addDetailEntry(entries, used, day, key, { entity: 'day' }));
+  return entries;
+}
+
+function addDetailEntry(entries, used, record, key, options = {}) {
+  if (used.has(key) || isNoisyDetailKey(key) || (options.entity === 'day' && isFinancialDetailKey(key))) return;
+  if (!canSeePrices() && isFinancialDetailKey(key)) return;
+  if (key === 'SourceItemID' && record.SourceItemID === record.ItemID) return;
+  if (key === 'Longitude' && hasMeaningfulDetailValue(record.Latitude)) return;
+  const value = record[key];
+  if (!hasMeaningfulDetailValue(value)) return;
+  const rendered = renderDetailValue(key, value, record);
+  if (!rendered) return;
+  used.add(key);
+  entries.push([getDetailLabel(key), rendered]);
+}
+
+function hasMeaningfulDetailValue(value) {
+  if (value === undefined || value === null || value === '') return false;
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === 'object') return Object.keys(value).length > 0;
+  return true;
+}
+
+function renderDetailValue(key, value, record) {
+  if (key === 'CompletedAt') return value ? escapeHtml(formatDateTime(value)) : '';
+  if (key === 'Completed') return escapeHtml(isItemCompleted(record) ? 'Sí' : 'No');
+  if (key === 'PlanningStatus') return escapeHtml(getItemPlanningStatus(record));
+  if (key === 'Latitude' || key === 'Longitude') return coordinateLink(record);
+  if (key === 'GooglePlusCode') return mapSearchLink(value);
+  if (isAddressDetailKey(key)) return mapSearchLink(value);
+  if (isUrlDetailKey(key)) return urlLink(value);
+  if (isEmailDetailKey(key)) return emailLink(value);
+  if (isPhoneDetailKey(key)) return phoneLink(value);
+  if (typeof value === 'object') return `<span class="notes">${escapeHtml(JSON.stringify(value, null, 2))}</span>`;
+  return `<span class="notes">${escapeHtml(String(value))}</span>`;
+}
+
+function getDetailLabel(key) {
+  return {
+    DayOrder: 'Día',
+    DayLabel: 'Etiqueta',
+    DayDate: 'Fecha del día',
+    ItemType: 'Tipo',
+    LocationLabel: 'Lugar',
+    LocationAddress: 'Dirección',
+    GooglePlusCode: 'Plus Code',
+    PhoneNumber: 'Teléfono',
+    ReservationNumber: 'Reserva',
+    BookingCode: 'Código de reserva',
+    ConfirmationNumber: 'Confirmación'
+  }[key] || key.replace(/([a-z])([A-Z])/g, '$1 $2');
+}
+
+function isNoisyDetailKey(key) {
+  return new Set([
+    'DatasetID', 'TripID', 'DayID', 'TripDayID', 'Version', 'SyncStatus', 'DeviceId', 'device_id',
+    'UpdatedAt', 'ModifiedAt', 'updatedAt', 'LastUpdatedAt', 'CreatedAt', 'createdAt', 'DeletedAt',
+    'deletedAt', 'deleted_at', 'Tombstone', 'IsDeleted', 'SortOrder', 'LodgingDisplayMode',
+    'OccurrenceRole', 'IncludedLabel', 'CompletedAgendaDate', 'CompletedAgendaTime', 'IsMultiDay',
+    'CompletedByRole', 'IsAllDay', 'Status'
+  ]).has(key);
+}
+
+function isBasicDayDetailKey(key) {
+  return new Set(['DayID', 'TripDayID', 'TripID', 'DayOrder', 'Date', 'DayDate', 'DayLabel', 'Title', 'City', 'PrimaryCity', 'CountryCode', 'PrimaryCountryCode']).has(key);
+}
+
+function isFinancialDetailKey(key) {
+  return /amount|price|cost|budget|paid|payment|total|pending|deposit|balance|fee|usd|currency/i.test(key);
+}
+
+function isAddressDetailKey(key) {
+  return /address|location|place|pluscode/i.test(key) && !isUrlDetailKey(key);
+}
+
+function isUrlDetailKey(key) {
+  return /url|website|link|maps/i.test(key);
+}
+
+function isEmailDetailKey(key) {
+  return /email/i.test(key);
+}
+
+function isPhoneDetailKey(key) {
+  return /phone|telefono|teléfono|mobile|cell/i.test(key);
 }
 
 function getCategoryLabel(type = 'OTHER') {

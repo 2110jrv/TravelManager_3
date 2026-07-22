@@ -350,6 +350,14 @@ h1 {
   padding: 0 10px 10px;
 }
 
+.day-details {
+  margin: 0 10px 10px;
+  padding: 12px;
+  border-top: 1px solid #e2e8f0;
+  background: #f8fafc;
+  color: #334155;
+}
+
 .agenda-item {
   border: 1px solid #e2e8f0;
   border-radius: 8px;
@@ -1497,15 +1505,70 @@ h1 {
   background: rgba(255, 255, 255, 0.52);
   color: #334155;
   padding: 10px 12px 12px 106px;
+  cursor: pointer;
 }
 
 .item-details p {
   margin: 0 0 6px;
 }
 
+.detail-section-label {
+  margin: 0 0 7px;
+  color: #64748b;
+  font-size: .72rem;
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.detail-expand-hint {
+  color: #475569;
+  font-size: .86rem;
+}
+
+.detail-grid {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+}
+
+.detail-grid div {
+  display: grid;
+  grid-template-columns: minmax(96px, .45fr) minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+
+.detail-grid dt {
+  color: #64748b;
+  font-size: .78rem;
+  font-weight: 800;
+}
+
+.detail-grid dd {
+  min-width: 0;
+  margin: 0;
+  color: #1f2937;
+  overflow-wrap: anywhere;
+}
+
+.detail-grid a {
+  color: #0f766e;
+  font-weight: 800;
+}
+
+.detail-grid .notes {
+  white-space: pre-wrap;
+}
+
 @media (max-width: 640px) {
   .item-details {
     padding-left: 88px;
+  }
+
+  .detail-grid div {
+    grid-template-columns: 1fr;
+    gap: 2px;
   }
 }
 

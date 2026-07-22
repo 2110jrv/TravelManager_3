@@ -117,3 +117,5 @@ Item completion is stored directly on item payloads as `Completed`, `CompletedAt
 Completed items keep their planned `StartDate`, `StartTime`, `EndDate`, and `EndTime`. For visible agenda ordering only, a completed item uses `CompletedAt` as its effective date/time. Budget calculations continue to use planning/payment fields, not completion state.
 
 Configuracion now includes an admin-only "Descargar reporte PDF completo" action. It opens a print-ready Letter portrait HTML report for the active trip, grouped by day and ordered by the same effective agenda time rule. The browser print dialog can save the report as PDF without a server or extra dependency.
+
+Agenda detail expansion is also local-first. Inicio keeps collapsed item cards as level 0, opens a readable summary as level 1, and can expand "Datos completos" as level 2 for meaningful payload fields. Day headers open the item list first; when already open, they toggle "Detalles del dia" if day-level notes or context fields exist. Family mode still hides every money, price, payment, paid/pending, budget, total, fee, USD, and currency field in collapsed and expanded agenda UI.
