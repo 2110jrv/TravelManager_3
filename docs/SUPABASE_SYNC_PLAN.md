@@ -99,3 +99,21 @@ Add these Supabase Auth redirect URLs in the Supabase Dashboard:
 - `https://2110jrv.github.io/TravelManager_3/**`
 
 Sync remains local-first and automatic. IndexedDB is still the immediate source for the UI, local edits continue offline, and cloud sync resumes when the browser is online and signed in. Manual backup/export is still recommended before travel or before large imports.
+
+## Access modes, completion, and PDF report
+
+The app now opens behind a local PIN screen before trip data, navigation, agenda, map, budget, or settings are shown. The PIN selects a local UI role stored in `localStorage`: family, traveler, or admin. Switching the app role only clears the local UI role; it does not sign out of Supabase and does not delete IndexedDB data.
+
+These PIN roles are a convenience layer for shared device use, not strong security. Supabase Auth and RLS remain the real data protection model for cloud rows.
+
+Role behavior:
+
+- Family sees Inicio and Mapa only, confirmed items only, no proposed items, no budget/prices/payment summaries, and no edit/configuration controls.
+- Traveler sees Inicio, Calendario, and Mapa, with confirmed and proposed items, but no editing, Data Manager, dangerous actions, or Supabase settings.
+- Admin keeps the full app, including editing, planning status changes, backup/restore, Data Manager, completion controls, and report export.
+
+Item completion is stored directly on item payloads as `Completed`, `CompletedAt`, and `CompletedByRole`. Admin completion toggles stamp `UpdatedAt`, `ModifiedAt`, and `updatedAt`, increment `Version`, mark the item as locally changed, and queue cloud sync immediately. Because `tm3_items.payload` syncs the full item object, these completion fields travel across signed-in devices through the existing local-first sync flow.
+
+Completed items keep their planned `StartDate`, `StartTime`, `EndDate`, and `EndTime`. For visible agenda ordering only, a completed item uses `CompletedAt` as its effective date/time. Budget calculations continue to use planning/payment fields, not completion state.
+
+Configuracion now includes an admin-only "Descargar reporte PDF completo" action. It opens a print-ready Letter portrait HTML report for the active trip, grouped by day and ordered by the same effective agenda time rule. The browser print dialog can save the report as PDF without a server or extra dependency.

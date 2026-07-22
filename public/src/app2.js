@@ -29,12 +29,14 @@ const state = {
   authLoading: true,
   authMessage: '',
   authError: '',
-  sync: getSyncState()
+  sync: getSyncState(),
+  accessRole: ''
 };
 
 const els = {
   viewTitle: document.getElementById('viewTitle'),
   dayList: document.getElementById('dayList'),
+  statusRow: document.getElementById('statusRow'),
   statusOnline: document.getElementById('statusOnline'),
   statusSync: document.getElementById('statusSync'),
   menuButton: document.getElementById('menuButton'),
@@ -51,23 +53,51 @@ const els = {
 
 const editModal = createItemModal('editItemModal', 'Editar item', saveEditForm);
 const newItemModal = createItemModal('newItemModal', 'Nuevo item', saveNewItemForm);
-const DATA_COLUMNS = ['ItemID', 'StartDate', 'EndDate', 'StartTime', 'EndTime', 'ItemType', 'Title', 'City', 'AmountUSD', 'PlanningStatus', 'PaymentStatus', 'IsPaid', 'GooglePlusCode', 'GoogleMapsUrl', 'Notes'];
+const DATA_COLUMNS = ['ItemID', 'StartDate', 'EndDate', 'StartTime', 'EndTime', 'ItemType', 'Title', 'City', 'AmountUSD', 'PlanningStatus', 'PaymentStatus', 'IsPaid', 'Completed', 'CompletedAt', 'CompletedByRole', 'GooglePlusCode', 'GoogleMapsUrl', 'Notes'];
 const ITEM_TYPES = ['ACTIVITY', 'FLIGHT', 'FOOD', 'LODGING', 'TRANSPORT', 'OTHER'];
 const PLANNING_STATUSES = ['CONFIRMED', 'PROPOSED'];
 const PAYMENT_STATUSES = ['PAID', 'NOT_PAID', 'PARTIAL', 'RESERVED', 'ESTIMATED'];
 const SNAPSHOT_KEY = 'tm3.dataSnapshots';
 const VIEW_STATE_KEY = 'tm3.activeView';
 const CALENDAR_MONTH_KEY = 'tm3.calendarMonth';
+const ACCESS_ROLE_KEY = 'tm3.accessRole';
 const BACKUP_SCHEMA_VERSION = 1;
 const APP_VERSION = '0.1.0';
 const MULTIDAY_OCCURRENCE_MIGRATION_VERSION = '2026-07-10-v3-legacy-derived-cleanup';
 const ITEM_ID_PATTERN = /^ITEM_\d{3}$/;
 const ALLOWED_LEGACY_ITEM_IDS = new Set(['ITEM_121_B']);
+const ACCESS_PINS = {
+  family: '0000',
+  traveler: '1991',
+  admin: '1891'
+};
+const ACCESS_ROLES = {
+  family: { label: 'Familia', views: ['home', 'map'], confirmedOnly: true, prices: false, edit: false, complete: false, settings: false },
+  traveler: { label: 'Viajero', views: ['home', 'calendar', 'map'], confirmedOnly: false, prices: true, edit: false, complete: false, settings: false },
+  admin: { label: 'Admin', views: ['home', 'calendar', 'map', 'budget', 'settings'], confirmedOnly: false, prices: true, edit: true, complete: true, settings: true }
+};
 
 await initApp();
 
 async function initApp() {
   registerServiceWorker();
+  bindEvents();
+  state.accessRole = getStoredAccessRole();
+  if (!state.accessRole) {
+    renderAccessGate();
+    updateOnlineStatus();
+    return;
+  }
+  await bootAppData();
+}
+
+async function bootAppData() {
+  if (state.booted) {
+    await loadState();
+    await render();
+    return;
+  }
+  state.booted = true;
   await openDatabase();
   await getOrCreateDeviceId();
   state.activeView = getStoredView();
@@ -79,7 +109,6 @@ async function initApp() {
   await migrateToItalyItineraryIfNeeded(itinerary);
   await migratePlanningStatus();
   await migrateLocalMultidayOccurrences();
-  bindEvents();
   await initAuth();
   await loadState();
   updateOnlineStatus();
@@ -161,6 +190,52 @@ function markLocalEntity(entityType, entityId) {
   if (entityType && entityId) recordLocalChange(entityType, entityId);
 }
 
+function getStoredAccessRole() {
+  const role = localStorage.getItem(ACCESS_ROLE_KEY);
+  return ACCESS_ROLES[role] ? role : '';
+}
+
+function getAccessConfig() {
+  return ACCESS_ROLES[state.accessRole] || ACCESS_ROLES.family;
+}
+
+function getAccessLabel() {
+  return state.accessRole ? getAccessConfig().label : 'Sin acceso';
+}
+
+function canView(view) {
+  return Boolean(state.accessRole && getAccessConfig().views.includes(view));
+}
+
+function canEditApp() {
+  return Boolean(getAccessConfig().edit);
+}
+
+function canToggleCompletion() {
+  return Boolean(getAccessConfig().complete);
+}
+
+function canSeePrices() {
+  return Boolean(getAccessConfig().prices);
+}
+
+function shouldShowOnlyConfirmed() {
+  return Boolean(getAccessConfig().confirmedOnly);
+}
+
+function requireAdminAction() {
+  return canEditApp();
+}
+
+function normalizeAccessView(view) {
+  return canView(view) ? view : 'home';
+}
+
+// PIN roles are a UI convenience for the shared travel app, not strong security.
+function resolveAccessRole(pin) {
+  return Object.entries(ACCESS_PINS).find(([, value]) => value === pin)?.[0] || '';
+}
+
 function bindEvents() {
   window.addEventListener('online', () => {
     updateOnlineStatus();
@@ -173,6 +248,7 @@ function bindEvents() {
   });
   els.menuOverlay.querySelectorAll('[data-view]').forEach(button => {
     button.addEventListener('click', () => {
+      if (!canView(button.dataset.view)) return;
       state.activeView = button.dataset.view;
       if (state.activeView === 'calendar') ensureCalendarMonth();
       persistViewState();
@@ -182,10 +258,13 @@ function bindEvents() {
   });
   els.tabs.forEach(button => {
     button.addEventListener('click', () => {
+      if (!state.accessRole) return;
       if (button.dataset.action === 'new-item') {
+        if (!canEditApp()) return;
         openNewItemModal();
         return;
       }
+      if (shouldShowOnlyConfirmed() && button.dataset.tab !== 'CONFIRMED') return;
       state.activeTab = button.dataset.tab;
       state.openItemId = null;
       render();
@@ -195,7 +274,9 @@ function bindEvents() {
     await loadState();
     await render();
   });
-  els.resetButton.addEventListener('click', restoreOriginalItinerary);
+  els.resetButton.addEventListener('click', () => {
+    if (requireAdminAction()) restoreOriginalItinerary();
+  });
   document.addEventListener('keydown', event => {
     if (event.key === 'Escape') {
       closeMenu();
@@ -205,9 +286,71 @@ function bindEvents() {
   });
 }
 
+function renderAccessGate(message = '') {
+  document.documentElement.dataset.accessRole = '';
+  document.documentElement.classList.add('app-readonly');
+  state.activeView = 'home';
+  closeMenu();
+  els.menuButton.classList.add('hidden');
+  els.menuOverlay.classList.add('hidden');
+  els.statusRow?.classList.add('hidden');
+  els.calendarSection.classList.add('hidden');
+  els.mapSection.classList.add('hidden');
+  els.budgetSection.classList.add('hidden');
+  els.settingsSection.classList.add('hidden');
+  els.homeSection.classList.remove('hidden');
+  els.viewTitle.textContent = 'Acceso';
+  const header = els.homeSection.querySelector('.section-header');
+  const tabs = els.homeSection.querySelector('.tabs');
+  header?.classList.add('hidden');
+  tabs?.classList.add('hidden');
+  els.dayList.innerHTML = `
+    <section class="access-gate" aria-labelledby="accessGateTitle">
+      <h2 id="accessGateTitle">TravelManager 3</h2>
+      <p>Ingresa el PIN de acceso para abrir el viaje.</p>
+      <form id="accessPinForm" class="access-form" novalidate>
+        <label>PIN<input id="accessPinInput" type="password" inputmode="numeric" autocomplete="current-password" maxlength="4" /></label>
+        <button class="primary-button" type="submit">Entrar</button>
+      </form>
+      <p id="accessMessage" class="settings-message${message ? ' data-error' : ''}">${escapeHtml(message)}</p>
+    </section>
+  `;
+  document.getElementById('accessPinForm')?.addEventListener('submit', handleAccessSubmit);
+  document.getElementById('accessPinInput')?.focus();
+}
+
+async function handleAccessSubmit(event) {
+  event.preventDefault();
+  const pin = document.getElementById('accessPinInput')?.value.trim() || '';
+  const role = resolveAccessRole(pin);
+  if (!role) {
+    renderAccessGate('PIN invalido.');
+    return;
+  }
+  localStorage.setItem(ACCESS_ROLE_KEY, role);
+  state.accessRole = role;
+  state.activeView = normalizeAccessView(getStoredView());
+  els.menuButton.classList.remove('hidden');
+  els.statusRow?.classList.remove('hidden');
+  els.homeSection.querySelector('.section-header')?.classList.remove('hidden');
+  els.homeSection.querySelector('.tabs')?.classList.remove('hidden');
+  await bootAppData();
+}
+
+async function switchAccessRole() {
+  localStorage.removeItem(ACCESS_ROLE_KEY);
+  state.accessRole = '';
+  state.openDayKey = null;
+  state.openItemId = null;
+  renderAccessGate();
+  updateOnlineStatus();
+}
+
 async function loadState() {
   state.allItems = await getAllItems();
-  state.items = state.allItems.filter(item => !state.activeTripId || item.TripID === state.activeTripId);
+  state.items = state.allItems
+    .filter(item => !state.activeTripId || item.TripID === state.activeTripId)
+    .filter(item => !shouldShowOnlyConfirmed() || getItemPlanningStatus(item) === 'CONFIRMED');
 }
 
 async function refreshTripsAndDays(fallbackDays = []) {
@@ -343,7 +486,8 @@ function isSampleItem(item) {
 
 function getStoredView() {
   const view = localStorage.getItem(VIEW_STATE_KEY);
-  return ['home', 'calendar', 'map', 'budget', 'settings'].includes(view) ? view : 'home';
+  if (!['home', 'calendar', 'map', 'budget', 'settings'].includes(view)) return 'home';
+  return normalizeAccessView(view);
 }
 
 function persistViewState() {
@@ -352,6 +496,13 @@ function persistViewState() {
 }
 
 async function render() {
+  if (!state.accessRole) {
+    renderAccessGate();
+    return;
+  }
+  state.activeView = normalizeAccessView(state.activeView);
+  if (shouldShowOnlyConfirmed()) state.activeTab = 'CONFIRMED';
+  syncAccessUi();
   els.homeSection.classList.toggle('hidden', state.activeView !== 'home');
   els.calendarSection.classList.toggle('hidden', state.activeView !== 'calendar');
   els.mapSection.classList.toggle('hidden', state.activeView !== 'map');
@@ -367,6 +518,34 @@ async function render() {
   if (state.activeView === 'settings') await renderSettings();
 }
 
+function syncAccessUi() {
+  document.documentElement.dataset.accessRole = state.accessRole;
+  document.documentElement.classList.toggle('app-readonly', !canEditApp());
+  els.menuButton.classList.remove('hidden');
+  els.statusRow?.classList.remove('hidden');
+  els.homeSection.querySelector('.section-header')?.classList.remove('hidden');
+  els.homeSection.querySelector('.tabs')?.classList.remove('hidden');
+  els.menuOverlay.querySelectorAll('[data-view]').forEach(button => {
+    button.classList.toggle('hidden', !canView(button.dataset.view));
+  });
+  els.tabs.forEach(button => {
+    const hide = (button.dataset.action === 'new-item' && !canEditApp())
+      || (button.dataset.tab === 'PROPOSED' && shouldShowOnlyConfirmed());
+    button.classList.toggle('hidden', hide);
+  });
+  els.resetButton.classList.toggle('hidden', !canEditApp());
+  let roleButton = document.getElementById('accessSwitchButton');
+  if (!roleButton) {
+    roleButton = document.createElement('button');
+    roleButton.id = 'accessSwitchButton';
+    roleButton.className = 'access-switch-button';
+    roleButton.type = 'button';
+    roleButton.addEventListener('click', switchAccessRole);
+    els.statusRow?.append(roleButton);
+  }
+  roleButton.textContent = `${getAccessLabel()} - cambiar PIN`;
+}
+
 function renderHome() {
   els.tabs.forEach(tab => tab.classList.toggle('active', tab.dataset.tab === state.activeTab && !tab.dataset.action));
   const visibleItems = state.items.filter(item => getItemPlanningStatus(item) === state.activeTab);
@@ -378,6 +557,9 @@ function renderDays(items) {
   for (const day of state.days) {
     const dayItems = getHomeDayItems(items, day.DayDate).sort(compareItems);
     const total = dayItems.reduce((sum, item) => sum + getFinancialAmount(item), 0);
+    const summaryText = canSeePrices()
+      ? `${state.activeTab === 'CONFIRMED' ? 'Total confirmado' : 'Total propuesto'}: ${formatMoney(total)}`
+      : `${dayItems.length} items confirmados`;
     const isOpen = state.openDayKey === day.DayDate;
     const card = document.createElement('article');
     card.className = 'day-card';
@@ -392,6 +574,9 @@ function renderDays(items) {
       </button>
       <div class="day-items${isOpen ? '' : ' hidden'}"></div>
     `;
+    if (!canSeePrices()) {
+      card.querySelector('.day-summary-text span').textContent = `${day.City || 'Sin ciudad'} - ${summaryText}`;
+    }
     card.querySelector('.day-summary').addEventListener('click', () => {
       state.openDayKey = isOpen ? null : day.DayDate;
       state.openItemId = null;
@@ -409,7 +594,7 @@ function renderDays(items) {
 
 function getHomeDayItems(items, dayDate) {
   const groups = new Map();
-  items.filter(item => dateInItemRange(dayDate, item)).forEach(item => {
+  items.filter(item => itemBelongsOnAgendaDate(item, dayDate)).forEach(item => {
     const key = getCanonicalLogicalItemId(item);
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(item);
@@ -423,6 +608,21 @@ function getHomeDayItems(items, dayDate) {
 function normalizeHomeDayOccurrence(group, dayDate) {
   const representative = chooseHomeDayRepresentative(group, dayDate);
   if (!representative) return null;
+
+  if (isItemCompleted(representative)) {
+    const completedTime = getCompletedTime(representative);
+    return {
+      ...representative,
+      SourceItemID: getCanonicalLogicalItemId(representative),
+      DayDate: dayDate,
+      StartTime: completedTime,
+      EndTime: '',
+      IsAllDay: false,
+      CompletedAgendaDate: dayDate,
+      CompletedAgendaTime: completedTime,
+      SortOrder: Number(representative.SortOrder || 0)
+    };
+  }
 
   const start = representative.StartDate || representative.DayDate || '';
   const end = representative.EndDate || start;
@@ -562,14 +762,14 @@ function renderMapView() {
   }
   const stats = getMapLocationStats();
   const pins = getFilteredMapItems();
+  const planningOptions = shouldShowOnlyConfirmed()
+    ? [['CONFIRMED', 'Confirmado']]
+    : [['ALL', 'Todos'], ['CONFIRMED', 'Confirmado'], ['PROPOSED', 'Propuesto']];
+  if (shouldShowOnlyConfirmed()) state.mapFilters.planning = 'CONFIRMED';
   els.mapSection.innerHTML = `
     <div class="map-panel">
       <div class="map-filter-grid">
-        <label>Estado<select data-map-filter="planning">${renderMapOptions([
-          ['ALL', 'Todos'],
-          ['CONFIRMED', 'Confirmado'],
-          ['PROPOSED', 'Propuesto']
-        ], state.mapFilters.planning)}</select></label>
+        <label>Estado<select data-map-filter="planning">${renderMapOptions(planningOptions, state.mapFilters.planning)}</select></label>
         <label>Categoría<select data-map-filter="type">${renderMapOptions([['ALL', 'Todos'], ...getMapItemTypes().map(value => [value, getCategoryLabel(value)])], state.mapFilters.type)}</select></label>
         <label>Ciudad<select data-map-filter="city">${renderMapOptions([['ALL', 'Todas'], ...getMapCities().map(value => [value, value])], state.mapFilters.city)}</select></label>
         <label>Día<select data-map-filter="date">${renderMapOptions([['ALL', 'Todos'], ...state.days.map(day => [day.DayDate, `${day.DayDate} ${day.City || day.Title || ''}`.trim()])], state.mapFilters.date)}</select></label>
@@ -740,7 +940,7 @@ function changeCalendarMonth(delta) {
 }
 
 function getCalendarCounts(date) {
-  const dayItems = state.items.filter(item => dateInItemRange(date, item));
+  const dayItems = state.items.filter(item => itemBelongsOnAgendaDate(item, date));
   const confirmed = dayItems.filter(item => getItemPlanningStatus(item) === 'CONFIRMED').length;
   const proposed = dayItems.filter(item => getItemPlanningStatus(item) === 'PROPOSED').length;
   return { total: dayItems.length, confirmed, proposed };
@@ -768,27 +968,41 @@ async function openCalendarDate(date) {
 
 function renderItem(item) {
   const isOpen = state.openItemId === item.ItemID;
+  const completed = isItemCompleted(item);
   const itemEl = document.createElement('article');
   const categoryVisual = getHomeCategoryVisual(item);
-  itemEl.className = `agenda-item agenda-item-${categoryVisual.family}`;
+  itemEl.className = `agenda-item agenda-item-${categoryVisual.family}${completed ? ' agenda-item-completed' : ''}`;
   itemEl.dataset.itemId = item.ItemID;
   const time = item.IsAllDay ? 'Todo el día' : (item.StartTime || '');
   const categoryChip = renderCategoryChip(categoryVisual);
   const categoryIcon = renderCategoryCardIcon(categoryVisual);
+  const displayTime = completed && item.CompletedAgendaTime ? item.CompletedAgendaTime : time;
+  const priceChip = canSeePrices() ? `<span class="item-price">${formatItemAmount(item)}</span>` : '';
+  const planningToggle = canEditApp() ? `
+        <span class="planning-toggle" role="group" aria-label="Estado de planificaciÃ³n">
+          <button type="button" data-status="CONFIRMED" aria-pressed="${getItemPlanningStatus(item) === 'CONFIRMED'}" class="${getItemPlanningStatus(item) === 'CONFIRMED' ? 'active' : ''}">Confirmado</button>
+          <button type="button" data-status="PROPOSED" aria-pressed="${getItemPlanningStatus(item) === 'PROPOSED'}" class="${getItemPlanningStatus(item) === 'PROPOSED' ? 'active' : ''}">Propuesto</button>
+        </span>` : '';
+  const completionButton = canToggleCompletion() ? `
+        <button type="button" class="completion-toggle${completed ? ' active' : ''}" data-complete-item aria-pressed="${completed}" aria-label="${completed ? 'Quitar completado' : 'Marcar completado'}">${completed ? 'Completado' : 'Completar'}</button>` : '';
+  const completedBadge = completed ? '<span class="completed-badge">Completado</span>' : '';
   itemEl.innerHTML = `
     <div class="item-summary" role="button" tabindex="0" aria-expanded="${isOpen}">
-      <span class="item-time">${escapeHtml(time)}</span>
+      <span class="item-time">${escapeHtml(displayTime)}</span>
       <span class="item-title">${escapeHtml(getDisplayTitle(item))}</span>
       <span class="item-meta">
         ${categoryChip}
-        <span class="item-price">${formatItemAmount(item)}</span>
+        ${completedBadge}
+        ${priceChip}
         ${item.GoogleMapsUrl || item.GooglePlusCode ? `<a class="map-button" target="_blank" rel="noopener" href="${escapeHtml(getMapUrl(item))}">${escapeHtml(item.GooglePlusCode || 'Mapas')}</a>` : ''}
         <span class="planning-toggle" role="group" aria-label="Estado de planificación">
           <button type="button" data-status="CONFIRMED" aria-pressed="${getItemPlanningStatus(item) === 'CONFIRMED'}" class="${getItemPlanningStatus(item) === 'CONFIRMED' ? 'active' : ''}">Confirmado</button>
           <button type="button" data-status="PROPOSED" aria-pressed="${getItemPlanningStatus(item) === 'PROPOSED'}" class="${getItemPlanningStatus(item) === 'PROPOSED' ? 'active' : ''}">Propuesto</button>
         </span>
+        ${completionButton}
       </span>
       ${categoryIcon}
+      ${completed ? '<span class="completed-watermark" aria-hidden="true">✓</span>' : ''}
     </div>
     <div class="item-details${isOpen ? '' : ' hidden'}">${renderDetails(item)}</div>
   `;
@@ -798,6 +1012,7 @@ function renderItem(item) {
   let ignoreClick = false;
   summary.addEventListener('pointerdown', event => {
     if (event.button && event.button !== 0) return;
+    if (!canEditApp()) return;
     holdTimer = window.setTimeout(() => {
       ignoreClick = true;
       openEditModal(item);
@@ -809,7 +1024,7 @@ function renderItem(item) {
   summary.addEventListener('contextmenu', event => {
     event.preventDefault();
     window.clearTimeout(holdTimer);
-    openEditModal(item);
+    if (canEditApp()) openEditModal(item);
   });
   summary.addEventListener('click', event => {
     if (ignoreClick) {
@@ -817,13 +1032,13 @@ function renderItem(item) {
       ignoreClick = false;
       return;
     }
-    if (event.target.closest('a, .planning-toggle')) return;
+    if (event.target.closest('a, .planning-toggle, .completion-toggle')) return;
     state.openItemId = isOpen ? null : item.ItemID;
     renderHome();
   });
   summary.addEventListener('keydown', event => {
     if (event.key !== 'Enter' && event.key !== ' ') return;
-    if (event.target.closest('a, .planning-toggle')) return;
+    if (event.target.closest('a, .planning-toggle, .completion-toggle')) return;
     event.preventDefault();
     state.openItemId = isOpen ? null : item.ItemID;
     renderHome();
@@ -841,11 +1056,17 @@ function renderItem(item) {
       updatePlanningStatus(item, button.dataset.status);
     });
   });
+  itemEl.querySelector('[data-complete-item]')?.addEventListener('click', event => {
+    event.preventDefault();
+    event.stopPropagation();
+    toggleItemCompletion(item);
+  });
   itemEl.querySelectorAll('a').forEach(link => link.addEventListener('click', event => event.stopPropagation()));
   return itemEl;
 }
 
 async function updatePlanningStatus(item, PlanningStatus) {
+  if (!canEditApp()) return;
   if (getItemPlanningStatus(item) === PlanningStatus) return;
   const updated = stampLocalChange({ ...item, PlanningStatus });
   await updateItem(updated);
@@ -855,6 +1076,28 @@ async function updatePlanningStatus(item, PlanningStatus) {
   state.openItemId = updated.ItemID;
   els.statusSync.textContent = 'Cambios locales pendientes';
   notifyLocalChange('planning-status');
+  await loadState();
+  await render();
+}
+
+async function toggleItemCompletion(item) {
+  if (!canToggleCompletion()) return;
+  const completed = isItemCompleted(item);
+  const message = completed ? '¿Quitar completado de este item?' : '¿Marcar este item como completado ahora?';
+  if (!confirm(message)) return;
+  const now = new Date().toISOString();
+  const updated = stampLocalChange({
+    ...item,
+    Completed: !completed,
+    CompletedAt: completed ? null : now,
+    CompletedByRole: completed ? null : state.accessRole
+  }, now);
+  await updateItem(updated);
+  markLocalEntity('ITEM', updated.ItemID);
+  state.openDayKey = getEffectiveAgendaDate(updated) || updated.DayDate || updated.StartDate || null;
+  state.openItemId = updated.ItemID;
+  els.statusSync.textContent = 'Cambios locales pendientes';
+  notifyLocalChange('item-completion');
   await loadState();
   await render();
 }
@@ -1012,6 +1255,13 @@ async function renderSettings() {
         ${renderAudit(audit)}
       </div>
     </section>
+    <section class="settings-panel pdf-report-panel">
+      <h2>Reporte completo</h2>
+      <p class="placeholder-note">Genera una vista imprimible del viaje activo con todos los detalles disponibles.</p>
+      <div class="settings-actions">
+        <button id="downloadPdfReportButton" class="primary-button" type="button">Descargar reporte PDF completo</button>
+      </div>
+    </section>
   `;
   bindTripManager();
   bindDayManager();
@@ -1019,6 +1269,7 @@ async function renderSettings() {
   bindBackupManager();
   bindDataManager();
   bindAuditManager();
+  bindPdfReportManager();
 }
 
 function renderAuthPanel() {
@@ -1070,6 +1321,185 @@ function bindAuthManager() {
   document.getElementById('authSignUpButton')?.addEventListener('click', event => handleAuthSubmit(event, 'sign-up'));
   document.getElementById('authSignOutButton')?.addEventListener('click', handleSignOut);
   document.getElementById('syncNowButton')?.addEventListener('click', () => runCloudSyncNow('manual'));
+}
+
+function bindPdfReportManager() {
+  document.getElementById('downloadPdfReportButton')?.addEventListener('click', exportFullPdfReport);
+}
+
+function exportFullPdfReport() {
+  if (!canEditApp()) return;
+  const popup = window.open('', '_blank');
+  if (!popup) {
+    alert('Permite ventanas emergentes para generar el reporte PDF.');
+    return;
+  }
+  popup.document.open();
+  popup.document.write(buildPdfReportHtml());
+  popup.document.close();
+  popup.focus();
+  popup.setTimeout(() => popup.print(), 350);
+}
+
+function buildPdfReportHtml() {
+  const trip = state.trips.find(row => row.TripID === state.activeTripId) || {};
+  const items = state.allItems
+    .filter(item => item.TripID === state.activeTripId)
+    .sort(compareReportItems);
+  const byDay = groupReportItemsByDay(items);
+  return `<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeHtml(trip.TripTitle || trip.TripName || state.activeTripId)} - reporte</title>
+  <style>
+    @page { size: Letter portrait; margin: 0.55in; }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: #111; font: 10.5pt/1.35 Arial, sans-serif; }
+    h1 { margin: 0 0 6px; font-size: 20pt; }
+    .meta { margin: 0 0 18px; color: #444; }
+    .day-header { margin: 18px 0 0; padding: 10px 12px; background: #000; color: #fff; page-break-after: avoid; }
+    .day-header h2 { margin: 0; font-size: 13pt; }
+    .report-item { border-top: 2px solid #111; padding: 10px 0 12px; page-break-inside: avoid; }
+    .report-item.confirmed { font-weight: 700; }
+    .item-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: start; }
+    .status { border: 1px solid #111; padding: 3px 7px; font-size: 9pt; letter-spacing: .04em; }
+    .fields { display: grid; grid-template-columns: 1.15in minmax(0, 1fr); gap: 3px 10px; margin-top: 7px; }
+    .label { color: #555; font-weight: 700; }
+    a { color: #0645ad; text-decoration: underline; overflow-wrap: anywhere; }
+    .notes { white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>${escapeHtml(trip.TripTitle || trip.TripName || state.activeTripId || 'TravelManager 3')}</h1>
+  <p class="meta">${escapeHtml([trip.StartDate, trip.EndDate].filter(Boolean).join(' / '))} - Generado ${escapeHtml(formatDateTime(new Date().toISOString()))}</p>
+  ${byDay.map(group => renderReportDay(group)).join('')}
+</body>
+</html>`;
+}
+
+function groupReportItemsByDay(items) {
+  const dayMap = new Map(state.days.map(day => [day.DayDate || day.Date, day]));
+  const groups = new Map();
+  for (const item of items) {
+    const date = getEffectiveAgendaDate(item) || 'Sin fecha';
+    if (!groups.has(date)) groups.set(date, { date, day: dayMap.get(date) || null, items: [] });
+    groups.get(date).items.push(item);
+  }
+  return [...groups.values()].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function renderReportDay(group) {
+  const day = group.day || {};
+  const title = [
+    day.DayLabel || day.Title || '',
+    group.date,
+    day.City || day.PrimaryCity || '',
+    day.Notes || day.DayNotes || ''
+  ].filter(Boolean).join(' - ');
+  return `
+    <section>
+      <header class="day-header"><h2>${escapeHtml(title || group.date)}</h2></header>
+      ${group.items.sort(compareReportItems).map(renderReportItem).join('')}
+    </section>
+  `;
+}
+
+function renderReportItem(item) {
+  const status = getItemPlanningStatus(item);
+  const fields = getReportFields(item);
+  return `
+    <article class="report-item ${status === 'CONFIRMED' ? 'confirmed' : 'proposed'}">
+      <div class="item-head">
+        <h3>${escapeHtml(item.Title || 'Sin titulo')}</h3>
+        <span class="status">${escapeHtml(status)}</span>
+      </div>
+      <div class="fields">
+        ${fields.map(([label, value]) => `<div class="label">${escapeHtml(label)}</div><div>${value}</div>`).join('')}
+      </div>
+    </article>
+  `;
+}
+
+function getReportFields(item) {
+  const fields = [
+    ['ItemID', textValue(item.ItemID)],
+    ['SourceItemID', item.SourceItemID && item.SourceItemID !== item.ItemID ? textValue(item.SourceItemID) : ''],
+    ['Categoria', textValue(item.ItemType || item.Category)],
+    ['Start', textValue([item.StartDate, item.StartTime].filter(Boolean).join(' '))],
+    ['End', textValue([item.EndDate, item.EndTime].filter(Boolean).join(' '))],
+    ['DayDate', textValue(item.DayDate)],
+    ['Ciudad', textValue(item.City)],
+    ['Direccion', mapSearchLink(item.Address || item.LocationAddress || item.LocationLabel)],
+    ['Coordenadas', coordinateLink(item)],
+    ['Plus Code', mapSearchLink(item.GooglePlusCode)],
+    ['Notas', noteValue(item.Notes || item.Description)],
+    ['Proveedor', textValue(item.Provider)],
+    ['Website', urlLink(item.Website || item.Url || item.URL || item.GoogleMapsUrl)],
+    ['Telefono', phoneLink(item.Phone || item.PhoneNumber)],
+    ['Email', emailLink(item.Email)],
+    ['AmountUSD', textValue(item.AmountUSD === undefined ? '' : formatMoney(item.AmountUSD))],
+    ['Pago', textValue([item.PaymentStatus, isPaidFinancial(item) ? 'Paid' : 'Pending'].filter(Boolean).join(' / '))],
+    ['PlanningStatus', textValue(getItemPlanningStatus(item))],
+    ['Completed', textValue(isItemCompleted(item) ? 'true' : 'false')],
+    ['CompletedAt', textValue(item.CompletedAt ? formatDateTime(item.CompletedAt) : '')],
+    ['CompletedByRole', textValue(item.CompletedByRole)]
+  ];
+  const known = new Set(['ItemID', 'SourceItemID', 'TripID', 'DatasetID', 'Title', 'ItemType', 'Category', 'StartDate', 'StartTime', 'EndDate', 'EndTime', 'DayDate', 'City', 'Address', 'LocationAddress', 'LocationLabel', 'Latitude', 'Longitude', 'GooglePlusCode', 'GoogleMapsUrl', 'Notes', 'Description', 'Provider', 'Website', 'Url', 'URL', 'Phone', 'PhoneNumber', 'Email', 'AmountUSD', 'PaymentStatus', 'IsPaid', 'PlanningStatus', 'Status', 'Completed', 'CompletedAt', 'CompletedByRole']);
+  Object.keys(item).sort().forEach(key => {
+    if (known.has(key) || item[key] === undefined || item[key] === null || item[key] === '') return;
+    if (typeof item[key] === 'object') return;
+    fields.push([key, textValue(item[key])]);
+  });
+  return fields.filter(([, value]) => value !== '');
+}
+
+function compareReportItems(a, b) {
+  const dateCompare = getEffectiveAgendaDate(a).localeCompare(getEffectiveAgendaDate(b));
+  if (dateCompare !== 0) return dateCompare;
+  if (isItemCompleted(a) || isItemCompleted(b)) {
+    const completedCompare = String(a.CompletedAt || '').localeCompare(String(b.CompletedAt || ''));
+    if (completedCompare !== 0) return completedCompare;
+  }
+  const timeCompare = (a.StartTime || '').localeCompare(b.StartTime || '');
+  if (timeCompare !== 0) return timeCompare;
+  return Number(a.SortOrder || 0) - Number(b.SortOrder || 0);
+}
+
+function textValue(value) {
+  return value === undefined || value === null || value === '' ? '' : escapeHtml(value);
+}
+
+function noteValue(value) {
+  return value ? `<span class="notes">${escapeHtml(value)}</span>` : '';
+}
+
+function urlLink(value) {
+  const url = String(value || '').trim();
+  if (!url) return '';
+  const href = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+  return `<a href="${escapeHtml(href)}">${escapeHtml(url)}</a>`;
+}
+
+function emailLink(value) {
+  const email = String(value || '').trim();
+  return email ? `<a href="mailto:${escapeHtml(email)}">${escapeHtml(email)}</a>` : '';
+}
+
+function phoneLink(value) {
+  const phone = String(value || '').trim();
+  return phone ? `<a href="tel:${escapeHtml(phone)}">${escapeHtml(phone)}</a>` : '';
+}
+
+function mapSearchLink(value) {
+  const text = String(value || '').trim();
+  return text ? `<a href="https://maps.google.com/?q=${encodeURIComponent(text)}">${escapeHtml(text)}</a>` : '';
+}
+
+function coordinateLink(item) {
+  if (!hasValidCoordinates(item)) return '';
+  const text = `${item.Latitude}, ${item.Longitude}`;
+  return `<a href="https://maps.google.com/?q=${encodeURIComponent(text)}">${escapeHtml(text)}</a>`;
 }
 
 async function handleAuthSubmit(event, mode) {
@@ -1162,6 +1592,7 @@ function bindTripManager() {
 }
 
 function openTripEditor(trip = null) {
+  if (!canEditApp()) return;
   const editor = document.getElementById('tripEditor');
   const today = new Date().toISOString().slice(0, 10);
   const draft = trip || { TripID: suggestTripId('Nuevo viaje', today), TripName: '', TripTitle: '', StartDate: today, EndDate: today, BudgetAmountUSD: 0, BudgetCurrencyCode: 'USD', Notes: '', IsActive: true };
@@ -1191,6 +1622,7 @@ function openTripEditor(trip = null) {
 }
 
 async function saveTripEditor(originalTripId = '') {
+  if (!canEditApp()) return;
   const TripID = document.getElementById('tripIdInput').value.trim();
   const TripName = document.getElementById('tripNameInput').value.trim();
   const TripTitle = document.getElementById('tripTitleInput').value.trim();
@@ -1221,6 +1653,7 @@ function suggestTripId(name, date) {
 }
 
 async function deleteActiveTrip() {
+  if (!canEditApp()) return;
   const trip = state.trips.find(row => row.TripID === state.activeTripId);
   if (!trip) return;
   const itemCount = state.allItems.filter(item => item.TripID === trip.TripID).length;
@@ -1267,6 +1700,7 @@ function bindDayManager() {
 }
 
 function openDayEditor(day = null) {
+  if (!canEditApp()) return;
   const editor = document.getElementById('dayEditor');
   const trip = state.trips.find(row => row.TripID === state.activeTripId);
   const nextDate = day?.Date || day?.DayDate || trip?.StartDate || new Date().toISOString().slice(0, 10);
@@ -1295,6 +1729,7 @@ function openDayEditor(day = null) {
 }
 
 async function saveDayEditor(originalDayId = '') {
+  if (!canEditApp()) return;
   const DateValue = document.getElementById('dayDateInput').value;
   const message = document.getElementById('dayMessage');
   if (!isValidDate(DateValue)) return setInlineMessage(message, 'Fecha inválida.', true);
@@ -1309,6 +1744,7 @@ async function saveDayEditor(originalDayId = '') {
 }
 
 async function deleteDay(TripDayID) {
+  if (!canEditApp()) return;
   const day = state.days.find(row => row.TripDayID === TripDayID);
   if (!day) return;
   const date = day.Date || day.DayDate;
@@ -1337,6 +1773,34 @@ function dateInItemRange(date, item) {
   const end = item.EndDate || start;
   if (!start || !end || end < start) return false;
   return start <= date && date <= end;
+}
+
+function itemBelongsOnAgendaDate(item, date) {
+  if (isItemCompleted(item)) return getEffectiveAgendaDate(item) === date;
+  return dateInItemRange(date, item);
+}
+
+function isItemCompleted(item) {
+  const value = item?.Completed;
+  return value === true || String(value || '').toLowerCase() === 'true';
+}
+
+function getEffectiveAgendaDate(item) {
+  if (isItemCompleted(item) && item.CompletedAt) return isoDatePart(item.CompletedAt);
+  return item.DayDate || item.StartDate || '';
+}
+
+function getCompletedTime(item) {
+  if (!item.CompletedAt) return '';
+  const date = new Date(item.CompletedAt);
+  if (Number.isNaN(date.getTime())) return String(item.CompletedAt).slice(11, 16);
+  return date.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
+function isoDatePart(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value || '').slice(0, 10);
+  return date.toISOString().slice(0, 10);
 }
 
 function makeTripDayId(tripId, date) {
@@ -1727,6 +2191,9 @@ function normalizeImportedItem(item, reservedIds = new Set()) {
     PlanningStatus: item.PlanningStatus || getPlanningStatus(item.Status),
     PaymentStatus: item.PaymentStatus || 'NOT_PAID',
     IsPaid: item.IsPaid === true || item.PaymentStatus === 'PAID',
+    Completed: isItemCompleted(item),
+    CompletedAt: item.CompletedAt || '',
+    CompletedByRole: item.CompletedByRole || '',
     GooglePlusCode: item.GooglePlusCode || '',
     GoogleMapsUrl: item.GoogleMapsUrl || '',
     Notes: item.Notes || ''
@@ -1842,7 +2309,7 @@ function renderDataCell(column, value) {
   if (column === 'ItemType') return `<select data-field="${column}">${ITEM_TYPES.map(option => `<option value="${option}"${value === option ? ' selected' : ''}>${option}</option>`).join('')}</select>`;
   if (column === 'PlanningStatus') return `<select data-field="${column}">${PLANNING_STATUSES.map(option => `<option value="${option}"${value === option ? ' selected' : ''}>${option}</option>`).join('')}</select>`;
   if (column === 'PaymentStatus') return `<select data-field="${column}">${PAYMENT_STATUSES.map(option => `<option value="${option}"${value === option ? ' selected' : ''}>${option}</option>`).join('')}</select>`;
-  if (column === 'IsPaid') return `<select data-field="${column}"><option value="false"${value ? '' : ' selected'}>false</option><option value="true"${value ? ' selected' : ''}>true</option></select>`;
+  if (column === 'IsPaid' || column === 'Completed') return `<select data-field="${column}"><option value="false"${value ? '' : ' selected'}>false</option><option value="true"${value ? ' selected' : ''}>true</option></select>`;
   const type = column === 'AmountUSD' ? 'number' : column.endsWith('Date') ? 'date' : 'text';
   const step = column === 'AmountUSD' ? ' step="0.01" min="0"' : '';
   return `<input data-field="${column}" type="${type}"${step} value="${escapeHtml(value ?? '')}" />`;
@@ -1870,6 +2337,9 @@ function getLogicalRows() {
     PlanningStatus: getItemPlanningStatus(item),
     PaymentStatus: item.PaymentStatus || 'NOT_PAID',
     IsPaid: item.IsPaid === true,
+    Completed: isItemCompleted(item),
+    CompletedAt: item.CompletedAt || '',
+    CompletedByRole: item.CompletedByRole || '',
     GooglePlusCode: item.GooglePlusCode || '',
     GoogleMapsUrl: item.GoogleMapsUrl || '',
     Notes: item.Notes || ''
@@ -1916,10 +2386,14 @@ function readDataRow(rowEl) {
   if (!data.ItemID) data.ItemID = getNextItemId();
   data.AmountUSD = Number(data.AmountUSD || 0);
   data.IsPaid = data.IsPaid === 'true';
+  data.Completed = data.Completed === 'true';
+  data.CompletedAt = data.Completed ? data.CompletedAt : '';
+  data.CompletedByRole = data.Completed ? data.CompletedByRole : '';
   return data;
 }
 
 async function saveDataRow(rowEl) {
+  if (!canEditApp()) return;
   const originalKey = rowEl.dataset.key;
   let data;
   try {
@@ -1939,6 +2413,7 @@ async function saveDataRow(rowEl) {
 }
 
 async function addLogicalRow() {
+  if (!canEditApp()) return;
   const date = state.days[0]?.DayDate || new Date().toISOString().slice(0, 10);
   let itemId = '';
   try {
@@ -1960,6 +2435,9 @@ async function addLogicalRow() {
     PlanningStatus: 'PROPOSED',
     PaymentStatus: 'NOT_PAID',
     IsPaid: false,
+    Completed: false,
+    CompletedAt: '',
+    CompletedByRole: '',
     GooglePlusCode: '',
     GoogleMapsUrl: '',
     Notes: ''
@@ -1972,6 +2450,7 @@ async function addLogicalRow() {
 }
 
 async function duplicateDataRow(rowEl) {
+  if (!canEditApp()) return;
   let data;
   try {
     data = readDataRow(rowEl);
@@ -1989,6 +2468,7 @@ async function duplicateDataRow(rowEl) {
 }
 
 async function deleteDataRow(rowEl) {
+  if (!canEditApp()) return;
   const key = rowEl.dataset.key;
   const item = state.items.find(row => getLogicalKey(row) === key) || { ItemID: key, Title: key };
   await deleteLogicalItem(item);
@@ -2011,6 +2491,7 @@ async function recordDeletion(EntityType, EntityId, TripID, entity = {}) {
 }
 
 async function deleteLogicalItem(item, modal = null) {
+  if (!canEditApp()) return;
   const key = getLogicalKey(item);
   const title = item.Title || 'Sin título';
   if (!confirm(`Eliminar item ${key} - ${title}? Se borrarán todas sus apariciones.`)) return;
@@ -2087,6 +2568,7 @@ function validateDataRow(data, originalKey = '') {
 }
 
 function openPastePreview() {
+  if (!canEditApp()) return;
   const preview = document.getElementById('pastePreview');
   preview.classList.remove('hidden');
   preview.innerHTML = `
@@ -2144,12 +2626,16 @@ function parseTsvRows(text) {
     reservedIds.add(row.ItemID);
     row.AmountUSD = Number(row.AmountUSD || 0);
     row.IsPaid = String(row.IsPaid).toLowerCase() === 'true';
+    row.Completed = String(row.Completed).toLowerCase() === 'true';
+    row.CompletedAt = row.Completed ? row.CompletedAt : '';
+    row.CompletedByRole = row.Completed ? row.CompletedByRole : '';
     row._columnCount = cells.length;
     return row;
   });
 }
 
 async function importTsvRows(rows) {
+  if (!canEditApp()) return;
   await createDataSnapshot('Antes de importar TSV');
   for (const row of rows) {
     row.TripID = row.TripID || state.activeTripId;
@@ -2266,6 +2752,7 @@ function formatDateTime(value) {
 }
 
 async function restoreOriginalItinerary() {
+  if (!canEditApp()) return;
   if (!confirm('Restaurar datos originales del viaje? Esto elimina modificaciones locales de los items de Italy 2026.')) return;
   const itinerary = await loadItalyItinerary();
   await createDataSnapshot('Antes de restaurar originales del viaje');
@@ -2287,6 +2774,7 @@ async function restoreOriginalItinerary() {
 }
 
 function openEditModal(item) {
+  if (!canEditApp()) return;
   state.editingItem = item;
   fillForm(editModal.form, item);
   state.editInitialValue = getFormSnapshot(editModal.form);
@@ -2296,6 +2784,7 @@ function openEditModal(item) {
 }
 
 function openNewItemModal() {
+  if (!canEditApp()) return;
   const today = state.openDayKey || state.days[0]?.DayDate || '';
   fillForm(newItemModal.form, {
     DayDate: today,
@@ -2497,6 +2986,12 @@ function getItemPlanningStatus(item) {
 }
 
 function compareItems(a, b) {
+  const completedCompare = Number(isItemCompleted(a)) - Number(isItemCompleted(b));
+  if (completedCompare !== 0) return completedCompare;
+  if (isItemCompleted(a) && isItemCompleted(b)) {
+    const dateCompare = String(a.CompletedAt || '').localeCompare(String(b.CompletedAt || ''));
+    if (dateCompare !== 0) return dateCompare;
+  }
   const allDayCompare = Number(Boolean(a.IsAllDay)) - Number(Boolean(b.IsAllDay));
   if (allDayCompare !== 0) return allDayCompare;
   const lodgingStayCompare = Number(a.LodgingDisplayMode === 'FULL_DAY') - Number(b.LodgingDisplayMode === 'FULL_DAY');
