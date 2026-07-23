@@ -124,6 +124,10 @@ Agenda detail expansion is also local-first. Inicio keeps collapsed item cards a
 
 Visible itinerary times are formatted for users in 12-hour AM/PM style. Stored values such as `StartTime` and `EndTime` may remain as internal `HH:mm` values for validation, sorting, forms, imports, IndexedDB, and Supabase payload sync, but normal UI rendering converts them for display. Examples: `08:00` shows as `8:00 AM`, `13:30` as `1:30 PM`, `00:05` as `12:05 AM`, and `12:00` as `12:00 PM`.
 
-After PIN access, the app shows a compact role-based clock header. Family access shows two clocks: device local time and Italy trip time. The Italy clock uses the IANA timezone `Europe/Rome`; when the current open day or item has a reliable city context, the label can show that city, such as `Hora en Roma`, otherwise it falls back to `Hora en Italia`.
+After PIN access, the app shows a compact role-based clock header. Family access shows two clocks: device local time and a destination clock resolved from the current itinerary context. The resolver works offline using an internal known-location map and checks explicit timezone fields before city/country text matching.
+
+Timezone priority is: open item explicit fields, open day explicit fields, active trip explicit fields, open item text, open day text, active trip text, Italy 2026 fallback, browser timezone, then UTC. Future trips should define explicit `Timezone`, `TimeZone`, `IanaTimezone`, `TripTimezone`, `LocationTimezone`, or `DestinationTimezone` fields on trip, day, or item records when possible.
+
+Italy 2026 remains a supported fallback using `Europe/Rome`. Known city context can label the Family destination clock as `Hora en Roma`, `Hora en Venecia`, `Hora en Santo Domingo`, `Hora en New York`, `Hora en Japón`, or another supported destination. If the destination is uncertain, the app uses `Hora en destino`.
 
 Admin and traveler access show one compact local device clock labeled `Hora actual`. The PIN screen does not show the app clock, agenda, menu, map, budget, or settings before access is granted.

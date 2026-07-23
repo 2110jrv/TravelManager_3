@@ -592,11 +592,11 @@ function updateClockHeader() {
   const now = new Date();
   const localDate = formatDisplayDate(now);
   if (state.accessRole === 'family') {
-    const city = getCurrentClockCity();
+    const target = getContextualClockTarget();
     clock.classList.add('dual-clock');
     clock.innerHTML = `
       ${renderClockCard('Hora local', formatClockTime(now), localDate)}
-      ${renderClockCard(`Hora en ${city || 'Italia'}`, formatClockTime(now, 'Europe/Rome'), formatDisplayDate(now, 'Europe/Rome'))}
+      ${renderClockCard(`Hora en ${target.label}`, formatClockTime(now, target.timeZone), formatDisplayDate(now, target.timeZone))}
     `;
     return;
   }
@@ -648,6 +648,182 @@ function cleanClockCity(value) {
   if (found === 'Firenze') return 'Florencia';
   if (found === 'Milan' || found === 'Milano') return 'Milán';
   return found || '';
+}
+
+function getContextualClockTarget() {
+  const context = getClockContext();
+  const resolved = resolveTimezoneFromContext(context);
+  const browserTimeZone = getBrowserTimeZone();
+  return {
+    label: resolved.label || 'destino',
+    timeZone: resolved.timeZone || browserTimeZone || 'UTC'
+  };
+}
+
+function getClockContext() {
+  return {
+    day: getOpenContextDay(),
+    item: getOpenContextItem(),
+    trip: getActiveTripRecord()
+  };
+}
+
+function resolveTimezoneFromContext(context = {}) {
+  const itemTimeZone = resolveExplicitTimezone(context.item);
+  if (itemTimeZone) return { timeZone: itemTimeZone, label: resolveClockLabelFromContext({ item: context.item }) };
+
+  const dayTimeZone = resolveExplicitTimezone(context.day);
+  if (dayTimeZone) return { timeZone: dayTimeZone, label: resolveClockLabelFromContext({ day: context.day }) };
+
+  const tripTimeZone = resolveExplicitTimezone(context.trip);
+  if (tripTimeZone) return { timeZone: tripTimeZone, label: resolveClockLabelFromContext({ trip: context.trip }) };
+
+  const itemMatch = resolveTimezoneFromText(getContextText(context.item, ['City', 'Country', 'Location', 'Address', 'LocationLabel', 'LocationAddress', 'Title', 'Subtitle', 'Notes', 'Description', 'Provider']));
+  if (itemMatch.timeZone) return itemMatch;
+
+  const dayMatch = resolveTimezoneFromText(getContextText(context.day, ['City', 'PrimaryCity', 'Country', 'CountryCode', 'PrimaryCountryCode', 'Route', 'Title', 'Notes', 'DayNotes', 'Description']));
+  if (dayMatch.timeZone) return dayMatch;
+
+  const tripMatch = resolveTimezoneFromText(getContextText(context.trip, ['TripTitle', 'TripName', 'Title', 'Destination', 'Country', 'City', 'Notes', 'Description']));
+  if (tripMatch.timeZone) return tripMatch;
+
+  if (isItalyTrip(context.trip)) return { timeZone: 'Europe/Rome', label: 'Italia' };
+  return { timeZone: getBrowserTimeZone() || 'UTC', label: 'destino' };
+}
+
+function resolveExplicitTimezone(record) {
+  if (!record) return '';
+  const fields = ['Timezone', 'TimeZone', 'IanaTimezone', 'TripTimezone', 'LocationTimezone', 'DestinationTimezone'];
+  for (const field of fields) {
+    const candidate = String(record[field] || '').trim();
+    if (candidate && isValidTimeZone(candidate)) return candidate;
+  }
+  return '';
+}
+
+function resolveTimezoneFromText(text) {
+  const rawText = String(text || '');
+  const normalized = normalizeClockText(text);
+  if (!normalized) return { timeZone: '', label: '' };
+  const match = getKnownTimezoneMap()
+    .flatMap(entry => entry.aliases.map(alias => ({ ...entry, alias, normalizedAlias: normalizeClockText(alias) })))
+    .filter(entry => clockAliasMatches(rawText, normalized, entry.alias, entry.normalizedAlias))
+    .sort((left, right) => right.normalizedAlias.length - left.normalizedAlias.length)[0];
+  return match ? { timeZone: match.timeZone, label: match.label } : { timeZone: '', label: '' };
+}
+
+function clockAliasMatches(rawText, normalizedText, alias, normalizedAlias) {
+  if (!normalizedAlias) return false;
+  if (alias === 'LA') return /\bLA\b/.test(rawText) || /\bL\.A\.\b/i.test(rawText);
+  return ` ${normalizedText} `.includes(` ${normalizedAlias} `);
+}
+
+function resolveClockLabelFromContext(context = {}) {
+  const text = getContextText(context.item, ['City', 'Location', 'LocationLabel', 'Title'])
+    || getContextText(context.day, ['City', 'PrimaryCity', 'Route', 'Title'])
+    || getContextText(context.trip, ['Destination', 'City', 'Country', 'TripTitle', 'TripName', 'Title']);
+  return resolveTimezoneFromText(text).label || cleanClockLabel(text) || 'destino';
+}
+
+function getKnownTimezoneMap() {
+  return [
+    { label: 'República Dominicana', timeZone: 'America/Santo_Domingo', aliases: ['Dominican Republic', 'República Dominicana', 'Republica Dominicana'] },
+    { label: 'Santo Domingo', timeZone: 'America/Santo_Domingo', aliases: ['Santo Domingo'] },
+    { label: 'Punta Cana', timeZone: 'America/Santo_Domingo', aliases: ['Punta Cana'] },
+    { label: 'Puerto Rico', timeZone: 'America/Puerto_Rico', aliases: ['Puerto Rico'] },
+    { label: 'San Juan', timeZone: 'America/Puerto_Rico', aliases: ['San Juan'] },
+    { label: 'Patillas', timeZone: 'America/Puerto_Rico', aliases: ['Patillas'] },
+    { label: 'Ponce', timeZone: 'America/Puerto_Rico', aliases: ['Ponce'] },
+    { label: 'Bayamón', timeZone: 'America/Puerto_Rico', aliases: ['Bayamón', 'Bayamon'] },
+    { label: 'Caguas', timeZone: 'America/Puerto_Rico', aliases: ['Caguas'] },
+    { label: 'Guayama', timeZone: 'America/Puerto_Rico', aliases: ['Guayama'] },
+    { label: 'Venecia', timeZone: 'Europe/Rome', aliases: ['Venice', 'Venezia', 'Venecia'] },
+    { label: 'Florencia', timeZone: 'Europe/Rome', aliases: ['Florence', 'Firenze', 'Florencia'] },
+    { label: 'Roma', timeZone: 'Europe/Rome', aliases: ['Rome', 'Roma'] },
+    { label: 'Vaticano', timeZone: 'Europe/Rome', aliases: ['Vatican', 'Vaticano'] },
+    { label: 'Milán', timeZone: 'Europe/Rome', aliases: ['Milan', 'Milano', 'Milán'] },
+    { label: 'Pisa', timeZone: 'Europe/Rome', aliases: ['Pisa'] },
+    { label: 'Lucca', timeZone: 'Europe/Rome', aliases: ['Lucca'] },
+    { label: 'Siena', timeZone: 'Europe/Rome', aliases: ['Siena'] },
+    { label: 'Tirano', timeZone: 'Europe/Rome', aliases: ['Tirano'] },
+    { label: 'Sorrento', timeZone: 'Europe/Rome', aliases: ['Sorrento'] },
+    { label: 'Nápoles', timeZone: 'Europe/Rome', aliases: ['Naples', 'Napoli', 'Nápoles'] },
+    { label: 'Amalfi', timeZone: 'Europe/Rome', aliases: ['Amalfi'] },
+    { label: 'Positano', timeZone: 'Europe/Rome', aliases: ['Positano'] },
+    { label: 'Ravello', timeZone: 'Europe/Rome', aliases: ['Ravello'] },
+    { label: 'Italia', timeZone: 'Europe/Rome', aliases: ['Italy', 'Italia'] },
+    { label: 'New York', timeZone: 'America/New_York', aliases: ['New York', 'NYC', 'Manhattan', 'Brooklyn', 'Queens'] },
+    { label: 'Washington DC', timeZone: 'America/New_York', aliases: ['Washington DC', 'Washington, D.C.', 'IAD', 'Dulles'] },
+    { label: 'Chicago', timeZone: 'America/Chicago', aliases: ['Chicago'] },
+    { label: 'Denver', timeZone: 'America/Denver', aliases: ['Denver'] },
+    { label: 'Los Angeles', timeZone: 'America/Los_Angeles', aliases: ['Los Angeles', 'LA', 'LAX'] },
+    { label: 'San Francisco', timeZone: 'America/Los_Angeles', aliases: ['San Francisco', 'SFO'] },
+    { label: 'Orlando', timeZone: 'America/New_York', aliases: ['Orlando'] },
+    { label: 'Miami', timeZone: 'America/New_York', aliases: ['Miami'] },
+    { label: 'Japón', timeZone: 'Asia/Tokyo', aliases: ['Japan', 'Japón', 'Japon'] },
+    { label: 'Tokyo', timeZone: 'Asia/Tokyo', aliases: ['Tokyo', 'Tokio'] },
+    { label: 'Kyoto', timeZone: 'Asia/Tokyo', aliases: ['Kyoto'] },
+    { label: 'Osaka', timeZone: 'Asia/Tokyo', aliases: ['Osaka'] },
+    { label: 'Suiza', timeZone: 'Europe/Zurich', aliases: ['Switzerland', 'Suiza'] },
+    { label: 'St. Moritz', timeZone: 'Europe/Zurich', aliases: ['St. Moritz', 'Saint Moritz'] },
+    { label: 'Zurich', timeZone: 'Europe/Zurich', aliases: ['Zurich', 'Zürich'] }
+  ];
+}
+
+function getOpenContextDay() {
+  if (!state.openDayKey) return null;
+  return state.days.find(day => day.DayDate === state.openDayKey || day.Date === state.openDayKey) || null;
+}
+
+function getActiveTripRecord() {
+  return state.trips.find(row => row.TripID === state.activeTripId) || null;
+}
+
+function getContextText(record, fields) {
+  if (!record) return '';
+  return fields.map(field => record[field]).filter(Boolean).join(' ');
+}
+
+function cleanClockLabel(value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  const normalized = text
+    .replace(/\s+/g, ' ')
+    .replace(/^d[ií]a\s+\d+\s*[-:•]\s*/i, '')
+    .split(/\s*(?:->|→|\/|,|\|| - | – | — |\ba\b|\bto\b)\s*/i)
+    .map(part => part.trim())
+    .find(Boolean) || '';
+  if (!normalized || normalized.length > 32 || /\d{4}-\d{2}-\d{2}/.test(normalized) || /^TD_|^TRIP_|^ITEM_/i.test(normalized)) return '';
+  return normalized;
+}
+
+function normalizeClockText(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isItalyTrip(trip) {
+  if (state.activeTripId === 'TRIP_ITALY_2026') return true;
+  return normalizeClockText(getContextText(trip, ['TripTitle', 'TripName', 'Title', 'Destination', 'Country'])).includes('ital');
+}
+
+function getBrowserTimeZone() {
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  return isValidTimeZone(timeZone) ? timeZone : '';
+}
+
+function isValidTimeZone(timeZone) {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone }).format(new Date());
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function renderHome() {
