@@ -119,3 +119,11 @@ Completed items keep their planned `StartDate`, `StartTime`, `EndDate`, and `End
 Configuracion now includes an admin-only "Descargar reporte PDF completo" action. It opens a print-ready Letter portrait HTML report for the active trip, grouped by day and ordered by the same effective agenda time rule. The browser print dialog can save the report as PDF without a server or extra dependency.
 
 Agenda detail expansion is also local-first. Inicio keeps collapsed item cards as level 0, opens a readable summary as level 1, and can expand "Datos completos" as level 2 for meaningful payload fields. Day headers open the item list first; when already open, they toggle "Detalles del dia" if day-level notes or context fields exist. Family mode still hides every money, price, payment, paid/pending, budget, total, fee, USD, and currency field in collapsed and expanded agenda UI.
+
+## Visible time and role clocks
+
+Visible itinerary times are formatted for users in 12-hour AM/PM style. Stored values such as `StartTime` and `EndTime` may remain as internal `HH:mm` values for validation, sorting, forms, imports, IndexedDB, and Supabase payload sync, but normal UI rendering converts them for display. Examples: `08:00` shows as `8:00 AM`, `13:30` as `1:30 PM`, `00:05` as `12:05 AM`, and `12:00` as `12:00 PM`.
+
+After PIN access, the app shows a compact role-based clock header. Family access shows two clocks: device local time and Italy trip time. The Italy clock uses the IANA timezone `Europe/Rome`; when the current open day or item has a reliable city context, the label can show that city, such as `Hora en Roma`, otherwise it falls back to `Hora en Italia`.
+
+Admin and traveler access show one compact local device clock labeled `Hora actual`. The PIN screen does not show the app clock, agenda, menu, map, budget, or settings before access is granted.

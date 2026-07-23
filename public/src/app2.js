@@ -32,7 +32,8 @@ const state = {
   authMessage: '',
   authError: '',
   sync: getSyncState(),
-  accessRole: ''
+  accessRole: '',
+  clockTimer: null
 };
 
 const els = {
@@ -43,6 +44,7 @@ const els = {
   statusSync: document.getElementById('statusSync'),
   menuButton: document.getElementById('menuButton'),
   menuOverlay: document.getElementById('menuOverlay'),
+  appHeader: document.querySelector('.app-header'),
   homeSection: document.getElementById('homeSection'),
   calendarSection: document.getElementById('calendarSection'),
   mapSection: document.getElementById('mapSection'),
@@ -296,6 +298,8 @@ function renderAccessGate(message = '') {
   state.activeView = 'home';
   closeMenu();
   els.menuButton.classList.add('hidden');
+  stopClockHeader();
+  removeClockHeader();
   els.menuOverlay.classList.add('hidden');
   els.statusRow?.classList.add('hidden');
   els.calendarSection.classList.add('hidden');
@@ -348,6 +352,8 @@ async function switchAccessRole() {
   state.openItemId = null;
   state.openItemFullId = null;
   state.openDayDetailsKey = null;
+  stopClockHeader();
+  removeClockHeader();
   renderAccessGate();
   updateOnlineStatus();
 }
@@ -523,6 +529,7 @@ async function render() {
   if (state.activeView === 'map') renderMapView();
   if (state.activeView === 'budget') await renderBudget();
   if (state.activeView === 'settings') await renderSettings();
+  updateClockHeader();
 }
 
 function syncAccessUi() {
@@ -551,6 +558,96 @@ function syncAccessUi() {
     els.statusRow?.append(roleButton);
   }
   roleButton.textContent = `${getAccessLabel()} - cambiar PIN`;
+  ensureClockHeader();
+  startClockHeader();
+}
+
+function ensureClockHeader() {
+  if (!state.accessRole || document.getElementById('roleClockHeader')) return;
+  const clock = document.createElement('section');
+  clock.id = 'roleClockHeader';
+  clock.className = 'role-clock-header';
+  clock.setAttribute('aria-label', 'Reloj del viaje');
+  els.appHeader?.insertAdjacentElement('afterend', clock);
+}
+
+function removeClockHeader() {
+  document.getElementById('roleClockHeader')?.remove();
+}
+
+function startClockHeader() {
+  if (state.clockTimer) return;
+  state.clockTimer = window.setInterval(updateClockHeader, 60000);
+}
+
+function stopClockHeader() {
+  if (!state.clockTimer) return;
+  window.clearInterval(state.clockTimer);
+  state.clockTimer = null;
+}
+
+function updateClockHeader() {
+  const clock = document.getElementById('roleClockHeader');
+  if (!state.accessRole || !clock) return;
+  const now = new Date();
+  const localDate = formatDisplayDate(now);
+  if (state.accessRole === 'family') {
+    const city = getCurrentClockCity();
+    clock.classList.add('dual-clock');
+    clock.innerHTML = `
+      ${renderClockCard('Hora local', formatClockTime(now), localDate)}
+      ${renderClockCard(`Hora en ${city || 'Italia'}`, formatClockTime(now, 'Europe/Rome'), formatDisplayDate(now, 'Europe/Rome'))}
+    `;
+    return;
+  }
+  clock.classList.remove('dual-clock');
+  clock.innerHTML = renderClockCard('Hora actual', formatClockTime(now), localDate);
+}
+
+function renderClockCard(label, time, dateLabel) {
+  return `
+    <div class="clock-card">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(time)}</strong>
+      <small>${escapeHtml(dateLabel)}</small>
+    </div>
+  `;
+}
+
+function getCurrentClockCity() {
+  const openDay = state.openDayKey ? state.days.find(day => day.DayDate === state.openDayKey || day.Date === state.openDayKey) : null;
+  const item = getOpenContextItem();
+  return cleanClockCity(openDay?.City || openDay?.PrimaryCity || openDay?.Title)
+    || cleanClockCity(item?.City || item?.LocationLabel || item?.Location || item?.Title)
+    || cleanClockCity(state.calendarMessage ? '' : state.days.find(day => day.DayDate === state.openDayKey)?.City)
+    || 'Italia';
+}
+
+function getOpenContextItem() {
+  if (!state.openItemId && !state.openItemFullId) return null;
+  const id = state.openItemFullId || state.openItemId;
+  return state.items.find(item => item.ItemID === id || getLogicalKey(item) === id) || null;
+}
+
+function cleanClockCity(value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  const normalized = text
+    .replace(/\s+/g, ' ')
+    .replace(/^d[ií]a\s+\d+\s*[-:•]\s*/i, '')
+    .split(/\s*(?:->|→|\/|,|\|| - | – | — |\ba\b|\bto\b)\s*/i)
+    .map(part => part.trim())
+    .find(Boolean) || '';
+  if (!normalized || normalized.length > 28 || /\d{4}-\d{2}-\d{2}/.test(normalized)) return '';
+  const known = [
+    'Venecia', 'Venezia', 'Tirano', 'Florencia', 'Firenze', 'Roma', 'Milan', 'Milano',
+    'Como', 'Varenna', 'Bellagio', 'Pisa', 'Siena', 'Verona', 'Italia'
+  ];
+  const found = known.find(city => normalized.toLowerCase().includes(city.toLowerCase()));
+  if (found === 'Venezia') return 'Venecia';
+  if (found === 'Firenze') return 'Florencia';
+  if (found === 'Milan' || found === 'Milano') return 'Milán';
+  return found || '';
 }
 
 function renderHome() {
@@ -911,7 +1008,7 @@ function renderMapPopup(item) {
 function getItemDateTimeSummary(item) {
   const start = item.StartDate || item.DayDate || '';
   const end = item.EndDate && item.EndDate !== start ? ` / ${item.EndDate}` : '';
-  const time = [item.StartTime, item.EndTime].filter(Boolean).join(' - ');
+  const time = formatDisplayTimeRange(item.StartTime, item.EndTime);
   return `${start}${end}${time ? ` · ${time}` : ''}`;
 }
 
@@ -994,10 +1091,10 @@ function renderItem(item) {
   const categoryVisual = getHomeCategoryVisual(item);
   itemEl.className = `agenda-item agenda-item-${categoryVisual.family}${completed ? ' agenda-item-completed' : ''}`;
   itemEl.dataset.itemId = item.ItemID;
-  const time = item.IsAllDay ? 'Todo el día' : (item.StartTime || '');
+  const time = item.IsAllDay ? 'Todo el día' : formatDisplayTime(item.StartTime);
   const categoryChip = renderCategoryChip(categoryVisual);
   const categoryIcon = renderCategoryCardIcon(categoryVisual);
-  const displayTime = completed && item.CompletedAgendaTime ? item.CompletedAgendaTime : time;
+  const displayTime = completed && item.CompletedAgendaTime ? formatDisplayTime(item.CompletedAgendaTime) : time;
   const priceChip = canSeePrices() ? `<span class="item-price">${formatItemAmount(item)}</span>` : '';
   const planningToggle = canEditApp() ? `
         <span class="planning-toggle" role="group" aria-label="Estado de planificaciÃ³n">
@@ -1335,7 +1432,7 @@ function renderAuthPanel() {
         <span>Usuario</span>
         <strong>${escapeHtml(state.authUser.email || 'Sesión activa')}</strong>
         <div class="sync-detail-row"><span>Estado</span><strong>${escapeHtml(getSyncStatusLabel())}</strong></div>
-        <div class="sync-detail-row"><span>Última sync</span><strong>${escapeHtml(state.sync.lastSyncAt ? formatDateTime(state.sync.lastSyncAt) : 'Pendiente')}</strong></div>
+        <div class="sync-detail-row"><span>Última sync</span><strong>${escapeHtml(state.sync.lastSyncAt ? formatDisplayDateTime(state.sync.lastSyncAt) : 'Pendiente')}</strong></div>
         ${state.sync.lastError ? `<p class="data-error">${escapeHtml(state.sync.lastError)}</p>` : ''}
         <p>Los cambios se guardan localmente y se sincronizan automáticamente cuando hay internet.</p>
         <div class="settings-actions">
@@ -1425,7 +1522,7 @@ function buildPdfReportHtml() {
 </head>
 <body>
   <h1>${escapeHtml(trip.TripTitle || trip.TripName || state.activeTripId || 'TravelManager 3')}</h1>
-  <p class="meta">${escapeHtml([trip.StartDate, trip.EndDate].filter(Boolean).join(' / '))} - Generado ${escapeHtml(formatDateTime(new Date().toISOString()))}</p>
+  <p class="meta">${escapeHtml([trip.StartDate, trip.EndDate].filter(Boolean).join(' / '))} - Generado ${escapeHtml(formatDisplayDateTime(new Date().toISOString()))}</p>
   ${byDay.map(group => renderReportDay(group)).join('')}
 </body>
 </html>`;
@@ -1479,8 +1576,8 @@ function getReportFields(item) {
     ['ItemID', textValue(item.ItemID)],
     ['SourceItemID', item.SourceItemID && item.SourceItemID !== item.ItemID ? textValue(item.SourceItemID) : ''],
     ['Categoria', textValue(item.ItemType || item.Category)],
-    ['Start', textValue([item.StartDate, item.StartTime].filter(Boolean).join(' '))],
-    ['End', textValue([item.EndDate, item.EndTime].filter(Boolean).join(' '))],
+    ['Start', textValue(formatDisplayDateTimeParts(item.StartDate, item.StartTime))],
+    ['End', textValue(formatDisplayDateTimeParts(item.EndDate, item.EndTime))],
     ['DayDate', textValue(item.DayDate)],
     ['Ciudad', textValue(item.City)],
     ['Direccion', mapSearchLink(item.Address || item.LocationAddress || item.LocationLabel)],
@@ -1495,7 +1592,7 @@ function getReportFields(item) {
     ['Pago', textValue([item.PaymentStatus, isPaidFinancial(item) ? 'Paid' : 'Pending'].filter(Boolean).join(' / '))],
     ['PlanningStatus', textValue(getItemPlanningStatus(item))],
     ['Completed', textValue(isItemCompleted(item) ? 'true' : 'false')],
-    ['CompletedAt', textValue(item.CompletedAt ? formatDateTime(item.CompletedAt) : '')],
+    ['CompletedAt', textValue(item.CompletedAt ? formatDisplayDateTime(item.CompletedAt) : '')],
     ['CompletedByRole', textValue(item.CompletedByRole)]
   ];
   const known = new Set(['ItemID', 'SourceItemID', 'TripID', 'DatasetID', 'Title', 'ItemType', 'Category', 'StartDate', 'StartTime', 'EndDate', 'EndTime', 'DayDate', 'City', 'Address', 'LocationAddress', 'LocationLabel', 'Latitude', 'Longitude', 'GooglePlusCode', 'GoogleMapsUrl', 'Notes', 'Description', 'Provider', 'Website', 'Url', 'URL', 'Phone', 'PhoneNumber', 'Email', 'AmountUSD', 'PaymentStatus', 'IsPaid', 'PlanningStatus', 'Status', 'Completed', 'CompletedAt', 'CompletedByRole']);
@@ -2137,7 +2234,7 @@ function renderBackupPreview(data, validation) {
       <span>Confirmados: <strong>${summary.confirmed}</strong></span>
       <span>Propuestos: <strong>${summary.proposed}</strong></span>
       <span>Presupuesto: <strong>${formatMoney(summary.budget)}</strong></span>
-      <span>Fecha backup: <strong>${escapeHtml(formatDateTime(summary.exportedAt))}</strong></span>
+      <span>Fecha backup: <strong>${escapeHtml(formatDisplayDateTime(summary.exportedAt))}</strong></span>
       <span>datasetId: <strong>${escapeHtml(summary.datasetId || 'Sin dato')}</strong></span>
     </div>` : ''}
     ${renderIssueList('Errores', validation.errors)}
@@ -2750,7 +2847,7 @@ function renderSnapshotList() {
     ${snapshots.length ? `<div class="snapshot-list">${snapshots.map(snapshot => `
       <article class="snapshot-card">
         <div>
-          <strong>${escapeHtml(formatDateTime(snapshot.timestamp))}</strong>
+          <strong>${escapeHtml(formatDisplayDateTime(snapshot.timestamp))}</strong>
           <span>${escapeHtml(snapshot.reason)} · ${snapshot.items.length} items · ${escapeHtml(snapshot.datasetId)}</span>
         </div>
         <button class="secondary-button danger-button" type="button" data-restore-snapshot="${escapeHtml(snapshot.id)}">Restaurar</button>
@@ -2798,10 +2895,63 @@ function formatBackupStamp(date) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}`;
 }
 
-function formatDateTime(value) {
-  const date = new Date(value);
+function formatDisplayTime(value, timeZone) {
+  if (!value) return '';
+  if (value instanceof Date) return formatClockTime(value, timeZone);
+  const text = String(value).trim();
+  const match = text.match(/^([01]?\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?$/);
+  if (match) {
+    const hours = Number(match[1]);
+    const minutes = match[2];
+    const period = hours >= 12 ? 'PM' : 'AM';
+    const hour12 = hours % 12 || 12;
+    return `${hour12}:${minutes} ${period}`;
+  }
+  const date = new Date(text);
+  if (!Number.isNaN(date.getTime())) return formatClockTime(date, timeZone);
+  return text;
+}
+
+function formatDisplayTimeRange(start, end) {
+  return [formatDisplayTime(start), formatDisplayTime(end)].filter(Boolean).join(' - ');
+}
+
+function formatDisplayDate(value, timeZone) {
+  const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) return value || 'Sin fecha';
-  return date.toLocaleString('es-ES', { dateStyle: 'medium', timeStyle: 'short' });
+  return new Intl.DateTimeFormat('es-ES', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    ...(timeZone ? { timeZone } : {})
+  }).format(date);
+}
+
+function formatDisplayDateTime(value, timeZone) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return value || 'Sin fecha';
+  return `${formatDisplayDate(date, timeZone)} ${formatClockTime(date, timeZone)}`;
+}
+
+function formatDisplayDateTimeParts(dateValue, timeValue) {
+  const date = dateValue || '';
+  const time = formatDisplayTime(timeValue);
+  return [date, time].filter(Boolean).join(' ');
+}
+
+function formatClockTime(value, timeZone) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+    ...(timeZone ? { timeZone } : {})
+  }).format(date);
+}
+
+function formatDateTime(value) {
+  return formatDisplayDateTime(value);
 }
 
 async function restoreOriginalItinerary() {
@@ -3151,7 +3301,8 @@ function hasMeaningfulDetailValue(value) {
 }
 
 function renderDetailValue(key, value, record) {
-  if (key === 'CompletedAt') return value ? escapeHtml(formatDateTime(value)) : '';
+  if (key === 'StartTime' || key === 'EndTime') return value ? escapeHtml(formatDisplayTime(value)) : '';
+  if (key === 'CompletedAt') return value ? escapeHtml(formatDisplayDateTime(value)) : '';
   if (key === 'Completed') return escapeHtml(isItemCompleted(record) ? 'Sí' : 'No');
   if (key === 'PlanningStatus') return escapeHtml(getItemPlanningStatus(record));
   if (key === 'Latitude' || key === 'Longitude') return coordinateLink(record);
@@ -3395,7 +3546,7 @@ function renderExpenseList(items) {
           <summary>
             <span>
               <strong>${escapeHtml(item.Title || 'Sin título')}</strong>
-              <small>${escapeHtml(getCategoryLabel(item.ItemType))} · ${escapeHtml(getBudgetDate(item))}${item.StartTime ? ` · ${escapeHtml(item.StartTime)}` : ''}</small>
+              <small>${escapeHtml(getCategoryLabel(item.ItemType))} · ${escapeHtml(getBudgetDate(item))}${item.StartTime ? ` · ${escapeHtml(formatDisplayTime(item.StartTime))}` : ''}</small>
             </span>
             <b>${formatMoney(item.AmountUSD || 0)}</b>
           </summary>
