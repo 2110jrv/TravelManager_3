@@ -3155,7 +3155,13 @@ async function restoreOriginalItinerary() {
 function openEditModal(item) {
   if (!canEditApp()) return;
   state.editingItem = item;
-  fillForm(editModal.form, item);
+  const startDate = item.StartDate || item.DayDate || item.Date || '';
+  fillForm(editModal.form, {
+    ...item,
+    DayDate: item.DayDate || startDate,
+    StartDate: startDate,
+    EndDate: item.EndDate || startDate
+  });
   state.editInitialValue = getFormSnapshot(editModal.form);
   editModal.el.querySelector('[data-delete-item]')?.classList.remove('hidden');
   editModal.el.classList.remove('hidden');
@@ -3167,6 +3173,8 @@ function openNewItemModal() {
   const today = state.openDayKey || state.days[0]?.DayDate || '';
   fillForm(newItemModal.form, {
     DayDate: today,
+    StartDate: today,
+    EndDate: today,
     StartTime: '',
     EndTime: '',
     ItemType: 'ACTIVITY',
@@ -3196,9 +3204,11 @@ async function saveEditForm(event) {
   const updated = stampLocalChange({
     ...state.editingItem,
     ...data,
+    DayDate: data.StartDate,
     AmountUSD: Number(data.AmountUSD),
     IsAllDay: event.currentTarget.elements.IsAllDay.checked,
-    IsPaid: event.currentTarget.elements.IsPaid.checked
+    IsPaid: event.currentTarget.elements.IsPaid.checked,
+    IsMultiDay: data.EndDate > data.StartDate
   }, now);
   await updateItem(updated);
   markLocalEntity('ITEM', updated.ItemID);
@@ -3233,9 +3243,8 @@ async function saveNewItemForm(event) {
     Status: data.PlanningStatus === 'CONFIRMED' ? 'CONFIRMED' : 'PLANNED',
     IsAllDay: event.currentTarget.elements.IsAllDay.checked,
     IsPaid: event.currentTarget.elements.IsPaid.checked,
-    IsMultiDay: false,
-    StartDate: data.DayDate,
-    EndDate: data.DayDate,
+    IsMultiDay: data.EndDate > data.StartDate,
+    DayDate: data.StartDate,
     LodgingDisplayMode: 'NORMAL',
     SortOrder: Date.now()
   }, now);
@@ -3264,25 +3273,30 @@ function createItemModal(id, title, submitHandler) {
       </header>
       <form class="edit-form" novalidate>
         <div class="edit-error" role="alert"></div>
-        <label>Fecha<input name="DayDate" type="date" required /></label>
-        <label>Title<input name="Title" required /></label>
+        <input name="DayDate" type="hidden" />
+        <label>Título<input name="Title" required /></label>
+        <fieldset class="edit-datetime-group">
+          <legend>Fecha y hora</legend>
+          <div class="edit-grid edit-datetime-grid">
+            <label>Fecha de inicio<input name="StartDate" type="date" required /></label>
+            <label>Hora de inicio<input name="StartTime" placeholder="9:30 AM" /></label>
+            <label>Fecha de finalización<input name="EndDate" type="date" /></label>
+            <label>Hora de finalización<input name="EndTime" placeholder="10:30 AM" /></label>
+          </div>
+        </fieldset>
         <div class="edit-grid">
-          <label>StartTime<input name="StartTime" placeholder="09:30" /></label>
-          <label>EndTime<input name="EndTime" placeholder="10:30" /></label>
+          <label>Tipo<select name="ItemType"><option value="ACTIVITY">Actividad</option><option value="FLIGHT">Vuelo</option><option value="FOOD">Comida</option><option value="LODGING">Hospedaje</option><option value="TRANSPORT">Transporte</option><option value="OTHER">Otro</option></select></label>
+          <label>Costo USD<input name="AmountUSD" type="number" min="0" step="0.01" /></label>
         </div>
         <div class="edit-grid">
-          <label>ItemType<select name="ItemType"><option value="ACTIVITY">Actividad</option><option value="FLIGHT">Vuelo</option><option value="FOOD">Comida</option><option value="LODGING">Hospedaje</option><option value="TRANSPORT">Transporte</option><option value="OTHER">Otro</option></select></label>
-          <label>AmountUSD<input name="AmountUSD" type="number" min="0" step="0.01" /></label>
+          <label>Estado de planificación<select name="PlanningStatus"><option value="CONFIRMED">CONFIRMED</option><option value="PROPOSED">PROPOSED</option></select></label>
+          <label>Estado de pago<select name="PaymentStatus"><option value="NOT_PAID">NOT_PAID</option><option value="RESERVED">RESERVED</option><option value="PAID">PAID</option><option value="PARTIAL">PARTIAL</option><option value="ESTIMATED">ESTIMATED</option></select></label>
         </div>
-        <div class="edit-grid">
-          <label>PlanningStatus<select name="PlanningStatus"><option value="CONFIRMED">CONFIRMED</option><option value="PROPOSED">PROPOSED</option></select></label>
-          <label>PaymentStatus<select name="PaymentStatus"><option value="NOT_PAID">NOT_PAID</option><option value="RESERVED">RESERVED</option><option value="PAID">PAID</option><option value="PARTIAL">PARTIAL</option><option value="ESTIMATED">ESTIMATED</option></select></label>
-        </div>
-        <label>City<input name="City" /></label>
+        <label>Ciudad<input name="City" /></label>
         <label>GooglePlusCode<input name="GooglePlusCode" /></label>
         <label>GoogleMapsUrl<input name="GoogleMapsUrl" type="url" /></label>
-        <label>Notes<textarea name="Notes" rows="3"></textarea></label>
-        <div class="edit-checks"><label><input name="IsAllDay" type="checkbox" /> IsAllDay</label><label><input name="IsPaid" type="checkbox" /> IsPaid</label></div>
+        <label>Notas<textarea name="Notes" rows="3"></textarea></label>
+        <div class="edit-checks"><label><input name="IsAllDay" type="checkbox" /> Todo el día</label><label><input name="IsPaid" type="checkbox" /> Pagado</label></div>
         <footer class="edit-actions"><button type="button" class="secondary-button danger-button hidden" data-delete-item>Eliminar item</button><button type="button" class="secondary-button" data-cancel>Cancelar</button><button type="submit" class="primary-button">Guardar</button></footer>
       </form>
     </div>
@@ -3319,19 +3333,31 @@ function closeModal(modal) {
 
 function fillForm(form, item) {
   setModalError({ form }, '');
-  const fields = ['DayDate', 'StartTime', 'EndTime', 'Title', 'ItemType', 'AmountUSD', 'PlanningStatus', 'PaymentStatus', 'City', 'GooglePlusCode', 'GoogleMapsUrl', 'Notes'];
+  const startDate = item.StartDate || item.DayDate || item.Date || '';
+  const normalized = {
+    ...item,
+    DayDate: item.DayDate || startDate,
+    StartDate: startDate,
+    EndDate: item.EndDate || startDate
+  };
+  const fields = ['DayDate', 'StartDate', 'EndDate', 'StartTime', 'EndTime', 'Title', 'ItemType', 'AmountUSD', 'PlanningStatus', 'PaymentStatus', 'City', 'GooglePlusCode', 'GoogleMapsUrl', 'Notes'];
   fields.forEach(field => {
-    if (form.elements[field]) form.elements[field].value = item[field] ?? '';
+    if (form.elements[field]) form.elements[field].value = normalized[field] ?? '';
   });
-  form.elements.IsAllDay.checked = item.IsAllDay === true;
-  form.elements.IsPaid.checked = item.IsPaid === true;
+  if (form.elements.StartTime) form.elements.StartTime.value = formatDisplayTime(normalized.StartTime);
+  if (form.elements.EndTime) form.elements.EndTime.value = formatDisplayTime(normalized.EndTime);
+  form.elements.IsAllDay.checked = normalized.IsAllDay === true;
+  form.elements.IsPaid.checked = normalized.IsPaid === true;
 }
 
 function formData(form) {
   const data = Object.fromEntries(new FormData(form).entries());
   data.Title = data.Title.trim();
-  data.StartTime = data.StartTime.trim();
-  data.EndTime = data.EndTime.trim();
+  data.StartDate = (data.StartDate || '').trim();
+  data.EndDate = (data.EndDate || '').trim() || data.StartDate;
+  data.DayDate = data.StartDate;
+  data.StartTime = normalizeFormTime(data.StartTime);
+  data.EndTime = normalizeFormTime(data.EndTime);
   data.City = data.City.trim();
   data.GooglePlusCode = data.GooglePlusCode.trim();
   data.GoogleMapsUrl = data.GoogleMapsUrl.trim();
@@ -3339,13 +3365,33 @@ function formData(form) {
   return data;
 }
 
+function normalizeFormTime(value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  const internalMatch = text.match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
+  if (internalMatch) return `${internalMatch[1].padStart(2, '0')}:${internalMatch[2]}`;
+  const displayMatch = text.match(/^(\d{1,2})(?::([0-5]\d))?\s*([ap])\.?\s*m\.?$/i);
+  if (!displayMatch) return text;
+  let hours = Number(displayMatch[1]);
+  const minutes = displayMatch[2] || '00';
+  const period = displayMatch[3].toUpperCase();
+  if (hours < 1 || hours > 12) return text;
+  if (period === 'A') hours = hours === 12 ? 0 : hours;
+  if (period === 'P') hours = hours === 12 ? 12 : hours + 12;
+  return `${String(hours).padStart(2, '0')}:${minutes}`;
+}
+
 function validateItemForm(data) {
-  if (!data.DayDate) return 'Fecha requerida.';
-  if (!data.Title) return 'Title es requerido.';
+  if (!data.StartDate) return 'La fecha de inicio es requerida.';
+  if (!isValidDate(data.StartDate)) return 'La fecha de inicio no es válida.';
+  if (!isValidDate(data.EndDate)) return 'La fecha de finalización no es válida.';
+  if (data.EndDate < data.StartDate) return 'La fecha de finalización debe ser igual o posterior a la fecha de inicio.';
+  if (data.StartDate === data.EndDate && data.StartTime && data.EndTime && data.EndTime < data.StartTime) return 'La hora de finalización debe ser posterior a la hora de inicio cuando es el mismo día.';
+  if (!data.Title) return 'El título es requerido.';
   const amount = Number(data.AmountUSD);
   if (data.AmountUSD === '' || Number.isNaN(amount) || amount < 0) return 'AmountUSD debe ser numérico y mayor o igual a 0.';
-  if (!isValidTime(data.StartTime)) return 'StartTime debe usar formato HH:mm.';
-  if (!isValidTime(data.EndTime)) return 'EndTime debe usar formato HH:mm.';
+  if (!isValidTime(data.StartTime)) return 'La hora de inicio debe usar formato HH:mm.';
+  if (!isValidTime(data.EndTime)) return 'La hora de finalización debe usar formato HH:mm.';
   return '';
 }
 

@@ -1795,6 +1795,21 @@ h1 {
   font: inherit;
 }
 
+.edit-datetime-group {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.edit-datetime-group legend {
+  padding: 0 6px;
+  color: #475569;
+  font-size: .82rem;
+  font-weight: 800;
+}
+
 .edit-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

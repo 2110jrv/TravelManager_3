@@ -131,3 +131,11 @@ Timezone priority is: open item explicit fields, open day explicit fields, activ
 Italy 2026 remains a supported fallback using `Europe/Rome`. Known city context can label the Family destination clock as `Hora en Roma`, `Hora en Venecia`, `Hora en Santo Domingo`, `Hora en New York`, `Hora en Japón`, or another supported destination. If the destination is uncertain, the app uses `Hora en destino`.
 
 Admin and traveler access show one compact local device clock labeled `Hora actual`. The PIN screen does not show the app clock, agenda, menu, map, budget, or settings before access is granted.
+
+## Item start and end date-time editing
+
+Admin item create/edit now treats `StartDate`, `StartTime`, `EndDate`, and `EndTime` as the complete scheduling fields for an item. New items created from an open day default both dates to that selected day, while existing items load `StartDate` first and fall back to `DayDate` when older data does not have a separate start date.
+
+On save, `EndDate` defaults to `StartDate` when left blank, `DayDate` is derived from `StartDate`, and multiday state is calculated from the start/end date range. Invalid ranges are blocked before local save: the start date is required, the end date cannot be earlier than the start date, and same-day end times cannot be earlier than start times.
+
+The sync payload continues to store the full item object in `tm3_items.payload`, so these fields travel through the existing local-first IndexedDB and Supabase sync path without a schema change. Visible itinerary rendering continues to format user-facing times as AM/PM, while internal form and sync values remain compatible with the existing `HH:mm` validation and sorting behavior.
