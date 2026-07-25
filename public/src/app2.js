@@ -314,8 +314,9 @@ function renderAccessGate(message = '') {
   tabs?.classList.add('hidden');
   els.dayList.innerHTML = `
     <section class="access-gate" aria-labelledby="accessGateTitle">
-      <h2 id="accessGateTitle">TravelManager 3</h2>
-      <p>Ingresa el PIN de acceso para abrir el viaje.</p>
+      <img class="access-logo" src="./assets/tm3-logo-web.png" alt="Agenda Viajera" />
+      <h2 id="accessGateTitle">Agenda Viajera</h2>
+      <p>Tu viaje claro, sincronizado y siempre contigo.</p>
       <form id="accessPinForm" class="access-form" novalidate>
         <label>PIN<input id="accessPinInput" type="password" inputmode="numeric" autocomplete="current-password" maxlength="4" /></label>
         <button class="primary-button" type="submit">Entrar</button>
@@ -1501,6 +1502,15 @@ async function renderSettings() {
   const auditCount = audit.errors.length + audit.warnings.length + audit.info.length;
   els.settingsSection.innerHTML = `
     <section class="settings-panel cloud-sync-panel">
+      <div class="settings-brand">
+        <img src="./assets/tm3-logo-web.png" alt="Agenda Viajera" />
+        <div>
+          <h2>Agenda Viajera</h2>
+          <p>Tu viaje claro, sincronizado y siempre contigo.</p>
+        </div>
+      </div>
+    </section>
+    <section class="settings-panel cloud-sync-panel">
       <h2>Sincronización en la nube</h2>
       <div class="cloud-status">
         <span>Supabase</span>
@@ -1677,11 +1687,15 @@ function buildPdfReportHtml() {
 <html lang="es">
 <head>
   <meta charset="utf-8" />
-  <title>${escapeHtml(trip.TripTitle || trip.TripName || state.activeTripId)} - reporte</title>
+  <title>Agenda Viajera - ${escapeHtml(trip.TripTitle || trip.TripName || state.activeTripId)} - reporte</title>
   <style>
     @page { size: Letter portrait; margin: 0.55in; }
     * { box-sizing: border-box; }
     body { margin: 0; color: #111; font: 10.5pt/1.35 Arial, sans-serif; }
+    .brand { display: grid; grid-template-columns: 1.05in minmax(0, 1fr); gap: 14px; align-items: center; margin-bottom: 16px; }
+    .brand img { width: 1.05in; height: auto; }
+    .brand-title { margin: 0; color: #111; font-size: 10pt; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    .brand-tagline { margin: 2px 0 0; color: #555; font-size: 9.5pt; }
     h1 { margin: 0 0 6px; font-size: 20pt; }
     .meta { margin: 0 0 18px; color: #444; }
     .day-header { margin: 18px 0 0; padding: 10px 12px; background: #000; color: #fff; page-break-after: avoid; }
@@ -1697,7 +1711,14 @@ function buildPdfReportHtml() {
   </style>
 </head>
 <body>
-  <h1>${escapeHtml(trip.TripTitle || trip.TripName || state.activeTripId || 'TravelManager 3')}</h1>
+  <header class="brand">
+    <img src="./assets/tm3-logo.png" alt="Agenda Viajera" />
+    <div>
+      <p class="brand-title">Agenda Viajera</p>
+      <p class="brand-tagline">Tu viaje claro, sincronizado y siempre contigo.</p>
+    </div>
+  </header>
+  <h1>${escapeHtml(trip.TripTitle || trip.TripName || state.activeTripId || 'Agenda Viajera')}</h1>
   <p class="meta">${escapeHtml([trip.StartDate, trip.EndDate].filter(Boolean).join(' / '))} - Generado ${escapeHtml(formatDisplayDateTime(new Date().toISOString()))}</p>
   ${byDay.map(group => renderReportDay(group)).join('')}
 </body>

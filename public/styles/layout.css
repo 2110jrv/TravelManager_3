@@ -21,6 +21,18 @@
   font-size: .77rem;
 }
 
+.app-brandline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.app-brandline img {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+}
+
 h1, h2, h3, h4 {
   margin: 0;
 }
@@ -191,6 +203,14 @@ h1 {
   box-shadow: 0 18px 45px rgba(20, 35, 70, 0.08);
   display: grid;
   gap: 12px;
+  justify-items: center;
+  text-align: center;
+}
+
+.access-logo {
+  width: min(190px, 70vw);
+  height: auto;
+  object-fit: contain;
 }
 
 .access-gate p {
@@ -202,6 +222,30 @@ h1 {
 .access-form {
   display: grid;
   gap: 10px;
+  width: 100%;
+  text-align: left;
+}
+
+.settings-brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.settings-brand img {
+  width: 74px;
+  height: auto;
+  object-fit: contain;
+}
+
+.settings-brand h2,
+.settings-brand p {
+  margin: 0;
+}
+
+.settings-brand p {
+  color: #64748b;
+  font-weight: 700;
 }
 
 .access-form label {

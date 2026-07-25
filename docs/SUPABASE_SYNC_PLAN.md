@@ -1,5 +1,13 @@
 # Supabase Sync Plan
 
+## User-facing branding
+
+Official Agenda Viajera PNG assets are installed in `public/assets`.
+
+The user-facing app name is **Agenda Viajera** and the tagline is **"Tu viaje claro, sincronizado y siempre contigo."** Technical project and repository naming remains TravelManager_3 / TM3 where it is useful internally.
+
+The browser title, favicon links, apple touch icon, PWA manifest icons, install metadata, PIN screen, configuration branding, service worker cache, and printable PDF report header now use the official Agenda Viajera assets and naming.
+
 TravelManager 3 uses Supabase Auth, row level security, Supabase cloud tables, and IndexedDB so the public GitHub Pages app can sync safely across PC, phone, and tablet browsers.
 
 ## Auth and RLS

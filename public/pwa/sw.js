@@ -1,4 +1,4 @@
-const CACHE_NAME = 'travelmanager3-cache-v9';
+const CACHE_NAME = 'travelmanager3-cache-v10';
 const TILE_CACHE_NAME = 'travelmanager3-tiles-v1';
 const APP_SCOPE = new URL('../', self.location.href).href;
 const SUPABASE_HOST = 'cslludzuejkhsydqiabx.supabase.co';
@@ -7,6 +7,13 @@ const ASSET_PATHS = [
   '',
   'index.html',
   'manifest.webmanifest',
+  'assets/tm3-logo.png',
+  'assets/tm3-logo-web.png',
+  'assets/tm3-icon-512.png',
+  'assets/tm3-icon-192.png',
+  'assets/tm3-apple-touch-icon.png',
+  'assets/tm3-favicon-32.png',
+  'assets/tm3-favicon-16.png',
   'styles/base.css',
   'styles/layout.css',
   'vendor/leaflet/leaflet.css',
