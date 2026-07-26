@@ -147,3 +147,9 @@ Admin item create/edit now treats `StartDate`, `StartTime`, `EndDate`, and `EndT
 On save, `EndDate` defaults to `StartDate` when left blank, `DayDate` is derived from `StartDate`, and multiday state is calculated from the start/end date range. Invalid ranges are blocked before local save: the start date is required, the end date cannot be earlier than the start date, and same-day end times cannot be earlier than start times.
 
 The sync payload continues to store the full item object in `tm3_items.payload`, so these fields travel through the existing local-first IndexedDB and Supabase sync path without a schema change. Visible itinerary rendering continues to format user-facing times as AM/PM, while internal form and sync values remain compatible with the existing `HH:mm` validation and sorting behavior.
+
+## Savepoint 037 expanded item editor
+
+TM3-065 expands the admin New/Edit item modal into collapsible full-field sections while preserving the same local-first sync model. Basic data and date/time sections open by default; location, costs, contact/reservation, notes/details, image links, and advanced read-only fields stay collapsed until needed.
+
+The editor now exposes the important item payload fields already supported by full details and PDF output. Save still preserves unknown and unedited fields, stamps `UpdatedAt`, `ModifiedAt`, and `updatedAt`, increments `Version`, marks the item locally changed, and queues Supabase sync. Completion fields remain display-only in this modal because the checkmark workflow owns `Completed`, `CompletedAt`, and `CompletedByRole`.

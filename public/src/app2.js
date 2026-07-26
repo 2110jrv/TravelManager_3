@@ -61,6 +61,104 @@ const DATA_COLUMNS = ['ItemID', 'StartDate', 'EndDate', 'StartTime', 'EndTime', 
 const ITEM_TYPES = ['ACTIVITY', 'FLIGHT', 'FOOD', 'LODGING', 'TRANSPORT', 'OTHER'];
 const PLANNING_STATUSES = ['CONFIRMED', 'PROPOSED'];
 const PAYMENT_STATUSES = ['PAID', 'NOT_PAID', 'PARTIAL', 'RESERVED', 'ESTIMATED'];
+const EDITOR_NUMERIC_FIELDS = new Set(['AmountUSD', 'PaidUSD', 'Latitude', 'Longitude']);
+const EDITOR_TEXTAREA_FIELDS = new Set(['Description', 'Notes', 'Details', 'ImportantInfo', 'Instructions']);
+const EDITOR_TRIM_FIELDS = [
+  'Title', 'Category', 'City', 'Country', 'LocationName', 'Address', 'GooglePlusCode', 'GoogleMapsUrl', 'MapUrl',
+  'Currency', 'PaymentNotes', 'Provider', 'Website', 'Phone', 'Email', 'ReservationUrl', 'BookingReference',
+  'ConfirmationNumber', 'Description', 'Notes', 'Details', 'ImportantInfo', 'Instructions', 'ImageUrl', 'PhotoUrl'
+];
+const ITEM_EDITOR_SECTIONS = [
+  {
+    title: 'Datos basicos',
+    open: true,
+    fields: [
+      { name: 'Title', label: 'Titulo', required: true },
+      { name: 'ItemType', label: 'Tipo', type: 'select', options: ITEM_TYPES.map(value => [value, getCategoryLabel(value)]) },
+      { name: 'Category', label: 'Categoria' },
+      { name: 'PlanningStatus', label: 'Estado de planificacion', type: 'select', options: PLANNING_STATUSES.map(value => [value, value]) },
+      { name: 'PaymentStatus', label: 'Estado de pago', type: 'select', options: PAYMENT_STATUSES.map(value => [value, value]) }
+    ]
+  },
+  {
+    title: 'Fecha y hora',
+    open: true,
+    fields: [
+      { name: 'StartDate', label: 'Fecha de inicio', type: 'date', required: true },
+      { name: 'StartTime', label: 'Hora de inicio', placeholder: '9:30 AM' },
+      { name: 'EndDate', label: 'Fecha de finalizacion', type: 'date' },
+      { name: 'EndTime', label: 'Hora de finalizacion', placeholder: '10:30 AM' },
+      { name: 'IsAllDay', label: 'Todo el dia', type: 'checkbox' }
+    ]
+  },
+  {
+    title: 'Ubicacion y mapas',
+    fields: [
+      { name: 'City', label: 'Ciudad' },
+      { name: 'Country', label: 'Pais' },
+      { name: 'LocationName', label: 'Nombre del lugar' },
+      { name: 'Address', label: 'Direccion' },
+      { name: 'Latitude', label: 'Latitud', type: 'number', step: 'any' },
+      { name: 'Longitude', label: 'Longitud', type: 'number', step: 'any' },
+      { name: 'GooglePlusCode', label: 'GooglePlusCode' },
+      { name: 'GoogleMapsUrl', label: 'GoogleMapsUrl', type: 'url' },
+      { name: 'MapUrl', label: 'MapUrl', type: 'url' }
+    ]
+  },
+  {
+    title: 'Costos',
+    fields: [
+      { name: 'AmountUSD', label: 'Costo USD', type: 'number', min: '0', step: '0.01' },
+      { name: 'PaidUSD', label: 'Pagado USD', type: 'number', min: '0', step: '0.01' },
+      { name: 'Currency', label: 'Moneda' },
+      { name: 'IsPaid', label: 'Pagado', type: 'checkbox' },
+      { name: 'PaymentNotes', label: 'Notas de pago' }
+    ]
+  },
+  {
+    title: 'Contacto / reserva',
+    fields: [
+      { name: 'Provider', label: 'Proveedor' },
+      { name: 'Website', label: 'Website', type: 'url' },
+      { name: 'Phone', label: 'Telefono', type: 'tel' },
+      { name: 'Email', label: 'Email', type: 'email' },
+      { name: 'ReservationUrl', label: 'ReservationUrl', type: 'url' },
+      { name: 'BookingReference', label: 'BookingReference' },
+      { name: 'ConfirmationNumber', label: 'ConfirmationNumber' }
+    ]
+  },
+  {
+    title: 'Notas y detalles',
+    fields: [
+      { name: 'Description', label: 'Descripcion', type: 'textarea', rows: 3 },
+      { name: 'Notes', label: 'Notas', type: 'textarea', rows: 3 },
+      { name: 'Details', label: 'Details', type: 'textarea', rows: 3 },
+      { name: 'ImportantInfo', label: 'ImportantInfo' },
+      { name: 'Instructions', label: 'Instructions', type: 'textarea', rows: 3 }
+    ]
+  },
+  {
+    title: 'Imagen / enlaces',
+    fields: [
+      { name: 'ImageUrl', label: 'ImageUrl', type: 'url' },
+      { name: 'PhotoUrl', label: 'PhotoUrl', type: 'url' }
+    ]
+  },
+  {
+    title: 'Datos avanzados',
+    fields: [
+      { name: 'ItemID', label: 'ItemID', readonly: true },
+      { name: 'SourceItemID', label: 'SourceItemID', readonly: true },
+      { name: 'TripID', label: 'TripID', readonly: true },
+      { name: 'DayID', label: 'DayID', readonly: true },
+      { name: 'DayDate', label: 'DayDate', readonly: true },
+      { name: 'Completed', label: 'Completed', readonly: true },
+      { name: 'CompletedAt', label: 'CompletedAt', readonly: true },
+      { name: 'CompletedByRole', label: 'CompletedByRole', readonly: true }
+    ]
+  }
+];
+const ITEM_EDITOR_FIELDS = [...new Set(ITEM_EDITOR_SECTIONS.flatMap(section => section.fields.map(field => field.name)))];
 const SNAPSHOT_KEY = 'tm3.dataSnapshots';
 const VIEW_STATE_KEY = 'tm3.activeView';
 const CALENDAR_MONTH_KEY = 'tm3.calendarMonth';
@@ -3199,14 +3297,37 @@ function openNewItemModal() {
     StartTime: '',
     EndTime: '',
     ItemType: 'ACTIVITY',
+    Category: '',
     Title: '',
     AmountUSD: 0,
+    PaidUSD: '',
+    Currency: 'USD',
     PlanningStatus: state.activeTab,
     PaymentStatus: 'NOT_PAID',
     City: state.days.find(day => day.DayDate === today)?.City || '',
+    Country: '',
+    LocationName: '',
+    Address: '',
+    Latitude: '',
+    Longitude: '',
     GooglePlusCode: '',
     GoogleMapsUrl: '',
+    MapUrl: '',
+    PaymentNotes: '',
+    Provider: '',
+    Website: '',
+    Phone: '',
+    Email: '',
+    ReservationUrl: '',
+    BookingReference: '',
+    ConfirmationNumber: '',
+    Description: '',
     Notes: '',
+    Details: '',
+    ImportantInfo: '',
+    Instructions: '',
+    ImageUrl: '',
+    PhotoUrl: '',
     IsAllDay: false,
     IsPaid: false
   });
@@ -3227,6 +3348,9 @@ async function saveEditForm(event) {
     ...data,
     DayDate: data.StartDate,
     AmountUSD: Number(data.AmountUSD),
+    PaidUSD: data.PaidUSD === '' ? '' : Number(data.PaidUSD),
+    Latitude: data.Latitude === '' ? '' : Number(data.Latitude),
+    Longitude: data.Longitude === '' ? '' : Number(data.Longitude),
     IsAllDay: event.currentTarget.elements.IsAllDay.checked,
     IsPaid: event.currentTarget.elements.IsPaid.checked,
     IsMultiDay: data.EndDate > data.StartDate
@@ -3260,7 +3384,10 @@ async function saveNewItemForm(event) {
     DatasetID: ITALY_DATASET_ID,
     TripID: state.activeTripId,
     AmountUSD: Number(data.AmountUSD),
-    Currency: 'USD',
+    PaidUSD: data.PaidUSD === '' ? '' : Number(data.PaidUSD),
+    Latitude: data.Latitude === '' ? '' : Number(data.Latitude),
+    Longitude: data.Longitude === '' ? '' : Number(data.Longitude),
+    Currency: data.Currency || 'USD',
     Status: data.PlanningStatus === 'CONFIRMED' ? 'CONFIRMED' : 'PLANNED',
     IsAllDay: event.currentTarget.elements.IsAllDay.checked,
     IsPaid: event.currentTarget.elements.IsPaid.checked,
@@ -3294,30 +3421,7 @@ function createItemModal(id, title, submitHandler) {
       </header>
       <form class="edit-form" novalidate>
         <div class="edit-error" role="alert"></div>
-        <input name="DayDate" type="hidden" />
-        <label>Título<input name="Title" required /></label>
-        <fieldset class="edit-datetime-group">
-          <legend>Fecha y hora</legend>
-          <div class="edit-grid edit-datetime-grid">
-            <label>Fecha de inicio<input name="StartDate" type="date" required /></label>
-            <label>Hora de inicio<input name="StartTime" placeholder="9:30 AM" /></label>
-            <label>Fecha de finalización<input name="EndDate" type="date" /></label>
-            <label>Hora de finalización<input name="EndTime" placeholder="10:30 AM" /></label>
-          </div>
-        </fieldset>
-        <div class="edit-grid">
-          <label>Tipo<select name="ItemType"><option value="ACTIVITY">Actividad</option><option value="FLIGHT">Vuelo</option><option value="FOOD">Comida</option><option value="LODGING">Hospedaje</option><option value="TRANSPORT">Transporte</option><option value="OTHER">Otro</option></select></label>
-          <label>Costo USD<input name="AmountUSD" type="number" min="0" step="0.01" /></label>
-        </div>
-        <div class="edit-grid">
-          <label>Estado de planificación<select name="PlanningStatus"><option value="CONFIRMED">CONFIRMED</option><option value="PROPOSED">PROPOSED</option></select></label>
-          <label>Estado de pago<select name="PaymentStatus"><option value="NOT_PAID">NOT_PAID</option><option value="RESERVED">RESERVED</option><option value="PAID">PAID</option><option value="PARTIAL">PARTIAL</option><option value="ESTIMATED">ESTIMATED</option></select></label>
-        </div>
-        <label>Ciudad<input name="City" /></label>
-        <label>GooglePlusCode<input name="GooglePlusCode" /></label>
-        <label>GoogleMapsUrl<input name="GoogleMapsUrl" type="url" /></label>
-        <label>Notas<textarea name="Notes" rows="3"></textarea></label>
-        <div class="edit-checks"><label><input name="IsAllDay" type="checkbox" /> Todo el día</label><label><input name="IsPaid" type="checkbox" /> Pagado</label></div>
+        ${renderItemEditorSections()}
         <footer class="edit-actions"><button type="button" class="secondary-button danger-button hidden" data-delete-item>Eliminar item</button><button type="button" class="secondary-button" data-cancel>Cancelar</button><button type="submit" class="primary-button">Guardar</button></footer>
       </form>
     </div>
@@ -3334,6 +3438,42 @@ function createItemModal(id, title, submitHandler) {
   });
   form.addEventListener('submit', submitHandler);
   return api;
+}
+
+function renderItemEditorSections() {
+  return ITEM_EDITOR_SECTIONS.map((section, sectionIndex) => `
+    <details class="edit-section" ${section.open ? 'open' : ''}>
+      <summary>${escapeHtml(section.title)}</summary>
+      <div class="edit-grid">
+        ${section.fields.map(field => renderItemEditorField(field, sectionIndex)).join('')}
+      </div>
+    </details>
+  `).join('');
+}
+
+function renderItemEditorField(field, sectionIndex) {
+  const id = `itemEditor-${sectionIndex}-${field.name}`;
+  const commonAttrs = [
+    `id="${id}"`,
+    field.readonly ? `data-display-field="${field.name}"` : `name="${field.name}"`,
+    field.required ? 'required' : '',
+    field.readonly ? 'readonly disabled' : '',
+    field.placeholder ? `placeholder="${escapeHtml(field.placeholder)}"` : '',
+    field.min !== undefined ? `min="${escapeHtml(field.min)}"` : '',
+    field.step !== undefined ? `step="${escapeHtml(field.step)}"` : ''
+  ].filter(Boolean).join(' ');
+  const labelClass = EDITOR_TEXTAREA_FIELDS.has(field.name) ? ' class="edit-field-wide"' : '';
+
+  if (field.type === 'select') {
+    return `<label${labelClass} for="${id}">${escapeHtml(field.label)}<select ${commonAttrs}>${field.options.map(([value, label]) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`).join('')}</select></label>`;
+  }
+  if (field.type === 'textarea') {
+    return `<label${labelClass} for="${id}">${escapeHtml(field.label)}<textarea ${commonAttrs} rows="${field.rows || 3}"></textarea></label>`;
+  }
+  if (field.type === 'checkbox') {
+    return `<label class="edit-check-field" for="${id}"><input ${commonAttrs} type="checkbox" /> ${escapeHtml(field.label)}</label>`;
+  }
+  return `<label${labelClass} for="${id}">${escapeHtml(field.label)}<input ${commonAttrs} type="${escapeHtml(field.type || 'text')}" /></label>`;
 }
 
 function requestCloseModal(modal) {
@@ -3359,11 +3499,12 @@ function fillForm(form, item) {
     ...item,
     DayDate: item.DayDate || startDate,
     StartDate: startDate,
-    EndDate: item.EndDate || startDate
+    EndDate: item.EndDate || startDate,
+    Currency: item.Currency || 'USD'
   };
-  const fields = ['DayDate', 'StartDate', 'EndDate', 'StartTime', 'EndTime', 'Title', 'ItemType', 'AmountUSD', 'PlanningStatus', 'PaymentStatus', 'City', 'GooglePlusCode', 'GoogleMapsUrl', 'Notes'];
-  fields.forEach(field => {
-    if (form.elements[field]) form.elements[field].value = normalized[field] ?? '';
+  ITEM_EDITOR_FIELDS.forEach(field => {
+    const element = form.elements[field] || form.querySelector(`[data-display-field="${field}"]`);
+    if (element && element.type !== 'checkbox') element.value = normalized[field] ?? '';
   });
   if (form.elements.StartTime) form.elements.StartTime.value = formatDisplayTime(normalized.StartTime);
   if (form.elements.EndTime) form.elements.EndTime.value = formatDisplayTime(normalized.EndTime);
@@ -3379,10 +3520,9 @@ function formData(form) {
   data.DayDate = data.StartDate;
   data.StartTime = normalizeFormTime(data.StartTime);
   data.EndTime = normalizeFormTime(data.EndTime);
-  data.City = data.City.trim();
-  data.GooglePlusCode = data.GooglePlusCode.trim();
-  data.GoogleMapsUrl = data.GoogleMapsUrl.trim();
-  data.Notes = data.Notes.trim();
+  EDITOR_TRIM_FIELDS.forEach(field => {
+    if (field in data) data[field] = data[field].trim();
+  });
   return data;
 }
 
@@ -3411,6 +3551,11 @@ function validateItemForm(data) {
   if (!data.Title) return 'El título es requerido.';
   const amount = Number(data.AmountUSD);
   if (data.AmountUSD === '' || Number.isNaN(amount) || amount < 0) return 'AmountUSD debe ser numérico y mayor o igual a 0.';
+  for (const field of EDITOR_NUMERIC_FIELDS) {
+    if (field === 'AmountUSD') continue;
+    const value = data[field];
+    if (value !== '' && value !== undefined && Number.isNaN(Number(value))) return `${field} debe ser numérico.`;
+  }
   if (!isValidTime(data.StartTime)) return 'La hora de inicio debe usar formato HH:mm.';
   if (!isValidTime(data.EndTime)) return 'La hora de finalización debe usar formato HH:mm.';
   return '';

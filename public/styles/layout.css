@@ -1817,6 +1817,7 @@ h1 {
   gap: 12px;
   padding: 16px;
   overflow: auto;
+  min-width: 0;
 }
 
 .edit-form label {
@@ -1831,6 +1832,8 @@ h1 {
 .edit-form select,
 .edit-form textarea {
   width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   border: 1px solid #cbd5e1;
   border-radius: 8px;
   padding: 10px 11px;
@@ -1839,25 +1842,75 @@ h1 {
   font: inherit;
 }
 
-.edit-datetime-group {
+.edit-form input:disabled,
+.edit-form select:disabled,
+.edit-form textarea:disabled {
+  color: #64748b;
+  background: #f8fafc;
+}
+
+.edit-section {
   display: grid;
   gap: 10px;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
-  padding: 12px;
+  background: #fff;
+  overflow: hidden;
 }
 
-.edit-datetime-group legend {
-  padding: 0 6px;
+.edit-section summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 12px;
   color: #475569;
   font-size: .82rem;
   font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.edit-section summary::-webkit-details-marker {
+  display: none;
+}
+
+.edit-section summary::after {
+  content: '+';
+  float: right;
+  color: #0f766e;
+  font-size: 1rem;
+}
+
+.edit-section[open] summary {
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.edit-section[open] summary::after {
+  content: '−';
 }
 
 .edit-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
+  padding: 12px;
+  min-width: 0;
+}
+
+.edit-field-wide {
+  grid-column: 1 / -1;
+}
+
+.edit-check-field {
+  align-self: end;
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 0;
+}
+
+.edit-check-field input {
+  width: auto;
 }
 
 .edit-checks {
@@ -1907,6 +1960,11 @@ h1 {
 
   .edit-grid {
     grid-template-columns: 1fr;
+  }
+
+  .edit-section summary,
+  .edit-grid {
+    padding-inline: 10px;
   }
 
   .edit-actions {
