@@ -163,3 +163,7 @@ TM3-075 keeps Nuevo item and Editar item on the same compact editor body. Both m
 ## Savepoint 043 itinerary time ranges
 
 TM3-077 shows planned `StartTime – EndTime` ranges on itinerary cards when an item has a real scheduled duration, while preserving single-time lodging check-in/check-out cards and excluding travel purchase/pre-trip purchase items. Expanded details also surface the planned range so completed cards can remain positioned by completion time without losing the original schedule.
+
+## Savepoint 044 itinerary wait time gaps
+
+TM3-079 inserts subtle wait-time mini cards between visible scheduled itinerary items in Inicio after role, status tab, day, and occurrence filtering. Gaps use only eligible duration-based items, skip lodging/generated all-day cards and purchase-like entries, and do not affect PDF, budget, local data, or Supabase sync.

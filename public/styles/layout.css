@@ -474,6 +474,23 @@ h1 {
 .agenda-item-other { background: #fff; border-color: #e2e8f0; }
 .agenda-item-flight { background: #dcfce7; border-color: #bbf7d0; }
 
+.agenda-gap-card {
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.agenda-gap-card__text {
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: .78rem;
+  font-weight: 700;
+  line-height: 1;
+  padding: 5px 10px;
+}
+
 .agenda-item-completed {
   background: #f3f4f6;
   border-color: #d1d5db;

@@ -1008,10 +1008,27 @@ function renderDays(items) {
     if (dayItems.length === 0) {
       details.innerHTML = '<div class="empty-day">Sin items programados</div>';
     } else {
-      dayItems.forEach(item => details.append(renderItem(item)));
+      renderDayItemsWithGaps(dayItems, details);
     }
     els.dayList.append(card);
   }
+}
+
+function renderDayItemsWithGaps(dayItems, container) {
+  dayItems.forEach((item, index) => {
+    container.append(renderItem(item));
+    const nextItem = dayItems[index + 1];
+    const gapMinutes = nextItem ? getWaitGapMinutes(item, nextItem) : 0;
+    if (gapMinutes > 0) container.append(renderAgendaGapCard(gapMinutes));
+  });
+}
+
+function renderAgendaGapCard(minutes) {
+  const card = document.createElement('div');
+  card.className = 'agenda-gap-card';
+  card.setAttribute('aria-label', `Tiempo de espera ${formatGapDuration(minutes, false)}`);
+  card.innerHTML = `<span class="agenda-gap-card__text">${escapeHtml(formatGapDuration(minutes))}</span>`;
+  return card;
 }
 
 function getHomeDayItems(items, dayDate) {
@@ -3961,6 +3978,57 @@ function shouldShowItineraryTimeRange(item) {
 
 function isScheduledShoppingVisit(text) {
   return matchesAny(text, ['market', 'mercado', 'store visit', 'visita a tienda', 'mall', 'centro comercial', 'feria', 'evento']);
+}
+
+function getWaitGapMinutes(previousItem, nextItem) {
+  const previousEnd = getWaitGapEndDate(previousItem);
+  const nextStart = getWaitGapStartDate(nextItem);
+  if (!previousEnd || !nextStart || nextStart <= previousEnd) return 0;
+  return Math.round((nextStart.getTime() - previousEnd.getTime()) / 60000);
+}
+
+function getWaitGapStartDate(item) {
+  if (!isWaitGapAnchor(item)) return null;
+  const date = item.DayDate || item.StartDate || '';
+  return parseLocalDateTime(date, item.StartTime);
+}
+
+function getWaitGapEndDate(item) {
+  if (!isWaitGapAnchor(item)) return null;
+  const startDate = item.DayDate || item.StartDate || '';
+  const endDate = item.EndDate && item.EndDate > startDate ? item.EndDate : startDate;
+  const start = parseLocalDateTime(startDate, item.StartTime);
+  const end = parseLocalDateTime(endDate, item.EndTime);
+  if (!start || !end || end <= start) return null;
+  return end;
+}
+
+function isWaitGapAnchor(item) {
+  if (isItemCompleted(item)) return false;
+  return shouldShowItineraryTimeRange(item);
+}
+
+function parseLocalDateTime(dateValue, timeValue) {
+  if (!isValidDate(dateValue) || !isValidTime(timeValue)) return null;
+  const date = new Date(`${dateValue}T${timeValue}:00`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatGapDuration(minutes, withParens = true) {
+  const rounded = Math.max(0, Math.round(Number(minutes) || 0));
+  let text = '';
+  if (rounded < 60) {
+    text = `${rounded} ${rounded === 1 ? 'minuto' : 'minutos'}`;
+  } else if (rounded === 60) {
+    text = '1 hora';
+  } else if (rounded % 60 === 0) {
+    const hours = rounded / 60;
+    text = `${hours} horas`;
+  } else {
+    const hours = Number((rounded / 60).toFixed(2)).toString();
+    text = `${hours} horas`;
+  }
+  return withParens ? `(${text})` : text;
 }
 
 function renderCategoryChip(visual) {
