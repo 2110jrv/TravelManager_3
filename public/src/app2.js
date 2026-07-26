@@ -219,7 +219,7 @@ async function bootAppData() {
 
 function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
-  const swUrl = new URL('../pwa/sw.js', import.meta.url);
+  const swUrl = new URL('../sw.js', import.meta.url);
   const scope = new URL('../', import.meta.url);
   window.addEventListener('load', () => {
     navigator.serviceWorker.register(swUrl, { scope }).catch(() => {

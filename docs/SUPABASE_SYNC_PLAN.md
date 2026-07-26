@@ -101,6 +101,8 @@ GitHub Pages should use Source: GitHub Actions. The workflow at `.github/workflo
 
 The app is path-safe for both local development at `http://127.0.0.1:5003/` and GitHub Pages under `/TravelManager_3/`. Static assets, the manifest, Leaflet files, itinerary data, and service worker registration use relative URLs or runtime scope detection.
 
+The active service worker lives at `public/sw.js`, so GitHub Pages serves it from `/TravelManager_3/sw.js` and it can control the full `/TravelManager_3/` app scope. `public/pwa/sw.js` remains only as a legacy wrapper for older registrations.
+
 Add these Supabase Auth redirect URLs in the Supabase Dashboard:
 
 - `http://127.0.0.1:5003/**`
