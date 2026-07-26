@@ -1812,19 +1812,21 @@ h1 {
   z-index: 20;
   display: grid;
   place-items: center;
-  padding: 18px;
+  padding: 16px;
   background: rgba(15, 23, 42, 0.5);
+  box-sizing: border-box;
 }
 
 .edit-modal-panel {
-  width: min(100%, 720px);
-  max-height: min(92vh, 820px);
+  width: min(880px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
   display: flex;
   flex-direction: column;
   background: #fff;
   border-radius: 8px;
   box-shadow: 0 22px 60px rgba(15, 23, 42, 0.22);
   overflow: hidden;
+  box-sizing: border-box;
 }
 
 .edit-modal-header {
@@ -1840,8 +1842,12 @@ h1 {
   display: grid;
   gap: 10px;
   padding: 12px;
-  overflow: auto;
+  flex: 1 1 auto;
+  min-height: 0;
   min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  box-sizing: border-box;
 }
 
 .edit-form label {
@@ -1883,7 +1889,9 @@ h1 {
 }
 
 .json-import-panel textarea {
+  min-height: 96px;
   background: #fff;
+  resize: vertical;
 }
 
 .json-import-actions {
@@ -1942,23 +1950,27 @@ h1 {
 
 .edit-actions {
   position: sticky;
-  bottom: -16px;
+  bottom: 0;
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  padding-top: 8px;
+  padding: 8px 0 0;
   background: #fff;
 }
 
 @media (max-width: 640px) {
   .edit-modal {
-    padding: 10px;
+    padding: 8px;
     align-items: stretch;
   }
 
   .edit-modal-panel {
-    max-height: calc(100vh - 20px);
-    width: 100%;
+    width: calc(100vw - 16px);
+    max-height: calc(100dvh - 16px);
+  }
+
+  .edit-form {
+    padding: 10px;
   }
 
   .compact-editor-grid {

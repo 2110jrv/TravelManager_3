@@ -167,3 +167,7 @@ TM3-077 shows planned `StartTime – EndTime` ranges on itinerary cards when an 
 ## Savepoint 044 itinerary wait time gaps
 
 TM3-079 inserts subtle wait-time mini cards between visible scheduled itinerary items in Inicio after role, status tab, day, and occurrence filtering. Gaps use only eligible duration-based items, skip lodging/generated all-day cards and purchase-like entries, and do not affect PDF, budget, local data, or Supabase sync.
+
+## Savepoint 045 restored JSON item editor modal
+
+TM3-081 restores the shared Nuevo item / Editar item compact JSON editor modal to a full, usable responsive size. The modal keeps the JSON import panel, AI instruction copy action, compact two-column desktop form, single-column mobile form, internal vertical scrolling, and sticky save/cancel/delete actions without returning to collapsible editor sections.

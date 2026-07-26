@@ -3483,7 +3483,7 @@ function createItemModal(id, title, submitHandler) {
         <h2 id="${id}Title">${title}</h2>
         <button type="button" class="icon-button" data-cancel aria-label="Cerrar">×</button>
       </header>
-      <form class="edit-form" novalidate>
+      <form class="edit-form item-editor-form" novalidate>
         ${renderItemEditorFormContent(id)}
       </form>
     </div>
