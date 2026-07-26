@@ -115,6 +115,82 @@ const ITEM_EDITOR_FIELDS = [
   { name: 'DayDate', label: 'DayDate', readonly: true }
 ];
 const ITEM_EDITOR_FIELD_NAMES = ITEM_EDITOR_FIELDS.map(field => field.name);
+const AI_JSON_INSTRUCTIONS = `Necesito que organices esta información para importarla o copiarla a mi app Agenda Viajera.
+
+Devuélveme la información en JSON válido. No lo escribas en párrafos. Puedes devolver un objeto único {...} o un array de objetos [{...}]. Un objeto por cada item del itinerario.
+
+Usa estos campos exactamente cuando estén disponibles:
+
+ItemID, Title, ItemType, Category, PlanningStatus, PaymentStatus, StartDate, StartTime, EndDate, EndTime, City, Country, LocationName, Address, Latitude, Longitude, GooglePlusCode, GoogleMapsUrl, MapUrl, AmountUSD, PaidUSD, Currency, Provider, Website, Phone, Email, ReservationUrl, BookingReference, ConfirmationNumber, Description, Notes, Details, ImportantInfo, Instructions, ImageUrl, PhotoUrl, Completed, CompletedAt, CompletedByRole.
+
+Reglas:
+- ItemID déjalo vacío si no sabes el próximo número.
+- Fechas en formato YYYY-MM-DD.
+- Horas en formato HH:mm de 24 horas. Ejemplos: 08:30, 13:45, 21:00.
+- PlanningStatus solo puede ser CONFIRMED o PROPOSED.
+- PaymentStatus solo puede ser PAID, NOT_PAID, PARTIAL, INCLUDED o UNKNOWN.
+- ItemType solo puede ser TRANSPORT, LODGING, FOOD, SHOPPING, TOUR, TRIP_PURCHASE, ACTIVITY u OTHER.
+- AmountUSD y PaidUSD deben ser números sin símbolo de moneda. Ejemplo: 124.57.
+- Currency debe ser USD, EUR u otra moneda real.
+- Completed siempre debe ser false.
+- CompletedAt siempre debe ser null.
+- CompletedByRole siempre debe ser null.
+- No inventes GPS, teléfono, email, website, precio, número de confirmación ni dirección si no están confirmados.
+- Si un dato no se sabe, déjalo como "" o null.
+- Para hospedaje: StartDate/StartTime son check-in y EndDate/EndTime son check-out.
+- Para transporte: StartDate/StartTime son salida y EndDate/EndTime son llegada.
+- Para tours, actividades o comidas: usa hora estimada si se conoce; si no, deja StartTime y EndTime vacíos.
+- Si encuentras enlaces, colócalos en Website, ReservationUrl, GoogleMapsUrl o MapUrl según corresponda.
+- Si encuentras instrucciones importantes de llegada, entrada, boletos, maletas, reglas, contacto o check-in, colócalas en Instructions o ImportantInfo.
+- Si encuentras detalles útiles pero no críticos, colócalos en Details.
+- Si hay notas personales o contexto del viaje, colócalas en Notes.
+- Devuelve solo JSON válido, sin markdown y sin explicación adicional.
+
+Ejemplo:
+
+[
+  {
+    "ItemID": "",
+    "Title": "Nombre del item",
+    "ItemType": "LODGING",
+    "Category": "Airbnb",
+    "PlanningStatus": "CONFIRMED",
+    "PaymentStatus": "PAID",
+    "StartDate": "2026-10-21",
+    "StartTime": "12:00",
+    "EndDate": "2026-10-24",
+    "EndTime": "10:00",
+    "City": "Venice",
+    "Country": "Italy",
+    "LocationName": "Nombre del lugar",
+    "Address": "",
+    "Latitude": null,
+    "Longitude": null,
+    "GooglePlusCode": "",
+    "GoogleMapsUrl": "",
+    "MapUrl": "",
+    "AmountUSD": 0,
+    "PaidUSD": 0,
+    "Currency": "USD",
+    "Provider": "",
+    "Website": "",
+    "Phone": "",
+    "Email": "",
+    "ReservationUrl": "",
+    "BookingReference": "",
+    "ConfirmationNumber": "",
+    "Description": "",
+    "Notes": "",
+    "Details": "",
+    "ImportantInfo": "",
+    "Instructions": "",
+    "ImageUrl": "",
+    "PhotoUrl": "",
+    "Completed": false,
+    "CompletedAt": null,
+    "CompletedByRole": null
+  }
+]`;
 const editModal = createItemModal('editItemModal', 'Editar item', saveEditForm);
 const newItemModal = createItemModal('newItemModal', 'Nuevo item', saveNewItemForm);
 const SNAPSHOT_KEY = 'tm3.dataSnapshots';
@@ -3395,6 +3471,7 @@ function createItemModal(id, title, submitHandler) {
           <div class="json-import-actions">
             <button type="button" class="secondary-button" data-load-json>Cargar JSON en formulario</button>
             <button type="button" class="secondary-button" data-clear-json>Limpiar JSON</button>
+            <button type="button" class="secondary-button" data-copy-ai-json>Copiar instrucciones para IA</button>
           </div>
         </div>
         <div class="compact-editor-grid">
@@ -3413,6 +3490,7 @@ function createItemModal(id, title, submitHandler) {
   modal.querySelectorAll('[data-cancel]').forEach(button => button.addEventListener('click', () => requestCloseModal(api)));
   modal.querySelector('[data-load-json]').addEventListener('click', () => loadJsonIntoForm(api));
   modal.querySelector('[data-clear-json]').addEventListener('click', () => clearJsonInput(api));
+  modal.querySelector('[data-copy-ai-json]').addEventListener('click', () => copyAiJsonInstructions(api));
   modal.querySelector('[data-delete-item]').addEventListener('click', () => {
     if (state.editingItem) deleteLogicalItem(state.editingItem, api);
   });
@@ -3563,6 +3641,20 @@ function ensureSelectOption(select, value) {
 function clearJsonInput(modal) {
   modal.form.querySelector('[data-json-input]').value = '';
   setModalError(modal, '');
+}
+
+async function copyAiJsonInstructions(modal) {
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
+    await navigator.clipboard.writeText(AI_JSON_INSTRUCTIONS);
+    setModalError(modal, 'Instrucciones copiadas.');
+  } catch (_error) {
+    const input = modal.form.querySelector('[data-json-input]');
+    input.value = AI_JSON_INSTRUCTIONS;
+    input.focus();
+    input.select();
+    setModalError(modal, 'No se pudo copiar automáticamente. Copia las instrucciones manualmente.');
+  }
 }
 
 function normalizeJsonItemForEditor(item, form) {
