@@ -155,3 +155,7 @@ The sync payload continues to store the full item object in `tm3_items.payload`,
 TM3-071 replaces the collapsible admin New/Edit item modal with a compact full-field form and a visible JSON paste/import area. Admin can paste either one item object or an array whose first entry is an item, load matching fields into the form, review or edit manually, and then save explicitly.
 
 The editor exposes the important item payload fields already supported by full details and PDF output. It also includes a copyable Spanish AI instruction template so external assistants can prepare compatible Agenda Viajera JSON. Save still preserves unknown and unedited fields, including unknown fields loaded from JSON, stamps `UpdatedAt`, `ModifiedAt`, and `updatedAt`, increments `Version`, marks the item locally changed, and queues Supabase sync. Completion fields remain display-only in this modal because the checkmark workflow owns `Completed`, `CompletedAt`, and `CompletedByRole`.
+
+## Savepoint 042 unified item editor
+
+TM3-075 keeps Nuevo item and Editar item on the same compact editor body. Both modals render the JSON paste/import panel, the copyable AI instructions action, and the full compact field grid from one shared function, so Editar item no longer has a separate collapsible section layout.

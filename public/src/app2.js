@@ -3464,20 +3464,7 @@ function createItemModal(id, title, submitHandler) {
         <button type="button" class="icon-button" data-cancel aria-label="Cerrar">×</button>
       </header>
       <form class="edit-form" novalidate>
-        <div class="edit-error" role="alert"></div>
-        <div class="json-import-panel">
-          <label for="${id}JsonInput">Pegar JSON del item</label>
-          <textarea id="${id}JsonInput" data-json-input rows="4" placeholder="Pega aqui un objeto JSON {...} o un array con un item [{...}]"></textarea>
-          <div class="json-import-actions">
-            <button type="button" class="secondary-button" data-load-json>Cargar JSON en formulario</button>
-            <button type="button" class="secondary-button" data-clear-json>Limpiar JSON</button>
-            <button type="button" class="secondary-button" data-copy-ai-json>Copiar instrucciones para IA</button>
-          </div>
-        </div>
-        <div class="compact-editor-grid">
-          ${renderItemEditorFields()}
-        </div>
-        <footer class="edit-actions"><button type="button" class="secondary-button danger-button hidden" data-delete-item>Eliminar item</button><button type="button" class="secondary-button" data-cancel>Cancelar</button><button type="submit" class="primary-button">Guardar</button></footer>
+        ${renderItemEditorFormContent(id)}
       </form>
     </div>
   `;
@@ -3496,6 +3483,25 @@ function createItemModal(id, title, submitHandler) {
   });
   form.addEventListener('submit', submitHandler);
   return api;
+}
+
+function renderItemEditorFormContent(id) {
+  return `
+    <div class="edit-error" role="alert"></div>
+    <div class="json-import-panel">
+      <label for="${id}JsonInput">Pegar JSON del item</label>
+      <textarea id="${id}JsonInput" data-json-input rows="4" placeholder="Pega aqui un objeto JSON {...} o un array con un item [{...}]"></textarea>
+      <div class="json-import-actions">
+        <button type="button" class="secondary-button" data-load-json>Cargar JSON en formulario</button>
+        <button type="button" class="secondary-button" data-clear-json>Limpiar JSON</button>
+        <button type="button" class="secondary-button" data-copy-ai-json>Copiar instrucciones para IA</button>
+      </div>
+    </div>
+    <div class="compact-editor-grid">
+      ${renderItemEditorFields()}
+    </div>
+    <footer class="edit-actions"><button type="button" class="secondary-button danger-button hidden" data-delete-item>Eliminar item</button><button type="button" class="secondary-button" data-cancel>Cancelar</button><button type="submit" class="primary-button">Guardar</button></footer>
+  `;
 }
 
 function renderItemEditorFields() {
