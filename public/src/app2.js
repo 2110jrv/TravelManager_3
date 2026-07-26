@@ -55,8 +55,6 @@ const els = {
   tabs: [...document.querySelectorAll('.tab-button')]
 };
 
-const editModal = createItemModal('editItemModal', 'Editar item', saveEditForm);
-const newItemModal = createItemModal('newItemModal', 'Nuevo item', saveNewItemForm);
 const DATA_COLUMNS = ['ItemID', 'StartDate', 'EndDate', 'StartTime', 'EndTime', 'ItemType', 'Title', 'City', 'AmountUSD', 'PlanningStatus', 'PaymentStatus', 'IsPaid', 'Completed', 'CompletedAt', 'CompletedByRole', 'GooglePlusCode', 'GoogleMapsUrl', 'Notes'];
 const ITEM_TYPES = ['ACTIVITY', 'FLIGHT', 'FOOD', 'LODGING', 'TRANSPORT', 'OTHER'];
 const PLANNING_STATUSES = ['CONFIRMED', 'PROPOSED'];
@@ -159,6 +157,8 @@ const ITEM_EDITOR_SECTIONS = [
   }
 ];
 const ITEM_EDITOR_FIELDS = [...new Set(ITEM_EDITOR_SECTIONS.flatMap(section => section.fields.map(field => field.name)))];
+const editModal = createItemModal('editItemModal', 'Editar item', saveEditForm);
+const newItemModal = createItemModal('newItemModal', 'Nuevo item', saveNewItemForm);
 const SNAPSHOT_KEY = 'tm3.dataSnapshots';
 const VIEW_STATE_KEY = 'tm3.activeView';
 const CALENDAR_MONTH_KEY = 'tm3.calendarMonth';
