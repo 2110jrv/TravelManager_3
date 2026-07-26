@@ -505,6 +505,13 @@ h1 {
   font-size: .9rem;
 }
 
+.item-time-range {
+  font-size: .78rem;
+  line-height: 1.2;
+  overflow-wrap: normal;
+  white-space: normal;
+}
+
 .item-title {
   grid-column: 2;
   min-width: 0;

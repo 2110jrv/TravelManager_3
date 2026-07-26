@@ -1401,9 +1401,12 @@ function renderItem(item) {
   itemEl.className = `agenda-item agenda-item-${categoryVisual.family}${completed ? ' agenda-item-completed' : ''}`;
   itemEl.dataset.itemId = item.ItemID;
   const time = item.IsAllDay ? 'Todo el día' : formatDisplayTime(item.StartTime);
+  const plannedTimeRange = getItineraryTimeRange(item);
+  const fallbackDisplayTime = plannedTimeRange || time;
   const categoryChip = renderCategoryChip(categoryVisual);
   const categoryIcon = renderCategoryCardIcon(categoryVisual);
-  const displayTime = completed && item.CompletedAgendaTime ? formatDisplayTime(item.CompletedAgendaTime) : time;
+  const displayTime = completed && item.CompletedAgendaTime ? formatDisplayTime(item.CompletedAgendaTime) : fallbackDisplayTime;
+  const timeClass = plannedTimeRange && displayTime === plannedTimeRange ? ' item-time-range' : '';
   const priceChip = canSeePrices() ? `<span class="item-price">${formatItemAmount(item)}</span>` : '';
   const planningToggle = canEditApp() ? `
         <span class="planning-toggle" role="group" aria-label="Estado de planificaciÃ³n">
@@ -1415,7 +1418,7 @@ function renderItem(item) {
   const completedBadge = completed ? '<span class="completed-badge">Completado</span>' : '';
   itemEl.innerHTML = `
     <div class="item-summary" role="button" tabindex="0" aria-expanded="${isOpen}">
-      <span class="item-time">${escapeHtml(displayTime)}</span>
+      <span class="item-time${timeClass}">${escapeHtml(displayTime)}</span>
       <span class="item-title">${escapeHtml(getDisplayTitle(item))}</span>
       <span class="item-meta">
         ${categoryChip}
@@ -3242,7 +3245,7 @@ function formatDisplayTime(value, timeZone) {
 }
 
 function formatDisplayTimeRange(start, end) {
-  return [formatDisplayTime(start), formatDisplayTime(end)].filter(Boolean).join(' - ');
+  return [formatDisplayTime(start), formatDisplayTime(end)].filter(Boolean).join(' – ');
 }
 
 function formatDisplayDate(value, timeZone) {
@@ -3788,7 +3791,9 @@ function getDisplayTitle(item) {
 }
 
 function renderDetails(item, isFullOpen = false) {
+  const plannedTimeRange = getItineraryTimeRange(item);
   const summary = [
+    plannedTimeRange ? `Horario planificado: ${plannedTimeRange}` : '',
     item.Description,
     item.Notes,
     item.GooglePlusCode ? `Plus Code: ${item.GooglePlusCode}` : ''
@@ -3933,6 +3938,29 @@ function isPhoneDetailKey(key) {
 
 function getCategoryLabel(type = 'OTHER') {
   return { ACTIVITY: 'Actividad', FLIGHT: 'Vuelo', FOOD: 'Comida', LODGING: 'Hospedaje', TRANSPORT: 'Transporte', SHOPPING: 'Compras' }[type] || 'Otro';
+}
+
+function getItineraryTimeRange(item) {
+  if (!shouldShowItineraryTimeRange(item)) return '';
+  return formatDisplayTimeRange(item.StartTime, item.EndTime);
+}
+
+function shouldShowItineraryTimeRange(item) {
+  if (!item?.StartTime || !item?.EndTime || item.IsAllDay) return false;
+  if (item.ItemType === 'LODGING' || item.LodgingDisplayMode) return false;
+  const text = getItemSearchText(item);
+  if (isTripPurchaseItem(item, text)) return false;
+
+  const type = item.ItemType || 'OTHER';
+  const category = String(item.Category || '').toUpperCase();
+  if (['TRANSPORT', 'FLIGHT', 'FOOD', 'TOUR', 'ACTIVITY', 'EVENT'].includes(type)) return true;
+  if (['TRANSPORT', 'FOOD', 'TOUR', 'ACTIVITY', 'EVENT'].includes(category)) return true;
+  if (type === 'SHOPPING' || category === 'SHOPPING') return isScheduledShoppingVisit(text);
+  return type === 'OTHER';
+}
+
+function isScheduledShoppingVisit(text) {
+  return matchesAny(text, ['market', 'mercado', 'store visit', 'visita a tienda', 'mall', 'centro comercial', 'feria', 'evento']);
 }
 
 function renderCategoryChip(visual) {

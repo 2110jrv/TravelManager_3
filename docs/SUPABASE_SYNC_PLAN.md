@@ -159,3 +159,7 @@ The editor exposes the important item payload fields already supported by full d
 ## Savepoint 042 unified item editor
 
 TM3-075 keeps Nuevo item and Editar item on the same compact editor body. Both modals render the JSON paste/import panel, the copyable AI instructions action, and the full compact field grid from one shared function, so Editar item no longer has a separate collapsible section layout.
+
+## Savepoint 043 itinerary time ranges
+
+TM3-077 shows planned `StartTime – EndTime` ranges on itinerary cards when an item has a real scheduled duration, while preserving single-time lodging check-in/check-out cards and excluding travel purchase/pre-trip purchase items. Expanded details also surface the planned range so completed cards can remain positioned by completion time without losing the original schedule.
