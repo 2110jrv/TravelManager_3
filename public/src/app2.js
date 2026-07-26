@@ -18,6 +18,8 @@ const state = {
   editingItem: null,
   editInitialValue: '',
   newInitialValue: '',
+  editJsonDraft: null,
+  newJsonDraft: null,
   pendingBackup: null,
   daysPanelOpen: false,
   auditPanelOpen: false,
@@ -58,105 +60,61 @@ const els = {
 const DATA_COLUMNS = ['ItemID', 'StartDate', 'EndDate', 'StartTime', 'EndTime', 'ItemType', 'Title', 'City', 'AmountUSD', 'PlanningStatus', 'PaymentStatus', 'IsPaid', 'Completed', 'CompletedAt', 'CompletedByRole', 'GooglePlusCode', 'GoogleMapsUrl', 'Notes'];
 const ITEM_TYPES = ['ACTIVITY', 'FLIGHT', 'FOOD', 'LODGING', 'TRANSPORT', 'OTHER'];
 const PLANNING_STATUSES = ['CONFIRMED', 'PROPOSED'];
-const PAYMENT_STATUSES = ['PAID', 'NOT_PAID', 'PARTIAL', 'RESERVED', 'ESTIMATED'];
+const PAYMENT_STATUSES = ['PAID', 'NOT_PAID', 'PARTIAL', 'RESERVED', 'ESTIMATED', 'INCLUDED', 'UNKNOWN'];
+const ITEM_EDITOR_PAYMENT_STATUSES = ['PAID', 'NOT_PAID', 'PARTIAL', 'INCLUDED', 'UNKNOWN'];
 const EDITOR_NUMERIC_FIELDS = new Set(['AmountUSD', 'PaidUSD', 'Latitude', 'Longitude']);
 const EDITOR_TEXTAREA_FIELDS = new Set(['Description', 'Notes', 'Details', 'ImportantInfo', 'Instructions']);
 const EDITOR_TRIM_FIELDS = [
-  'Title', 'Category', 'City', 'Country', 'LocationName', 'Address', 'GooglePlusCode', 'GoogleMapsUrl', 'MapUrl',
+  'ItemID', 'Title', 'Category', 'City', 'Country', 'LocationName', 'Address', 'GooglePlusCode', 'GoogleMapsUrl', 'MapUrl',
   'Currency', 'PaymentNotes', 'Provider', 'Website', 'Phone', 'Email', 'ReservationUrl', 'BookingReference',
   'ConfirmationNumber', 'Description', 'Notes', 'Details', 'ImportantInfo', 'Instructions', 'ImageUrl', 'PhotoUrl'
 ];
-const ITEM_EDITOR_SECTIONS = [
-  {
-    title: 'Datos basicos',
-    open: true,
-    fields: [
-      { name: 'Title', label: 'Titulo', required: true },
-      { name: 'ItemType', label: 'Tipo', type: 'select', options: ITEM_TYPES.map(value => [value, getCategoryLabel(value)]) },
-      { name: 'Category', label: 'Categoria' },
-      { name: 'PlanningStatus', label: 'Estado de planificacion', type: 'select', options: PLANNING_STATUSES.map(value => [value, value]) },
-      { name: 'PaymentStatus', label: 'Estado de pago', type: 'select', options: PAYMENT_STATUSES.map(value => [value, value]) }
-    ]
-  },
-  {
-    title: 'Fecha y hora',
-    open: true,
-    fields: [
-      { name: 'StartDate', label: 'Fecha de inicio', type: 'date', required: true },
-      { name: 'StartTime', label: 'Hora de inicio', placeholder: '9:30 AM' },
-      { name: 'EndDate', label: 'Fecha de finalizacion', type: 'date' },
-      { name: 'EndTime', label: 'Hora de finalizacion', placeholder: '10:30 AM' },
-      { name: 'IsAllDay', label: 'Todo el dia', type: 'checkbox' }
-    ]
-  },
-  {
-    title: 'Ubicacion y mapas',
-    fields: [
-      { name: 'City', label: 'Ciudad' },
-      { name: 'Country', label: 'Pais' },
-      { name: 'LocationName', label: 'Nombre del lugar' },
-      { name: 'Address', label: 'Direccion' },
-      { name: 'Latitude', label: 'Latitud', type: 'number', step: 'any' },
-      { name: 'Longitude', label: 'Longitud', type: 'number', step: 'any' },
-      { name: 'GooglePlusCode', label: 'GooglePlusCode' },
-      { name: 'GoogleMapsUrl', label: 'GoogleMapsUrl', type: 'url' },
-      { name: 'MapUrl', label: 'MapUrl', type: 'url' }
-    ]
-  },
-  {
-    title: 'Costos',
-    fields: [
-      { name: 'AmountUSD', label: 'Costo USD', type: 'number', min: '0', step: '0.01' },
-      { name: 'PaidUSD', label: 'Pagado USD', type: 'number', min: '0', step: '0.01' },
-      { name: 'Currency', label: 'Moneda' },
-      { name: 'IsPaid', label: 'Pagado', type: 'checkbox' },
-      { name: 'PaymentNotes', label: 'Notas de pago' }
-    ]
-  },
-  {
-    title: 'Contacto / reserva',
-    fields: [
-      { name: 'Provider', label: 'Proveedor' },
-      { name: 'Website', label: 'Website', type: 'url' },
-      { name: 'Phone', label: 'Telefono', type: 'tel' },
-      { name: 'Email', label: 'Email', type: 'email' },
-      { name: 'ReservationUrl', label: 'ReservationUrl', type: 'url' },
-      { name: 'BookingReference', label: 'BookingReference' },
-      { name: 'ConfirmationNumber', label: 'ConfirmationNumber' }
-    ]
-  },
-  {
-    title: 'Notas y detalles',
-    fields: [
-      { name: 'Description', label: 'Descripcion', type: 'textarea', rows: 3 },
-      { name: 'Notes', label: 'Notas', type: 'textarea', rows: 3 },
-      { name: 'Details', label: 'Details', type: 'textarea', rows: 3 },
-      { name: 'ImportantInfo', label: 'ImportantInfo' },
-      { name: 'Instructions', label: 'Instructions', type: 'textarea', rows: 3 }
-    ]
-  },
-  {
-    title: 'Imagen / enlaces',
-    fields: [
-      { name: 'ImageUrl', label: 'ImageUrl', type: 'url' },
-      { name: 'PhotoUrl', label: 'PhotoUrl', type: 'url' }
-    ]
-  },
-  {
-    title: 'Datos avanzados',
-    fields: [
-      { name: 'ItemID', label: 'ItemID', readonly: true },
-      { name: 'SourceItemID', label: 'SourceItemID', readonly: true },
-      { name: 'TripID', label: 'TripID', readonly: true },
-      { name: 'DayID', label: 'DayID', readonly: true },
-      { name: 'DayDate', label: 'DayDate', readonly: true },
-      { name: 'Completed', label: 'Completed', readonly: true },
-      { name: 'CompletedAt', label: 'CompletedAt', readonly: true },
-      { name: 'CompletedByRole', label: 'CompletedByRole', readonly: true }
-    ]
-  }
+const ITEM_EDITOR_FIELDS = [
+  { name: 'ItemID', label: 'ItemID' },
+  { name: 'Title', label: 'Title', required: true, wide: true },
+  { name: 'ItemType', label: 'ItemType', type: 'select', options: ITEM_TYPES.map(value => [value, getCategoryLabel(value)]) },
+  { name: 'Category', label: 'Category' },
+  { name: 'PlanningStatus', label: 'PlanningStatus', type: 'select', options: PLANNING_STATUSES.map(value => [value, value]) },
+  { name: 'PaymentStatus', label: 'PaymentStatus', type: 'select', options: ITEM_EDITOR_PAYMENT_STATUSES.map(value => [value, value]) },
+  { name: 'StartDate', label: 'StartDate', type: 'date', required: true },
+  { name: 'StartTime', label: 'StartTime', placeholder: '9:30 AM' },
+  { name: 'EndDate', label: 'EndDate', type: 'date' },
+  { name: 'EndTime', label: 'EndTime', placeholder: '10:30 AM' },
+  { name: 'City', label: 'City' },
+  { name: 'Country', label: 'Country' },
+  { name: 'LocationName', label: 'LocationName' },
+  { name: 'Address', label: 'Address', wide: true },
+  { name: 'Latitude', label: 'Latitude', type: 'number', step: 'any' },
+  { name: 'Longitude', label: 'Longitude', type: 'number', step: 'any' },
+  { name: 'GooglePlusCode', label: 'GooglePlusCode' },
+  { name: 'GoogleMapsUrl', label: 'GoogleMapsUrl' },
+  { name: 'MapUrl', label: 'MapUrl' },
+  { name: 'AmountUSD', label: 'AmountUSD', type: 'number', min: '0', step: '0.01' },
+  { name: 'PaidUSD', label: 'PaidUSD', type: 'number', min: '0', step: '0.01' },
+  { name: 'Currency', label: 'Currency' },
+  { name: 'Provider', label: 'Provider' },
+  { name: 'Website', label: 'Website' },
+  { name: 'Phone', label: 'Phone' },
+  { name: 'Email', label: 'Email' },
+  { name: 'ReservationUrl', label: 'ReservationUrl' },
+  { name: 'BookingReference', label: 'BookingReference' },
+  { name: 'ConfirmationNumber', label: 'ConfirmationNumber' },
+  { name: 'Description', label: 'Description', type: 'textarea', rows: 3, wide: true },
+  { name: 'Notes', label: 'Notes', type: 'textarea', rows: 3, wide: true },
+  { name: 'Details', label: 'Details', type: 'textarea', rows: 3, wide: true },
+  { name: 'ImportantInfo', label: 'ImportantInfo', type: 'textarea', rows: 2, wide: true },
+  { name: 'Instructions', label: 'Instructions', type: 'textarea', rows: 2, wide: true },
+  { name: 'ImageUrl', label: 'ImageUrl' },
+  { name: 'PhotoUrl', label: 'PhotoUrl' },
+  { name: 'Completed', label: 'Completed', readonly: true },
+  { name: 'CompletedAt', label: 'CompletedAt', readonly: true },
+  { name: 'CompletedByRole', label: 'CompletedByRole', readonly: true },
+  { name: 'SourceItemID', label: 'SourceItemID', readonly: true },
+  { name: 'TripID', label: 'TripID', readonly: true },
+  { name: 'DayID', label: 'DayID', readonly: true },
+  { name: 'DayDate', label: 'DayDate', readonly: true }
 ];
-const ITEM_EDITOR_FIELDS = [...new Set(ITEM_EDITOR_SECTIONS.flatMap(section => section.fields.map(field => field.name)))];
+const ITEM_EDITOR_FIELD_NAMES = ITEM_EDITOR_FIELDS.map(field => field.name);
 const editModal = createItemModal('editItemModal', 'Editar item', saveEditForm);
 const newItemModal = createItemModal('newItemModal', 'Nuevo item', saveNewItemForm);
 const SNAPSHOT_KEY = 'tm3.dataSnapshots';
@@ -3274,6 +3232,7 @@ async function restoreOriginalItinerary() {
 function openEditModal(item) {
   if (!canEditApp()) return;
   state.editingItem = item;
+  state.editJsonDraft = null;
   const startDate = item.StartDate || item.DayDate || item.Date || '';
   fillForm(editModal.form, {
     ...item,
@@ -3282,6 +3241,7 @@ function openEditModal(item) {
     EndDate: item.EndDate || startDate
   });
   state.editInitialValue = getFormSnapshot(editModal.form);
+  setItemIdEditMode(editModal.form, true);
   editModal.el.querySelector('[data-delete-item]')?.classList.remove('hidden');
   editModal.el.classList.remove('hidden');
   editModal.form.elements.Title.focus();
@@ -3289,6 +3249,7 @@ function openEditModal(item) {
 
 function openNewItemModal() {
   if (!canEditApp()) return;
+  state.newJsonDraft = null;
   const today = state.openDayKey || state.days[0]?.DayDate || '';
   fillForm(newItemModal.form, {
     DayDate: today,
@@ -3332,6 +3293,7 @@ function openNewItemModal() {
     IsPaid: false
   });
   state.newInitialValue = getFormSnapshot(newItemModal.form);
+  setItemIdEditMode(newItemModal.form, false);
   newItemModal.el.querySelector('[data-delete-item]')?.classList.add('hidden');
   newItemModal.el.classList.remove('hidden');
   newItemModal.form.elements.Title.focus();
@@ -3345,14 +3307,16 @@ async function saveEditForm(event) {
   const now = new Date().toISOString();
   const updated = stampLocalChange({
     ...state.editingItem,
+    ...(state.editJsonDraft || {}),
     ...data,
+    ItemID: state.editingItem.ItemID,
     DayDate: data.StartDate,
     AmountUSD: Number(data.AmountUSD),
     PaidUSD: data.PaidUSD === '' ? '' : Number(data.PaidUSD),
     Latitude: data.Latitude === '' ? '' : Number(data.Latitude),
     Longitude: data.Longitude === '' ? '' : Number(data.Longitude),
-    IsAllDay: event.currentTarget.elements.IsAllDay.checked,
-    IsPaid: event.currentTarget.elements.IsPaid.checked,
+    IsAllDay: state.editingItem.IsAllDay === true,
+    IsPaid: data.PaymentStatus === 'PAID',
     IsMultiDay: data.EndDate > data.StartDate
   }, now);
   await updateItem(updated);
@@ -3371,14 +3335,18 @@ async function saveNewItemForm(event) {
   const data = formData(event.currentTarget);
   const error = validateItemForm(data);
   if (error) return setModalError(newItemModal, error);
-  let itemId = '';
+  let itemId = data.ItemID || '';
   try {
-    itemId = getNextItemId();
+    if (!itemId) itemId = getNextItemId();
+    if (itemId && getLogicalRows().some(existing => existing.ItemID === itemId)) {
+      return setModalError(newItemModal, `ItemID ${itemId} ya existe.`);
+    }
   } catch (idError) {
     return setModalError(newItemModal, idError.message);
   }
   const now = new Date().toISOString();
   const item = stampLocalChange({
+    ...(state.newJsonDraft || {}),
     ...data,
     ItemID: itemId,
     DatasetID: ITALY_DATASET_ID,
@@ -3389,8 +3357,8 @@ async function saveNewItemForm(event) {
     Longitude: data.Longitude === '' ? '' : Number(data.Longitude),
     Currency: data.Currency || 'USD',
     Status: data.PlanningStatus === 'CONFIRMED' ? 'CONFIRMED' : 'PLANNED',
-    IsAllDay: event.currentTarget.elements.IsAllDay.checked,
-    IsPaid: event.currentTarget.elements.IsPaid.checked,
+    IsAllDay: false,
+    IsPaid: data.PaymentStatus === 'PAID',
     IsMultiDay: data.EndDate > data.StartDate,
     DayDate: data.StartDate,
     LodgingDisplayMode: 'NORMAL',
@@ -3421,7 +3389,17 @@ function createItemModal(id, title, submitHandler) {
       </header>
       <form class="edit-form" novalidate>
         <div class="edit-error" role="alert"></div>
-        ${renderItemEditorSections()}
+        <div class="json-import-panel">
+          <label for="${id}JsonInput">Pegar JSON del item</label>
+          <textarea id="${id}JsonInput" data-json-input rows="4" placeholder="Pega aqui un objeto JSON {...} o un array con un item [{...}]"></textarea>
+          <div class="json-import-actions">
+            <button type="button" class="secondary-button" data-load-json>Cargar JSON en formulario</button>
+            <button type="button" class="secondary-button" data-clear-json>Limpiar JSON</button>
+          </div>
+        </div>
+        <div class="compact-editor-grid">
+          ${renderItemEditorFields()}
+        </div>
         <footer class="edit-actions"><button type="button" class="secondary-button danger-button hidden" data-delete-item>Eliminar item</button><button type="button" class="secondary-button" data-cancel>Cancelar</button><button type="submit" class="primary-button">Guardar</button></footer>
       </form>
     </div>
@@ -3433,6 +3411,8 @@ function createItemModal(id, title, submitHandler) {
     if (event.target === modal) requestCloseModal(api);
   });
   modal.querySelectorAll('[data-cancel]').forEach(button => button.addEventListener('click', () => requestCloseModal(api)));
+  modal.querySelector('[data-load-json]').addEventListener('click', () => loadJsonIntoForm(api));
+  modal.querySelector('[data-clear-json]').addEventListener('click', () => clearJsonInput(api));
   modal.querySelector('[data-delete-item]').addEventListener('click', () => {
     if (state.editingItem) deleteLogicalItem(state.editingItem, api);
   });
@@ -3440,19 +3420,12 @@ function createItemModal(id, title, submitHandler) {
   return api;
 }
 
-function renderItemEditorSections() {
-  return ITEM_EDITOR_SECTIONS.map((section, sectionIndex) => `
-    <details class="edit-section" ${section.open ? 'open' : ''}>
-      <summary>${escapeHtml(section.title)}</summary>
-      <div class="edit-grid">
-        ${section.fields.map(field => renderItemEditorField(field, sectionIndex)).join('')}
-      </div>
-    </details>
-  `).join('');
+function renderItemEditorFields() {
+  return ITEM_EDITOR_FIELDS.map(field => renderItemEditorField(field)).join('');
 }
 
-function renderItemEditorField(field, sectionIndex) {
-  const id = `itemEditor-${sectionIndex}-${field.name}`;
+function renderItemEditorField(field) {
+  const id = `itemEditor-${field.name}`;
   const commonAttrs = [
     `id="${id}"`,
     field.readonly ? `data-display-field="${field.name}"` : `name="${field.name}"`,
@@ -3462,7 +3435,7 @@ function renderItemEditorField(field, sectionIndex) {
     field.min !== undefined ? `min="${escapeHtml(field.min)}"` : '',
     field.step !== undefined ? `step="${escapeHtml(field.step)}"` : ''
   ].filter(Boolean).join(' ');
-  const labelClass = EDITOR_TEXTAREA_FIELDS.has(field.name) ? ' class="edit-field-wide"' : '';
+  const labelClass = field.wide || EDITOR_TEXTAREA_FIELDS.has(field.name) ? ' class="edit-field-wide"' : '';
 
   if (field.type === 'select') {
     return `<label${labelClass} for="${id}">${escapeHtml(field.label)}<select ${commonAttrs}>${field.options.map(([value, label]) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`).join('')}</select></label>`;
@@ -3488,8 +3461,15 @@ function requestCloseModal(modal) {
 function closeModal(modal) {
   modal.el.classList.add('hidden');
   setModalError(modal, '');
-  if (modal === editModal) state.editingItem = null;
-  if (modal === newItemModal) state.newInitialValue = '';
+  modal.form.querySelector('[data-json-input]').value = '';
+  if (modal === editModal) {
+    state.editingItem = null;
+    state.editJsonDraft = null;
+  }
+  if (modal === newItemModal) {
+    state.newInitialValue = '';
+    state.newJsonDraft = null;
+  }
 }
 
 function fillForm(form, item) {
@@ -3502,18 +3482,27 @@ function fillForm(form, item) {
     EndDate: item.EndDate || startDate,
     Currency: item.Currency || 'USD'
   };
-  ITEM_EDITOR_FIELDS.forEach(field => {
+  ITEM_EDITOR_FIELD_NAMES.forEach(field => {
     const element = form.elements[field] || form.querySelector(`[data-display-field="${field}"]`);
-    if (element && element.type !== 'checkbox') element.value = normalized[field] ?? '';
+    if (element?.tagName === 'SELECT') ensureSelectOption(element, normalized[field]);
+    if (element && element.type !== 'checkbox') element.value = formatEditorFieldValue(field, normalized[field]);
   });
   if (form.elements.StartTime) form.elements.StartTime.value = formatDisplayTime(normalized.StartTime);
   if (form.elements.EndTime) form.elements.EndTime.value = formatDisplayTime(normalized.EndTime);
-  form.elements.IsAllDay.checked = normalized.IsAllDay === true;
-  form.elements.IsPaid.checked = normalized.IsPaid === true;
+  if (form.elements.IsAllDay) form.elements.IsAllDay.checked = normalized.IsAllDay === true;
+  if (form.elements.IsPaid) form.elements.IsPaid.checked = normalized.IsPaid === true;
+}
+
+function setItemIdEditMode(form, isExisting) {
+  const itemId = form.elements.ItemID;
+  if (!itemId) return;
+  itemId.readOnly = isExisting;
+  itemId.classList.toggle('readonly-input', isExisting);
 }
 
 function formData(form) {
   const data = Object.fromEntries(new FormData(form).entries());
+  if (!('ItemID' in data)) data.ItemID = form.elements.ItemID?.value || '';
   data.Title = data.Title.trim();
   data.StartDate = (data.StartDate || '').trim();
   data.EndDate = (data.EndDate || '').trim() || data.StartDate;
@@ -3524,6 +3513,97 @@ function formData(form) {
     if (field in data) data[field] = data[field].trim();
   });
   return data;
+}
+
+function loadJsonIntoForm(modal) {
+  const input = modal.form.querySelector('[data-json-input]');
+  const text = input.value.trim();
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch (_error) {
+    return setModalError(modal, 'El JSON no es valido.');
+  }
+  const item = Array.isArray(parsed) ? parsed[0] : parsed;
+  if (!item || typeof item !== 'object' || Array.isArray(item)) {
+    return setModalError(modal, 'El JSON no es valido.');
+  }
+
+  const normalized = normalizeJsonItemForEditor(item, modal.form);
+  const draftKey = modal === editModal ? 'editJsonDraft' : 'newJsonDraft';
+  state[draftKey] = { ...normalized };
+  ITEM_EDITOR_FIELD_NAMES.forEach(field => {
+    const value = normalized[field];
+    if (value === undefined) return;
+    const element = modal.form.elements[field] || modal.form.querySelector(`[data-display-field="${field}"]`);
+    if (!element || element.readOnly && field === 'ItemID') return;
+    if (element.tagName === 'SELECT') ensureSelectOption(element, value);
+    if (element.type === 'checkbox') {
+      element.checked = value === true || String(value).toLowerCase() === 'true';
+    } else {
+      element.value = formatEditorFieldValue(field, value);
+    }
+  });
+
+  if (!normalized.GoogleMapsUrl && normalized.MapUrl && !modal.form.elements.GoogleMapsUrl.value) {
+    modal.form.elements.GoogleMapsUrl.value = normalized.MapUrl;
+  }
+  if (!normalized.MapUrl && normalized.GoogleMapsUrl && !modal.form.elements.MapUrl.value) {
+    modal.form.elements.MapUrl.value = normalized.GoogleMapsUrl;
+  }
+  setModalError(modal, 'JSON cargado en el formulario.');
+}
+
+function ensureSelectOption(select, value) {
+  const text = String(value ?? '').trim();
+  if (!text || [...select.options].some(option => option.value === text)) return;
+  select.append(new Option(text, text));
+}
+
+function clearJsonInput(modal) {
+  modal.form.querySelector('[data-json-input]').value = '';
+  setModalError(modal, '');
+}
+
+function normalizeJsonItemForEditor(item, form) {
+  const normalized = { ...item };
+  ['TripID', 'DayID', 'DayDate'].forEach(field => {
+    if (normalized[field] === undefined || normalized[field] === null || normalized[field] === '') {
+      normalized[field] = form.elements[field]?.value || form.querySelector(`[data-display-field="${field}"]`)?.value || '';
+    }
+  });
+  ['AmountUSD', 'PaidUSD'].forEach(field => {
+    if (normalized[field] !== undefined && normalized[field] !== null && normalized[field] !== '') {
+      normalized[field] = parseLooseNumber(normalized[field]);
+    }
+  });
+  ['Latitude', 'Longitude'].forEach(field => {
+    if (normalized[field] === null || normalized[field] === '') normalized[field] = '';
+  });
+  ['StartTime', 'EndTime'].forEach(field => {
+    if (normalized[field]) normalized[field] = normalizeFormTime(normalized[field]);
+  });
+  if ((normalized.GoogleMapsUrl === undefined || normalized.GoogleMapsUrl === null || normalized.GoogleMapsUrl === '') && normalized.MapUrl && !form.elements.GoogleMapsUrl.value) {
+    normalized.GoogleMapsUrl = normalized.MapUrl;
+  }
+  if ((normalized.MapUrl === undefined || normalized.MapUrl === null || normalized.MapUrl === '') && normalized.GoogleMapsUrl && !form.elements.MapUrl.value) {
+    normalized.MapUrl = normalized.GoogleMapsUrl;
+  }
+  return normalized;
+}
+
+function parseLooseNumber(value) {
+  if (typeof value === 'number') return value;
+  const cleaned = String(value || '').replace(/[$,\s]/g, '');
+  if (!cleaned) return '';
+  const number = Number(cleaned);
+  return Number.isNaN(number) ? value : number;
+}
+
+function formatEditorFieldValue(field, value) {
+  if (value === null || value === undefined) return '';
+  if (field === 'StartTime' || field === 'EndTime') return formatDisplayTime(value);
+  return String(value);
 }
 
 function normalizeFormTime(value) {
@@ -3567,8 +3647,8 @@ function setModalError(modal, message) {
 
 function getFormSnapshot(form) {
   return JSON.stringify([...new FormData(form).entries()].concat([
-    ['IsAllDay', form.elements.IsAllDay.checked],
-    ['IsPaid', form.elements.IsPaid.checked]
+    ['IsAllDay', form.elements.IsAllDay?.checked || false],
+    ['IsPaid', form.elements.IsPaid?.checked || false]
   ]));
 }
 

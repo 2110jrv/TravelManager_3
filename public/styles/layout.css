@@ -1814,8 +1814,8 @@ h1 {
 
 .edit-form {
   display: grid;
-  gap: 12px;
-  padding: 16px;
+  gap: 10px;
+  padding: 12px;
   overflow: auto;
   min-width: 0;
 }
@@ -1824,7 +1824,7 @@ h1 {
   display: grid;
   gap: 6px;
   color: #334155;
-  font-size: .88rem;
+  font-size: .78rem;
   font-weight: 700;
 }
 
@@ -1835,8 +1835,8 @@ h1 {
   min-width: 0;
   box-sizing: border-box;
   border: 1px solid #cbd5e1;
-  border-radius: 8px;
-  padding: 10px 11px;
+  border-radius: 7px;
+  padding: 8px 9px;
   background: #fff;
   color: #111827;
   font: inherit;
@@ -1849,50 +1849,29 @@ h1 {
   background: #f8fafc;
 }
 
-.edit-section {
+.json-import-panel {
   display: grid;
-  gap: 10px;
+  gap: 7px;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
+  padding: 10px;
+  background: #f8fafc;
+}
+
+.json-import-panel textarea {
   background: #fff;
-  overflow: hidden;
 }
 
-.edit-section summary {
-  cursor: pointer;
-  list-style: none;
-  padding: 12px;
-  color: #475569;
-  font-size: .82rem;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: .04em;
+.json-import-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
-.edit-section summary::-webkit-details-marker {
-  display: none;
-}
-
-.edit-section summary::after {
-  content: '+';
-  float: right;
-  color: #0f766e;
-  font-size: 1rem;
-}
-
-.edit-section[open] summary {
-  border-bottom: 1px solid #e2e8f0;
-}
-
-.edit-section[open] summary::after {
-  content: '−';
-}
-
-.edit-grid {
+.compact-editor-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  padding: 12px;
+  gap: 9px 10px;
   min-width: 0;
 }
 
@@ -1958,13 +1937,12 @@ h1 {
     width: 100%;
   }
 
-  .edit-grid {
+  .compact-editor-grid {
     grid-template-columns: 1fr;
   }
 
-  .edit-section summary,
-  .edit-grid {
-    padding-inline: 10px;
+  .json-import-actions button {
+    flex: 1 1 160px;
   }
 
   .edit-actions {
