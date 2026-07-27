@@ -177,3 +177,9 @@ TM3-081 restores the shared Nuevo item / Editar item compact JSON editor modal t
 TM3-083 protects TripDay edits with the same local-first timestamp/version rule used for item edits. Day editor saves preserve unknown fields, stamp `UpdatedAt`, `ModifiedAt`, `updatedAt`, and `Version`, and queue sync before any pull can apply stale cloud data. The Italy seed migration no longer overwrites existing trip days, so local or cloud-edited day titles, headers, city, and notes remain authoritative over original seed values.
 
 TripDay pull uses last-write-wins when both local and cloud rows have valid timestamps. Recent local TripDay edits remain protected from older realtime/pull rows, while newer cloud rows still apply to support multi-device edits.
+
+## Savepoint 047 day persistence and itinerary timing display
+
+TM3-085 tightens TripDay persistence by treating existing local days with the same `TripID + Date/DayDate` as authoritative over seed rows, even when IDs drift. The local TripDay reader de-dupes same-date rows in memory and displays the newest timestamp/version without blindly deleting older records.
+
+TripDay sync conflict checks now compare timestamps first, then `Version` when timestamps are missing or tied. Itinerary time ranges and wait-time mini cards require real `EndTime` values; they do not fabricate durations. Normal itinerary items with `LodgingDisplayMode: NORMAL` remain eligible, while generated lodging occurrences and purchase-like items stay excluded.

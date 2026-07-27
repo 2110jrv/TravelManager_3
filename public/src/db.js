@@ -331,7 +331,7 @@ export async function getTripDays(TripID) {
     const transaction = db.transaction(STORE_TRIP_DAYS, 'readonly');
     const store = transaction.objectStore(STORE_TRIP_DAYS);
     const request = TripID ? store.index('TripID').getAll(TripID) : store.getAll();
-    request.onsuccess = () => resolve(request.result.sort((a, b) => (a.Date || '').localeCompare(b.Date || '') || Number(a.DayOrder || 0) - Number(b.DayOrder || 0)));
+    request.onsuccess = () => resolve(dedupeTripDays(request.result).sort((a, b) => (a.Date || a.DayDate || '').localeCompare(b.Date || b.DayDate || '') || Number(a.DayOrder || 0) - Number(b.DayOrder || 0)));
     request.onerror = () => reject(request.error);
   });
 }
@@ -345,6 +345,44 @@ export async function saveTripDay(day) {
     request.onsuccess = () => resolve(day);
     request.onerror = () => reject(request.error);
   });
+}
+
+function dedupeTripDays(days) {
+  const byKey = new Map();
+  for (const day of days || []) {
+    const key = getTripDayDateKey(day) || day.TripDayID;
+    if (!key) continue;
+    const existing = byKey.get(key);
+    if (!existing || compareRecords(day, existing) > 0) byKey.set(key, day);
+  }
+  return [...byKey.values()];
+}
+
+function getTripDayDateKey(day) {
+  const tripId = day?.TripID || '';
+  const date = day?.Date || day?.DayDate || '';
+  return tripId && date ? `${tripId}:${date}` : '';
+}
+
+function compareRecords(left, right) {
+  const timestampCompare = compareIso(getRecordTimestamp(left), getRecordTimestamp(right));
+  if (timestampCompare !== 0) return timestampCompare;
+  const leftVersion = Number(left?.Version || 0);
+  const rightVersion = Number(right?.Version || 0);
+  return leftVersion === rightVersion ? 0 : leftVersion > rightVersion ? 1 : -1;
+}
+
+function getRecordTimestamp(record) {
+  return record?.UpdatedAt || record?.updatedAt || record?.ModifiedAt || record?.LastUpdatedAt || record?.updated_at || '';
+}
+
+function compareIso(left, right) {
+  const leftTime = Date.parse(left || '');
+  const rightTime = Date.parse(right || '');
+  if (Number.isNaN(leftTime) && Number.isNaN(rightTime)) return 0;
+  if (Number.isNaN(leftTime)) return -1;
+  if (Number.isNaN(rightTime)) return 1;
+  return leftTime === rightTime ? 0 : leftTime > rightTime ? 1 : -1;
 }
 
 export async function deleteTripDay(TripDayID) {
@@ -399,8 +437,9 @@ export async function migrateLegacyTravelData(seed) {
   });
   const existingDays = await getTripDays(seed.trip.TripID);
   const existingById = new Map(existingDays.map(day => [day.TripDayID, day]));
+  const existingByDate = new Map(existingDays.map(day => [getTripDayDateKey(day), day]));
   for (const day of seed.tripDays) {
-    const existing = existingById.get(day.TripDayID);
+    const existing = existingById.get(day.TripDayID) || existingByDate.get(getTripDayDateKey({ ...day, TripID: day.TripID || seed.trip.TripID }));
     if (existing) continue;
     await saveTripDay({
       ...day,

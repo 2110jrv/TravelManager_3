@@ -209,7 +209,7 @@ export async function pullCloudToLocal() {
     applied += await pullDeletions(cloud.tm3_deletion_queue, local.tm3_deletion_queue);
     applied += await applyTombstones(tombstones, local);
     applied += await pullCollection(cloud.tm3_trips, local.tm3_trips, { cloudId: 'trip_id', save: saveTrip, entityType: 'TRIP', tombstones });
-    applied += await pullCollection(cloud.tm3_trip_days, local.tm3_trip_days, { cloudId: 'day_id', save: saveTripDay, entityType: 'TRIP_DAY', tombstones });
+    applied += await pullCollection(cloud.tm3_trip_days, local.tm3_trip_days, { cloudId: 'day_id', save: saveTripDay, entityType: 'TRIP_DAY', tombstones, localByNaturalKey: indexByComputed([...local.tm3_trip_days.values()], getTripDayDateKey), getNaturalKey: getTripDayDateKey });
     applied += await pullCollection(cloud.tm3_items, local.tm3_items, { cloudId: 'item_id', save: updateItem, entityType: 'ITEM', tombstones });
     applied += await pullCollection(cloud.tm3_settings, local.tm3_settings, { cloudId: 'setting_key', save: saveSettingRecord, entityType: 'SETTING', tombstones: new Map() });
   } finally {
@@ -258,13 +258,14 @@ async function pushCollection(client, table, localRows, cloudRows, options) {
     if (tombstone && compareIso(getLocalTimestamp(tombstone), localTimestamp) >= 0) continue;
     const cloud = cloudById.get(id);
     if (cloud?.deleted_at) continue;
-    if (cloud && compareIso(cloud.updated_at, localTimestamp) >= 0) continue;
-    const payload = { ...row, UpdatedAt: row.UpdatedAt || localTimestamp };
+    if (cloud && compareLocalToCloud(row, cloud) <= 0) continue;
+    const pushTimestamp = localTimestamp || new Date().toISOString();
+    const payload = normalizeLocalPayloadForPush(row, pushTimestamp);
     const upsertRow = {
       ...options.row(payload),
       user_id: options.user.id,
       payload,
-      updated_at: localTimestamp,
+      updated_at: pushTimestamp,
       device_id: options.deviceId
     };
     const { error } = await client.from(table).upsert(upsertRow, { onConflict: options.onConflict || options.cloudId });
@@ -283,9 +284,9 @@ async function pullCollection(cloudRows, localById, options) {
     if (!id || !payload) continue;
     const tombstone = options.tombstones.get(tombstoneKey(options.entityType, id));
     if (tombstone && compareIso(getLocalTimestamp(tombstone), row.updated_at) >= 0) continue;
-    const local = localById.get(id);
+    const local = localById.get(id) || options.localByNaturalKey?.get(options.getNaturalKey?.(payload) || '');
     if (isRecentlyChanged(options.entityType, id, row.updated_at)) continue;
-    if (local && compareIso(getLocalTimestamp(local), row.updated_at) >= 0) continue;
+    if (local && compareLocalToCloud(local, row) >= 0) continue;
     await options.save(normalizeRemotePayload(payload, row.updated_at));
     count += 1;
   }
@@ -300,6 +301,15 @@ function normalizeRemotePayload(payload, updatedAt) {
     ModifiedAt: payload.ModifiedAt || timestamp,
     updatedAt: payload.updatedAt || timestamp,
     SyncStatus: 'SYNCED'
+  };
+}
+
+function normalizeLocalPayloadForPush(payload, updatedAt) {
+  return {
+    ...payload,
+    UpdatedAt: payload.UpdatedAt || updatedAt,
+    ModifiedAt: payload.ModifiedAt || updatedAt,
+    updatedAt: payload.updatedAt || updatedAt
   };
 }
 
@@ -396,12 +406,40 @@ function indexBy(rows, field) {
   return new Map((rows || []).filter(row => row?.[field]).map(row => [row[field], row]));
 }
 
+function indexByComputed(rows, getKey) {
+  return new Map((rows || []).map(row => [getKey(row), row]).filter(([key]) => key));
+}
+
 function indexCloud(rows, field) {
   return new Map((rows || []).filter(row => row?.[field]).map(row => [row[field], row]));
 }
 
+function getTripDayDateKey(day) {
+  const tripId = day?.TripID || '';
+  const date = day?.Date || day?.DayDate || '';
+  return tripId && date ? `${tripId}:${date}` : '';
+}
+
 function getLocalTimestamp(row) {
-  return row?.UpdatedAt || row?.updatedAt || row?.UpdatedOn || row?.ModifiedAt || row?.LastUpdatedAt || row?.DeletedAt || row?.updated_at || new Date().toISOString();
+  return row?.UpdatedAt || row?.updatedAt || row?.UpdatedOn || row?.ModifiedAt || row?.LastUpdatedAt || row?.DeletedAt || row?.updated_at || '';
+}
+
+function getCloudTimestamp(row) {
+  return row?.updated_at || getLocalTimestamp(row?.payload || row);
+}
+
+function compareLocalToCloud(local, cloud) {
+  const cloudPayload = cloud?.payload || cloud;
+  const timestampCompare = compareIso(getLocalTimestamp(local), getCloudTimestamp(cloud));
+  if (timestampCompare !== 0) return timestampCompare;
+  return compareVersion(local, cloudPayload);
+}
+
+function compareVersion(left, right) {
+  const leftVersion = Number(left?.Version || 0);
+  const rightVersion = Number(right?.Version || 0);
+  if (leftVersion === rightVersion) return 0;
+  return leftVersion > rightVersion ? 1 : -1;
 }
 
 function compareIso(left, right) {

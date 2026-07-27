@@ -1125,7 +1125,7 @@ function getHomeOccurrenceMeta(item, dayDate) {
     return { role: 'FULL_DAY', lodgingMode: 'FULL_DAY', startTime: '', endTime: '', amount, isAllDay: true, includedLabel: 'Incluido en reserva', sortOffset: 800 };
   }
 
-  if (isStart) return { role: 'START', lodgingMode: 'NORMAL', startTime: item.StartTime || '', endTime: '', amount, isAllDay: false, includedLabel: '', sortOffset: 0 };
+  if (isStart) return { role: 'START', lodgingMode: 'NORMAL', startTime: item.StartTime || '', endTime: item.EndTime || '', amount, isAllDay: false, includedLabel: '', sortOffset: 0 };
   if (isEnd) return { role: 'END', lodgingMode: 'NORMAL', startTime: item.EndTime || '', endTime: '', amount, isAllDay: false, includedLabel: 'Incluido en item', sortOffset: 900 };
   return { role: 'FULL_DAY', lodgingMode: 'NORMAL', startTime: '', endTime: '', amount, isAllDay: true, includedLabel: 'Incluido en item', sortOffset: 800 };
 }
@@ -3965,7 +3965,7 @@ function getItineraryTimeRange(item) {
 
 function shouldShowItineraryTimeRange(item) {
   if (!item?.StartTime || !item?.EndTime || item.IsAllDay) return false;
-  if (item.ItemType === 'LODGING' || item.LodgingDisplayMode) return false;
+  if (item.ItemType === 'LODGING' || ['CHECK_IN', 'CHECK_OUT', 'FULL_DAY'].includes(item.LodgingDisplayMode)) return false;
   const text = getItemSearchText(item);
   if (isTripPurchaseItem(item, text)) return false;
 
