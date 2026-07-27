@@ -191,3 +191,7 @@ TM3-087 makes Nuevo item and Editar item render from one explicit non-collapsibl
 ## Savepoint 049 wait gap anchors
 
 TM3-089 separates itinerary range display from wait-gap anchoring. Ranges still require `StartTime` and `EndTime`, while wait cards use the previous eligible item's `EndTime` and the next eligible visible item's `StartTime`, so a gap can appear before an item that has no `EndTime`.
+
+## Savepoint 050 left-aligned wait gaps
+
+TM3-091 keeps itinerary wait-time mini cards compact and non-clickable while aligning the pill to the left edge of the agenda item content instead of centering it across the full day column.

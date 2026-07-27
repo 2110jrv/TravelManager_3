@@ -476,7 +476,8 @@ h1 {
 
 .agenda-gap-card {
   display: flex;
-  justify-content: center;
+  justify-content: flex-start;
+  padding-left: 12px;
   pointer-events: none;
 }
 
