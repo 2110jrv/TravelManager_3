@@ -3965,6 +3965,11 @@ function getItineraryTimeRange(item) {
 
 function shouldShowItineraryTimeRange(item) {
   if (!item?.StartTime || !item?.EndTime || item.IsAllDay) return false;
+  return isEligibleTimedItineraryItem(item);
+}
+
+function isEligibleTimedItineraryItem(item) {
+  if (!item || item.IsAllDay) return false;
   if (item.ItemType === 'LODGING' || ['CHECK_IN', 'CHECK_OUT', 'FULL_DAY'].includes(item.LodgingDisplayMode)) return false;
   const text = getItemSearchText(item);
   if (isTripPurchaseItem(item, text)) return false;
@@ -3989,13 +3994,13 @@ function getWaitGapMinutes(previousItem, nextItem) {
 }
 
 function getWaitGapStartDate(item) {
-  if (!isWaitGapAnchor(item)) return null;
+  if (!isWaitGapNextAnchor(item)) return null;
   const date = item.DayDate || item.StartDate || '';
   return parseLocalDateTime(date, item.StartTime);
 }
 
 function getWaitGapEndDate(item) {
-  if (!isWaitGapAnchor(item)) return null;
+  if (!isWaitGapPreviousAnchor(item)) return null;
   const startDate = item.DayDate || item.StartDate || '';
   const endDate = item.EndDate && item.EndDate > startDate ? item.EndDate : startDate;
   const start = parseLocalDateTime(startDate, item.StartTime);
@@ -4004,9 +4009,16 @@ function getWaitGapEndDate(item) {
   return end;
 }
 
-function isWaitGapAnchor(item) {
+function isWaitGapPreviousAnchor(item) {
+  if (!item?.StartTime || !item?.EndTime) return false;
   if (isItemCompleted(item)) return false;
-  return shouldShowItineraryTimeRange(item);
+  return isEligibleTimedItineraryItem(item);
+}
+
+function isWaitGapNextAnchor(item) {
+  if (!item?.StartTime) return false;
+  if (isItemCompleted(item)) return false;
+  return isEligibleTimedItineraryItem(item);
 }
 
 function parseLocalDateTime(dateValue, timeValue) {

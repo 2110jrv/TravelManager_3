@@ -187,3 +187,7 @@ TripDay sync conflict checks now compare timestamps first, then `Version` when t
 ## Savepoint 048 forced compact JSON item editor
 
 TM3-087 makes Nuevo item and Editar item render from one explicit non-collapsible compact JSON editor function. The item editor uses dedicated JSON panel and compact field grid classes, shows all supported fields directly, preserves JSON import and AI instruction copy, and does not call or depend on any item-editor accordion/section renderer.
+
+## Savepoint 049 wait gap anchors
+
+TM3-089 separates itinerary range display from wait-gap anchoring. Ranges still require `StartTime` and `EndTime`, while wait cards use the previous eligible item's `EndTime` and the next eligible visible item's `StartTime`, so a gap can appear before an item that has no `EndTime`.
