@@ -1879,7 +1879,7 @@ h1 {
   background: #f8fafc;
 }
 
-.json-import-panel {
+.item-json-panel {
   display: grid;
   gap: 7px;
   border: 1px solid #e2e8f0;
@@ -1888,26 +1888,30 @@ h1 {
   background: #f8fafc;
 }
 
-.json-import-panel textarea {
+.item-json-textarea {
   min-height: 96px;
   background: #fff;
   resize: vertical;
 }
 
-.json-import-actions {
+.item-json-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
 
-.compact-editor-grid {
+.compact-item-form {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 9px 10px;
   min-width: 0;
 }
 
-.edit-field-wide {
+.compact-item-field {
+  min-width: 0;
+}
+
+.compact-item-field--full {
   grid-column: 1 / -1;
 }
 
@@ -1973,11 +1977,11 @@ h1 {
     padding: 10px;
   }
 
-  .compact-editor-grid {
+  .compact-item-form {
     grid-template-columns: 1fr;
   }
 
-  .json-import-actions button {
+  .item-json-actions button {
     flex: 1 1 160px;
   }
 

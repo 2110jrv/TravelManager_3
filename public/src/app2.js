@@ -3484,8 +3484,8 @@ function createItemModal(id, title, submitHandler) {
         <h2 id="${id}Title">${title}</h2>
         <button type="button" class="icon-button" data-cancel aria-label="Cerrar">×</button>
       </header>
-      <form class="edit-form item-editor-form" novalidate>
-        ${renderItemEditorFormContent(id)}
+      <form class="edit-form item-editor-form compact-json-item-editor" novalidate>
+        ${renderCompactJsonItemEditor(id)}
       </form>
     </div>
   `;
@@ -3506,19 +3506,19 @@ function createItemModal(id, title, submitHandler) {
   return api;
 }
 
-function renderItemEditorFormContent(id) {
+function renderCompactJsonItemEditor(id) {
   return `
     <div class="edit-error" role="alert"></div>
-    <div class="json-import-panel">
+    <div class="item-json-panel">
       <label for="${id}JsonInput">Pegar JSON del item</label>
-      <textarea id="${id}JsonInput" data-json-input rows="4" placeholder="Pega aqui un objeto JSON {...} o un array con un item [{...}]"></textarea>
-      <div class="json-import-actions">
+      <textarea id="${id}JsonInput" class="item-json-textarea" data-json-input rows="4" placeholder="Pega aquí un objeto JSON {...} o un array con un item [{...}]"></textarea>
+      <div class="item-json-actions">
         <button type="button" class="secondary-button" data-load-json>Cargar JSON en formulario</button>
         <button type="button" class="secondary-button" data-clear-json>Limpiar JSON</button>
         <button type="button" class="secondary-button" data-copy-ai-json>Copiar instrucciones para IA</button>
       </div>
     </div>
-    <div class="compact-editor-grid">
+    <div class="compact-item-form">
       ${renderItemEditorFields()}
     </div>
     <footer class="edit-actions"><button type="button" class="secondary-button danger-button hidden" data-delete-item>Eliminar item</button><button type="button" class="secondary-button" data-cancel>Cancelar</button><button type="submit" class="primary-button">Guardar</button></footer>
@@ -3540,7 +3540,7 @@ function renderItemEditorField(field) {
     field.min !== undefined ? `min="${escapeHtml(field.min)}"` : '',
     field.step !== undefined ? `step="${escapeHtml(field.step)}"` : ''
   ].filter(Boolean).join(' ');
-  const labelClass = field.wide || EDITOR_TEXTAREA_FIELDS.has(field.name) ? ' class="edit-field-wide"' : '';
+  const labelClass = ` class="compact-item-field${field.wide || EDITOR_TEXTAREA_FIELDS.has(field.name) ? ' compact-item-field--full' : ''}"`;
 
   if (field.type === 'select') {
     return `<label${labelClass} for="${id}">${escapeHtml(field.label)}<select ${commonAttrs}>${field.options.map(([value, label]) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`).join('')}</select></label>`;

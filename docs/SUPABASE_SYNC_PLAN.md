@@ -183,3 +183,7 @@ TripDay pull uses last-write-wins when both local and cloud rows have valid time
 TM3-085 tightens TripDay persistence by treating existing local days with the same `TripID + Date/DayDate` as authoritative over seed rows, even when IDs drift. The local TripDay reader de-dupes same-date rows in memory and displays the newest timestamp/version without blindly deleting older records.
 
 TripDay sync conflict checks now compare timestamps first, then `Version` when timestamps are missing or tied. Itinerary time ranges and wait-time mini cards require real `EndTime` values; they do not fabricate durations. Normal itinerary items with `LodgingDisplayMode: NORMAL` remain eligible, while generated lodging occurrences and purchase-like items stay excluded.
+
+## Savepoint 048 forced compact JSON item editor
+
+TM3-087 makes Nuevo item and Editar item render from one explicit non-collapsible compact JSON editor function. The item editor uses dedicated JSON panel and compact field grid classes, shows all supported fields directly, preserves JSON import and AI instruction copy, and does not call or depend on any item-editor accordion/section renderer.
