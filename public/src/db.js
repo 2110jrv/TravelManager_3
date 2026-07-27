@@ -398,12 +398,18 @@ export async function migrateLegacyTravelData(seed) {
     IsActive: true
   });
   const existingDays = await getTripDays(seed.trip.TripID);
-  const existingCreatedAt = new Map(existingDays.map(day => [day.TripDayID, day.CreatedAt]));
+  const existingById = new Map(existingDays.map(day => [day.TripDayID, day]));
   for (const day of seed.tripDays) {
+    const existing = existingById.get(day.TripDayID);
+    if (existing) continue;
     await saveTripDay({
       ...day,
-      CreatedAt: existingCreatedAt.get(day.TripDayID) || now,
-      LastUpdatedAt: now
+      CreatedAt: now,
+      UpdatedAt: now,
+      ModifiedAt: now,
+      updatedAt: now,
+      LastUpdatedAt: now,
+      Version: Number(day.Version || 0) + 1
     });
   }
   const trips = await getAllTrips();

@@ -2235,7 +2235,8 @@ async function saveDayEditor(originalDayId = '') {
   const TripDayID = originalDayId || makeTripDayId(state.activeTripId, DateValue);
   if (!originalDayId && state.days.some(day => day.TripDayID === TripDayID)) return setInlineMessage(message, 'TripDayID duplicado.', true);
   const now = new Date().toISOString();
-  await saveTripDay(stampLocalChange({ TripDayID, TripID: state.activeTripId, DayOrder: Number(document.getElementById('dayOrderInput').value || 0), Date: DateValue, DayLabel: document.getElementById('dayLabelInput').value.trim(), Title: document.getElementById('dayTitleInput').value.trim(), PrimaryCity: document.getElementById('dayCityInput').value.trim(), PrimaryCountryCode: document.getElementById('dayCountryInput').value.trim(), DayNotes: document.getElementById('dayNotesInput').value.trim(), DayImageUrl: document.getElementById('dayImageInput').value.trim(), CreatedAt: state.days.find(day => day.TripDayID === originalDayId)?.CreatedAt || now }, now));
+  const existing = state.days.find(day => day.TripDayID === originalDayId);
+  await saveTripDay(stampLocalChange({ ...existing, TripDayID, TripID: state.activeTripId, DayOrder: Number(document.getElementById('dayOrderInput').value || 0), Date: DateValue, DayDate: DateValue, DayLabel: document.getElementById('dayLabelInput').value.trim(), Title: document.getElementById('dayTitleInput').value.trim(), PrimaryCity: document.getElementById('dayCityInput').value.trim(), PrimaryCountryCode: document.getElementById('dayCountryInput').value.trim(), DayNotes: document.getElementById('dayNotesInput').value.trim(), DayImageUrl: document.getElementById('dayImageInput').value.trim(), CreatedAt: existing?.CreatedAt || now }, now));
   markLocalEntity('TRIP_DAY', TripDayID);
   await refreshTripsAndDays();
   notifyLocalChange('day-save');

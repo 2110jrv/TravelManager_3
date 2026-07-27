@@ -171,3 +171,9 @@ TM3-079 inserts subtle wait-time mini cards between visible scheduled itinerary 
 ## Savepoint 045 restored JSON item editor modal
 
 TM3-081 restores the shared Nuevo item / Editar item compact JSON editor modal to a full, usable responsive size. The modal keeps the JSON import panel, AI instruction copy action, compact two-column desktop form, single-column mobile form, internal vertical scrolling, and sticky save/cancel/delete actions without returning to collapsible editor sections.
+
+## Savepoint 046 trip day edit protection
+
+TM3-083 protects TripDay edits with the same local-first timestamp/version rule used for item edits. Day editor saves preserve unknown fields, stamp `UpdatedAt`, `ModifiedAt`, `updatedAt`, and `Version`, and queue sync before any pull can apply stale cloud data. The Italy seed migration no longer overwrites existing trip days, so local or cloud-edited day titles, headers, city, and notes remain authoritative over original seed values.
+
+TripDay pull uses last-write-wins when both local and cloud rows have valid timestamps. Recent local TripDay edits remain protected from older realtime/pull rows, while newer cloud rows still apply to support multi-device edits.

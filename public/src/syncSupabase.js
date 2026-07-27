@@ -286,10 +286,21 @@ async function pullCollection(cloudRows, localById, options) {
     const local = localById.get(id);
     if (isRecentlyChanged(options.entityType, id, row.updated_at)) continue;
     if (local && compareIso(getLocalTimestamp(local), row.updated_at) >= 0) continue;
-    await options.save({ ...payload, UpdatedAt: payload.UpdatedAt || row.updated_at, SyncStatus: 'SYNCED' });
+    await options.save(normalizeRemotePayload(payload, row.updated_at));
     count += 1;
   }
   return count;
+}
+
+function normalizeRemotePayload(payload, updatedAt) {
+  const timestamp = payload.UpdatedAt || payload.updatedAt || payload.ModifiedAt || payload.LastUpdatedAt || updatedAt;
+  return {
+    ...payload,
+    UpdatedAt: payload.UpdatedAt || timestamp,
+    ModifiedAt: payload.ModifiedAt || timestamp,
+    updatedAt: payload.updatedAt || timestamp,
+    SyncStatus: 'SYNCED'
+  };
 }
 
 async function pullDeletions(cloudRows, localById) {
