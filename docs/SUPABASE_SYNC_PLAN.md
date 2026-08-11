@@ -32,6 +32,8 @@ Supabase Auth is required so each browser signs in as a real user. Every synced 
 
 The first sync schema uses `payload jsonb` so the static app can evolve local object shapes without a database migration for every UI field. Stable sync metadata remains in typed columns: ownership, ids, timestamps, deletion state, version, device id, and practical query fields.
 
+Payment visibility is handled in the client payload: `PaymentStatus` drives the Admin/Traveler card icon and is hidden from Family. Moving an existing paid confirmed item to proposed is confirmed client-side before the usual local timestamp/version/sync flow continues.
+
 ## Conflict rule
 
 For the first version, conflicts are resolved by last write wins using `updated_at`. When two devices edit the same entity, the row with the newest `updated_at` is authoritative. The update trigger also increments `version` on every update so later sync versions can add stronger conflict handling.

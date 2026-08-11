@@ -62,6 +62,8 @@ const ITEM_TYPES = ['ACTIVITY', 'FLIGHT', 'FOOD', 'LODGING', 'TRANSPORT', 'OTHER
 const PLANNING_STATUSES = ['CONFIRMED', 'PROPOSED'];
 const PAYMENT_STATUSES = ['PAID', 'NOT_PAID', 'PARTIAL', 'RESERVED', 'ESTIMATED', 'INCLUDED', 'UNKNOWN'];
 const ITEM_EDITOR_PAYMENT_STATUSES = ['PAID', 'NOT_PAID', 'PARTIAL', 'INCLUDED', 'UNKNOWN'];
+const PAID_PAYMENT_STATUSES = new Set(['PAID', 'INCLUDED', 'PARTIAL']);
+const PAID_CONFIRMED_TO_PROPOSED_MESSAGE = 'Este item aparece como pagado. Si lo mueves a Propuesto, seguirá marcado como pagado, pero saldrá del presupuesto confirmado. ¿Deseas continuar?';
 const EDITOR_NUMERIC_FIELDS = new Set(['AmountUSD', 'PaidUSD', 'Latitude', 'Longitude']);
 const EDITOR_TEXTAREA_FIELDS = new Set(['Description', 'Notes', 'Details', 'ImportantInfo', 'Instructions']);
 const EDITOR_TRIM_FIELDS = [
@@ -1425,6 +1427,7 @@ function renderItem(item) {
   const displayTime = completed && item.CompletedAgendaTime ? formatDisplayTime(item.CompletedAgendaTime) : fallbackDisplayTime;
   const timeClass = plannedTimeRange && displayTime === plannedTimeRange ? ' item-time-range' : '';
   const priceChip = canSeePrices() ? `<span class="item-price">${formatItemAmount(item)}</span>` : '';
+  const paymentStatusIcon = canSeePrices() ? renderPaymentStatusIcon(item) : '';
   const planningToggle = canEditApp() ? `
         <span class="planning-toggle" role="group" aria-label="Estado de planificaciÃ³n">
           <button type="button" data-status="CONFIRMED" aria-pressed="${getItemPlanningStatus(item) === 'CONFIRMED'}" class="${getItemPlanningStatus(item) === 'CONFIRMED' ? 'active' : ''}">Confirmado</button>
@@ -1435,6 +1438,7 @@ function renderItem(item) {
   const completedBadge = completed ? '<span class="completed-badge">Completado</span>' : '';
   itemEl.innerHTML = `
     <div class="item-summary" role="button" tabindex="0" aria-expanded="${isOpen}">
+      ${paymentStatusIcon}
       <span class="item-time${timeClass}">${escapeHtml(displayTime)}</span>
       <span class="item-title">${escapeHtml(getDisplayTitle(item))}</span>
       <span class="item-meta">
@@ -1541,6 +1545,7 @@ function renderItem(item) {
 async function updatePlanningStatus(item, PlanningStatus) {
   if (!canEditApp()) return;
   if (getItemPlanningStatus(item) === PlanningStatus) return;
+  if (!confirmPaidConfirmedToProposedChange(item, PlanningStatus)) return;
   const updated = stampLocalChange({ ...item, PlanningStatus });
   await updateItem(updated);
   markLocalEntity('ITEM', updated.ItemID);
@@ -2903,6 +2908,7 @@ async function saveDataRow(rowEl) {
   }
   const error = validateDataRow(data, originalKey);
   if (error) return setDataMessage(error, true);
+  if (!confirmPaidConfirmedToProposedChangeForItems(state.items.filter(item => getLogicalKey(item) === originalKey), data.PlanningStatus)) return;
   await upsertLogicalRow(originalKey, data);
   await loadState();
   state.openDayKey = data.StartDate;
@@ -3401,6 +3407,7 @@ async function saveEditForm(event) {
   const data = formData(event.currentTarget);
   const error = validateItemForm(data);
   if (error) return setModalError(editModal, error);
+  if (!confirmPaidConfirmedToProposedChange(state.editingItem, data.PlanningStatus)) return;
   const now = new Date().toISOString();
   const updated = stampLocalChange({
     ...state.editingItem,
@@ -3773,6 +3780,30 @@ function getFormSnapshot(form) {
 
 function getItemPlanningStatus(item) {
   return item.PlanningStatus || getPlanningStatus(item.Status);
+}
+
+function isItemPaid(item) {
+  return PAID_PAYMENT_STATUSES.has(String(item?.PaymentStatus || '').trim().toUpperCase());
+}
+
+function renderPaymentStatusIcon(item) {
+  const paid = isItemPaid(item);
+  const label = paid ? 'Pagado' : 'No pagado';
+  const className = paid ? 'payment-status-icon--paid' : 'payment-status-icon--unpaid';
+  return `<span class="payment-status-icon ${className}" aria-label="${label}" title="${label}">$</span>`;
+}
+
+function confirmPaidConfirmedToProposedChange(item, nextPlanningStatus) {
+  if (getItemPlanningStatus(item) !== 'CONFIRMED') return true;
+  if (nextPlanningStatus !== 'PROPOSED') return true;
+  if (!isItemPaid(item)) return true;
+  return confirm(PAID_CONFIRMED_TO_PROPOSED_MESSAGE);
+}
+
+function confirmPaidConfirmedToProposedChangeForItems(items, nextPlanningStatus) {
+  return !items.some(item => getItemPlanningStatus(item) === 'CONFIRMED' && isItemPaid(item))
+    || nextPlanningStatus !== 'PROPOSED'
+    || confirm(PAID_CONFIRMED_TO_PROPOSED_MESSAGE);
 }
 
 function compareItems(a, b) {
