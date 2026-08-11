@@ -42,6 +42,8 @@ For the first version, conflicts are resolved by last write wins using `updated_
 
 IndexedDB keeps the app usable while the browser is offline. Users can keep viewing and editing cached data without a network connection. When the browser is online again and the user is authenticated, sync resumes by pushing local pending changes and pulling newer Supabase rows.
 
+Deleted itinerary items are protected by durable deletion tombstones in the local deletion queue. Item tombstones store canonical ids, source ids, trip/date/title identity, and deleted timestamps so seed reloads, stale cloud pulls, and duplicate occurrences cannot re-add deleted items. The sync loop keeps retrying the deletion queue and attempts to hard-delete stale `tm3_items` rows; if the remote delete fails, the tombstone remains local and stale pulls stay blocked.
+
 ## Supabase SQL Editor
 
 Open the Supabase Dashboard for `https://cslludzuejkhsydqiabx.supabase.co`, go to SQL Editor, and run `supabase/schema.sql`.

@@ -1,4 +1,4 @@
-import { addItem, deleteTrip, deleteTripDay, enqueueDeletion, getActiveTripId, getAllItems, getAllTrips, getOrCreateDeviceId, getSetting, getTrip, getTripDays, migrateLegacyTravelData, openDatabase, replaceDatasetItems, replaceItemsByPredicate, saveTrip, saveTripDay, selectDefaultTrip, setActiveTripId, setSetting, updateItem } from './db.js';
+import { addItem, deleteTrip, deleteTripDay, enqueueDeletion, getActiveTripId, getAllItems, getAllTrips, getDeletionQueue, getOrCreateDeviceId, getSetting, getTrip, getTripDays, migrateLegacyTravelData, openDatabase, replaceDatasetItems, replaceItemsByPredicate, saveTrip, saveTripDay, selectDefaultTrip, setActiveTripId, setSetting, updateItem } from './db.js';
 import { ITALY_DATASET_ID, ITALY_DATASET_MARK_KEY, ITALY_DAYS_KEY, getPlanningStatus, loadItalyItinerary, rebuildMultidayOccurrences } from './italyAdapter.js';
 import { getCurrentSession, onAuthStateChange, signInWithEmailPassword, signOut, signUpWithEmailPassword } from './supabaseClient.js';
 import { getSyncState, queueCloudSync, recordLocalChange, runCloudSyncNow, startCloudSync, stopCloudSync } from './syncSupabase.js';
@@ -566,7 +566,9 @@ async function migrateToItalyItineraryIfNeeded(itinerary) {
   const isSampleOnly = existingItems.length > 0 && existingItems.every(isSampleItem);
   if (datasetMark === ITALY_DATASET_ID && !isSampleOnly) return;
   if (!isEmpty && !isSampleOnly) return;
-  await replaceItemsByPredicate(itinerary.items, item => isSampleItem(item) || item.DatasetID === ITALY_DATASET_ID);
+  const tombstones = await getDeletionQueue();
+  const seedItems = filterDeletedItems(itinerary.items, tombstones);
+  await replaceItemsByPredicate(seedItems, item => isSampleItem(item) || item.DatasetID === ITALY_DATASET_ID);
   localStorage.setItem(ITALY_DATASET_MARK_KEY, ITALY_DATASET_ID);
   els.statusSync.textContent = 'Itinerario Italy 2026 cargado';
 }
@@ -597,7 +599,8 @@ async function migrateLocalMultidayOccurrences() {
     state.days,
     { datasetId }
   );
-  await replaceItemsByPredicate(rebuilt, item => isActiveDatasetItem(item) && relatedKeys.has(getLogicalKey(item)));
+  const tombstones = await getDeletionQueue();
+  await replaceItemsByPredicate(filterDeletedItems(rebuilt, tombstones), item => isActiveDatasetItem(item) && relatedKeys.has(getLogicalKey(item)));
   await setSetting(settingKey, MULTIDAY_OCCURRENCE_MIGRATION_VERSION);
 }
 
@@ -2989,7 +2992,9 @@ async function recordDeletion(EntityType, EntityId, TripID, entity = {}) {
     EntityType,
     EntityId,
     TripID: TripID || '',
+    ...getDeletionEntityDetails(EntityType, entity),
     DeletedAt: now,
+    deletedAt: now,
     Version,
     DeviceId
   }, now));
@@ -3003,7 +3008,8 @@ async function deleteLogicalItem(item, modal = null) {
   if (!confirm(`Eliminar item ${key} - ${title}? Se borrarán todas sus apariciones.`)) return;
   await createDataSnapshot('Antes de eliminar item');
   await recordDeletion('ITEM', key, item.TripID || state.activeTripId, item);
-  await replaceItemsByPredicate([], row => row.TripID === state.activeTripId && getLogicalKey(row) === key);
+  const tombstones = await getDeletionQueue();
+  await replaceItemsByPredicate([], row => row.TripID === state.activeTripId && (getLogicalKey(row) === key || itemMatchesDeletionTombstone(row, tombstones)));
   if (modal) closeModal(modal);
   await loadState();
   state.openItemId = null;
@@ -3319,7 +3325,8 @@ async function restoreOriginalItinerary() {
   await setActiveTripId('TRIP_ITALY_2026');
   await refreshTripsAndDays(itinerary.days);
   const now = new Date().toISOString();
-  const restoredItems = itinerary.items.map(item => stampLocalChange(item, now));
+  const tombstones = await getDeletionQueue();
+  const restoredItems = filterDeletedItems(itinerary.items, tombstones).map(item => stampLocalChange(item, now));
   await replaceItemsByPredicate(restoredItems, item => item.DatasetID === ITALY_DATASET_ID || item.TripID === 'TRIP_ITALY_2026');
   restoredItems.forEach(item => markLocalEntity('ITEM', item.ItemID));
   localStorage.setItem(ITALY_DATASET_MARK_KEY, ITALY_DATASET_ID);
@@ -3780,6 +3787,66 @@ function getFormSnapshot(form) {
 
 function getItemPlanningStatus(item) {
   return item.PlanningStatus || getPlanningStatus(item.Status);
+}
+
+function getDeletionEntityDetails(EntityType, entity) {
+  if (EntityType !== 'ITEM') return {};
+  const identityKeys = getItemIdentityKeys(entity);
+  return {
+    ItemID: entity.ItemID || '',
+    SourceItemID: entity.SourceItemID || '',
+    TripID: entity.TripID || state.activeTripId || '',
+    DayID: entity.DayID || entity.TripDayID || '',
+    DayDate: entity.DayDate || '',
+    StartDate: entity.StartDate || '',
+    Title: entity.Title || '',
+    TableName: 'items',
+    RecordType: 'items',
+    IdentityKeys: identityKeys,
+    identityKeys
+  };
+}
+
+function filterDeletedItems(items, tombstones) {
+  return items.filter(item => !itemMatchesDeletionTombstone(item, tombstones));
+}
+
+function itemMatchesDeletionTombstone(item, tombstones) {
+  return tombstones.some(tombstone => {
+    if ((tombstone.EntityType || tombstone.entity_type) !== 'ITEM') return false;
+    const tombstoneKeys = getTombstoneIdentityKeys(tombstone);
+    return getItemIdentityKeys(item).some(key => tombstoneKeys.has(key));
+  });
+}
+
+function getItemIdentityKeys(item) {
+  const keys = new Set();
+  [item?.ItemID, item?.SourceItemID, item?.EntityId, item?.EntityID, item?.entity_id].filter(Boolean).forEach(value => {
+    keys.add(`id:${String(value)}`);
+  });
+  const tripId = item?.TripID || state.activeTripId || '';
+  const date = item?.DayDate || item?.StartDate || '';
+  const title = normalizeIdentityText(item?.Title);
+  if (tripId && date && title) keys.add(`natural:${tripId}:${date}:${title}`);
+  return [...keys];
+}
+
+function getTombstoneIdentityKeys(tombstone) {
+  const keys = new Set();
+  const listed = tombstone.IdentityKeys || tombstone.identityKeys || [];
+  listed.forEach(key => keys.add(String(key)));
+  [tombstone.ItemID, tombstone.SourceItemID, tombstone.EntityId, tombstone.EntityID, tombstone.entity_id].filter(Boolean).forEach(value => {
+    keys.add(`id:${String(value)}`);
+  });
+  const tripId = tombstone.TripID || tombstone.trip_id || '';
+  const date = tombstone.DayDate || tombstone.StartDate || tombstone.day_date || '';
+  const title = normalizeIdentityText(tombstone.Title || tombstone.title);
+  if (tripId && date && title) keys.add(`natural:${tripId}:${date}:${title}`);
+  return keys;
+}
+
+function normalizeIdentityText(value) {
+  return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
 function isItemPaid(item) {

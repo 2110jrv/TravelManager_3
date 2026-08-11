@@ -132,6 +132,7 @@ export async function pushLocalToCloud() {
   const tombstones = buildTombstoneMap([...deletions, ...cloud.tm3_deletion_queue.map(row => row.payload || row)]);
   let count = 0;
 
+  count += await pushRemoteDeletes(client, cloud, tombstones);
   count += await pushCollection(client, 'tm3_trips', await getAllTrips(), cloud.tm3_trips, {
     idField: 'TripID',
     cloudId: 'trip_id',
@@ -254,7 +255,7 @@ async function pushCollection(client, table, localRows, cloudRows, options) {
     const id = row[options.idField];
     if (!id) continue;
     const localTimestamp = getLocalTimestamp(row);
-    const tombstone = options.tombstones.get(tombstoneKey(options.entityType, id));
+    const tombstone = findTombstoneForEntity(options.tombstones, options.entityType, row, id);
     if (tombstone && compareIso(getLocalTimestamp(tombstone), localTimestamp) >= 0) continue;
     const cloud = cloudById.get(id);
     if (cloud?.deleted_at) continue;
@@ -282,7 +283,7 @@ async function pullCollection(cloudRows, localById, options) {
     const id = row[options.cloudId];
     const payload = row.payload;
     if (!id || !payload) continue;
-    const tombstone = options.tombstones.get(tombstoneKey(options.entityType, id));
+    const tombstone = findTombstoneForEntity(options.tombstones, options.entityType, payload, id);
     if (tombstone && compareIso(getLocalTimestamp(tombstone), row.updated_at) >= 0) continue;
     const local = localById.get(id) || options.localByNaturalKey?.get(options.getNaturalKey?.(payload) || '');
     if (isRecentlyChanged(options.entityType, id, row.updated_at)) continue;
@@ -327,12 +328,12 @@ async function pullDeletions(cloudRows, localById) {
 
 async function applyTombstones(tombstones, local) {
   let count = 0;
-  for (const tombstone of tombstones.values()) {
+  for (const tombstone of uniqueTombstones(tombstones)) {
     const type = tombstone.EntityType || tombstone.entity_type;
     const id = tombstone.EntityId || tombstone.EntityID || tombstone.entity_id;
     const ts = getLocalTimestamp(tombstone);
     if (type === 'ITEM') {
-      const items = [...local.tm3_items.values()].filter(item => item.ItemID === id || item.SourceItemID === id);
+      const items = [...local.tm3_items.values()].filter(item => findTombstoneForEntity(tombstones, 'ITEM', item, item.ItemID) === tombstone);
       for (const item of items) {
         if (compareIso(ts, getLocalTimestamp(item)) >= 0) {
           await deleteItem(item.ItemID);
@@ -358,6 +359,30 @@ async function applyTombstones(tombstones, local) {
   return count;
 }
 
+async function pushRemoteDeletes(client, cloud, tombstones) {
+  let count = 0;
+  count += await pushRemoteDeletesForTable(client, 'tm3_items', cloud.tm3_items, {
+    cloudId: 'item_id',
+    entityType: 'ITEM',
+    tombstones
+  });
+  return count;
+}
+
+async function pushRemoteDeletesForTable(client, table, cloudRows, options) {
+  let count = 0;
+  for (const row of cloudRows || []) {
+    if (row.deleted_at) continue;
+    const payload = row.payload || {};
+    const id = row[options.cloudId];
+    const tombstone = findTombstoneForEntity(options.tombstones, options.entityType, payload, id);
+    if (!tombstone || compareIso(getLocalTimestamp(tombstone), getCloudTimestamp(row)) < 0) continue;
+    const { error } = await client.from(table).delete().eq(options.cloudId, id);
+    if (!error) count += 1;
+  }
+  return count;
+}
+
 async function loadCloudSnapshot(client) {
   const entries = await Promise.all(SYNC_TABLES.map(async table => {
     const { data, error } = await client.from(table).select('*');
@@ -371,17 +396,59 @@ function buildTombstoneMap(rows) {
   const map = new Map();
   for (const row of rows) {
     const type = row.EntityType || row.entity_type;
-    const id = row.EntityId || row.EntityID || row.entity_id;
-    if (!type || !id) continue;
-    const key = tombstoneKey(type, id);
-    const existing = map.get(key);
-    if (!existing || compareIso(getLocalTimestamp(row), getLocalTimestamp(existing)) > 0) map.set(key, row);
+    if (!type) continue;
+    for (const key of getDeletionIdentityKeys(type, row)) {
+      const existing = map.get(key);
+      if (!existing || compareIso(getLocalTimestamp(row), getLocalTimestamp(existing)) > 0) map.set(key, row);
+    }
   }
   return map;
 }
 
-function tombstoneKey(type, id) {
-  return `${type}:${id}`;
+function uniqueTombstones(tombstones) {
+  return [...new Set(tombstones.values())];
+}
+
+function findTombstoneForEntity(tombstones, type, entity, fallbackId = '') {
+  for (const key of getEntityIdentityKeys(type, entity, fallbackId)) {
+    const tombstone = tombstones.get(key);
+    if (tombstone) return tombstone;
+  }
+  return null;
+}
+
+function getDeletionIdentityKeys(type, tombstone) {
+  if (type === 'ITEM') return getItemIdentityKeys(tombstone);
+  const id = tombstone.EntityId || tombstone.EntityID || tombstone.entity_id;
+  return id ? [tombstoneKey(type, `id:${id}`)] : [];
+}
+
+function getEntityIdentityKeys(type, entity, fallbackId = '') {
+  if (type === 'ITEM') return getItemIdentityKeys({ ...entity, ItemID: entity?.ItemID || fallbackId });
+  const id = entity?.EntityId || entity?.EntityID || entity?.entity_id || fallbackId;
+  return id ? [tombstoneKey(type, `id:${id}`)] : [];
+}
+
+function getItemIdentityKeys(item) {
+  const keys = new Set();
+  const listed = item.IdentityKeys || item.identityKeys || [];
+  listed.forEach(key => keys.add(tombstoneKey('ITEM', String(key))));
+  [item.ItemID, item.SourceItemID, item.EntityId, item.EntityID, item.entity_id].filter(Boolean).forEach(value => {
+    keys.add(tombstoneKey('ITEM', `id:${String(value)}`));
+  });
+  const tripId = item.TripID || item.trip_id || '';
+  const date = item.DayDate || item.StartDate || item.day_date || '';
+  const title = normalizeIdentityText(item.Title || item.title);
+  if (tripId && date && title) keys.add(tombstoneKey('ITEM', `natural:${tripId}:${date}:${title}`));
+  return [...keys];
+}
+
+function tombstoneKey(type, key) {
+  return `${String(type || '').toUpperCase()}:${key}`;
+}
+
+function normalizeIdentityText(value) {
+  return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
 function entityKey(type, id) {
