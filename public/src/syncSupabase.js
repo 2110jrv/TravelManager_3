@@ -36,6 +36,7 @@ let debounceId = null;
 let realtimeChannel = null;
 let onAppliedRemoteChanges = null;
 const localRecentlyChanged = new Map();
+const deletedItemIdentityKeys = new Set();
 
 export function getSyncState() {
   return { ...state };
@@ -45,6 +46,17 @@ export function recordLocalChange(entityType, entityId, changedAt = new Date().t
   if (!entityType || !entityId) return;
   localRecentlyChanged.set(entityKey(entityType, entityId), changedAt);
   pruneRecentChanges();
+}
+
+export function registerDeletedItemIdentityKeys(itemOrTombstone) {
+  getItemIdentityKeys(itemOrTombstone).forEach(key => deletedItemIdentityKeys.add(key));
+}
+
+export function registerDeletedItemTombstones(tombstones = []) {
+  tombstones.forEach(tombstone => {
+    if ((tombstone.EntityType || tombstone.entity_type) !== 'ITEM') return;
+    getItemIdentityKeys(tombstone).forEach(key => deletedItemIdentityKeys.add(key));
+  });
 }
 
 export async function startCloudSync(options = {}) {
@@ -204,6 +216,7 @@ export async function pullCloudToLocal() {
     ...local.tm3_deletion_queue.values(),
     ...cloud.tm3_deletion_queue.map(row => row.payload || row)
   ]);
+  registerDeletedItemTombstones([...local.tm3_deletion_queue.values(), ...cloud.tm3_deletion_queue.map(row => row.payload || row)]);
   let applied = 0;
   state.applyingRemote = true;
   try {
@@ -285,6 +298,11 @@ async function pullCollection(cloudRows, localById, options) {
     if (!id || !payload) continue;
     const tombstone = findTombstoneForEntity(options.tombstones, options.entityType, payload, id);
     if (tombstone && compareIso(getLocalTimestamp(tombstone), row.updated_at) >= 0) continue;
+    if (options.entityType === 'ITEM' && isDeletedItem(payload)) {
+      await deleteItem(id).catch(() => {});
+      count += 1;
+      continue;
+    }
     const local = localById.get(id) || options.localByNaturalKey?.get(options.getNaturalKey?.(payload) || '');
     if (isRecentlyChanged(options.entityType, id, row.updated_at)) continue;
     if (local && compareLocalToCloud(local, row) >= 0) continue;
@@ -337,6 +355,7 @@ async function applyTombstones(tombstones, local) {
       for (const item of items) {
         if (compareIso(ts, getLocalTimestamp(item)) >= 0) {
           await deleteItem(item.ItemID);
+          registerDeletedItemIdentityKeys(item);
           count += 1;
         }
       }
@@ -441,6 +460,10 @@ function getItemIdentityKeys(item) {
   const title = normalizeIdentityText(item.Title || item.title);
   if (tripId && date && title) keys.add(tombstoneKey('ITEM', `natural:${tripId}:${date}:${title}`));
   return [...keys];
+}
+
+function isDeletedItem(item) {
+  return getItemIdentityKeys(item).some(key => deletedItemIdentityKeys.has(key));
 }
 
 function tombstoneKey(type, key) {
