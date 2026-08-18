@@ -7,7 +7,15 @@ import {
   getAllTrips,
   getDeletionQueue,
   getOrCreateDeviceId,
+  getQueueRecords,
   getTripDays,
+  getSyncMeta,
+  countPendingQueueRecords,
+  saveSyncMeta,
+  saveSyncSnapshot,
+  saveQueueRecord,
+  updateQueueRecord,
+  setSyncQueueWritesSuppressed,
   saveDeletionRecord,
   saveSettingRecord,
   saveTrip,
@@ -18,8 +26,8 @@ import { getCurrentUser, getSupabaseClient } from './supabaseClient.js';
 
 const SYNC_INTERVAL_MS = 60000;
 const SYNC_DEBOUNCE_MS = 1200;
-const DIRTY_PROTECTION_MS = 5 * 60000;
-const SYNC_TABLES = ['tm3_trips', 'tm3_trip_days', 'tm3_items', 'tm3_settings', 'tm3_deletion_queue'];
+const AUTO_SYNC_COOLDOWN_MS = 30000;
+const SNAPSHOT_REASON_PULL = 'pull';
 
 const state = {
   status: 'signed_out',
@@ -28,7 +36,11 @@ const state = {
   pendingReason: '',
   running: false,
   started: false,
-  applyingRemote: false
+  applyingRemote: false,
+  conflict: false,
+  lastAutoSyncAt: '',
+  suppressCloudSyncUntil: 0,
+  deviceId: ''
 };
 
 let intervalId = null;
@@ -70,12 +82,10 @@ export async function startCloudSync(options = {}) {
     stopCloudSync();
     return getSyncState();
   }
+  state.deviceId = await getOrCreateDeviceId();
   if (!state.started) {
     state.started = true;
-    await subscribeToCloudChanges();
   }
-  if (!intervalId) intervalId = window.setInterval(() => queueCloudSync('interval'), SYNC_INTERVAL_MS);
-  queueCloudSync('start');
   return getSyncState();
 }
 
@@ -90,8 +100,10 @@ export function stopCloudSync() {
 }
 
 export async function runCloudSyncNow(reason = 'manual') {
+  const isManual = reason === 'manual';
+  const now = Date.now();
   if (state.running) {
-    setSyncState({ status: 'pending', pendingReason: reason });
+    if (isManual) setSyncState({ status: 'pending', pendingReason: reason });
     return getSyncState();
   }
   if (!navigator.onLine) {
@@ -103,15 +115,18 @@ export async function runCloudSyncNow(reason = 'manual') {
     setSyncState({ status: 'signed_out', pendingReason: '' });
     return getSyncState();
   }
+  if (!isManual && state.lastAutoSyncAt && now - Date.parse(state.lastAutoSyncAt || 0) < AUTO_SYNC_COOLDOWN_MS) {
+    return getSyncState();
+  }
 
   state.running = true;
   setSyncState({ status: 'syncing', pendingReason: reason, lastError: '' });
   try {
-    const pushed = await pushLocalToCloud();
-    const pulled = await pullCloudToLocal();
+    const pending = await getQueueRecords('PENDING');
+    const pushed = await pushPendingQueue(pending);
     state.lastSyncAt = new Date().toISOString();
-    setSyncState({ status: pushed > 0 || pulled > 0 ? 'synced' : 'idle', pendingReason: '', lastError: '' });
-    if (pulled > 0 && onAppliedRemoteChanges) await onAppliedRemoteChanges({ pulled, reason });
+    if (!isManual) state.lastAutoSyncAt = state.lastSyncAt;
+    setSyncState({ status: pushed > 0 ? 'synced' : 'idle', pendingReason: '', lastError: '' });
   } catch (error) {
     setSyncState({ status: 'error', lastError: getErrorMessage(error), pendingReason: reason });
   } finally {
@@ -122,10 +137,13 @@ export async function runCloudSyncNow(reason = 'manual') {
 
 export function queueCloudSync(reason = 'change') {
   if (state.applyingRemote) return;
+  if (Date.now() < Number(state.suppressCloudSyncUntil || 0)) return;
   if (!navigator.onLine) {
     setSyncState({ status: 'offline', pendingReason: reason });
     return;
   }
+  if (state.running) return;
+  if (reason !== 'manual' && state.lastAutoSyncAt && Date.now() - Date.parse(state.lastAutoSyncAt || 0) < AUTO_SYNC_COOLDOWN_MS) return;
   setSyncState({ status: 'pending', pendingReason: reason });
   if (debounceId) window.clearTimeout(debounceId);
   debounceId = window.setTimeout(() => {
@@ -134,70 +152,99 @@ export function queueCloudSync(reason = 'change') {
   }, SYNC_DEBOUNCE_MS);
 }
 
-export async function pushLocalToCloud() {
+export async function pushPendingQueue(records = null) {
   const user = await safeUser();
   if (!user || !navigator.onLine) return 0;
   const client = await getSupabaseClient();
-  const deviceId = await getOrCreateDeviceId();
-  const cloud = await loadCloudSnapshot(client);
-  const deletions = await getDeletionQueue();
-  const tombstones = buildTombstoneMap([...deletions, ...cloud.tm3_deletion_queue.map(row => row.payload || row)]);
+  const deviceId = state.deviceId || await getOrCreateDeviceId();
+  state.deviceId = deviceId;
+  const pending = records || await getQueueRecords('PENDING');
   let count = 0;
-
-  count += await pushRemoteDeletes(client, cloud, tombstones);
-  count += await pushCollection(client, 'tm3_trips', await getAllTrips(), cloud.tm3_trips, {
-    idField: 'TripID',
-    cloudId: 'trip_id',
-    row: item => ({ trip_id: item.TripID }),
-    user,
-    deviceId,
-    tombstones,
-    entityType: 'TRIP'
-  });
-  count += await pushCollection(client, 'tm3_trip_days', await getTripDays(), cloud.tm3_trip_days, {
-    idField: 'TripDayID',
-    cloudId: 'day_id',
-    row: item => ({ day_id: item.TripDayID, trip_id: item.TripID || '' }),
-    user,
-    deviceId,
-    tombstones,
-    entityType: 'TRIP_DAY'
-  });
-  count += await pushCollection(client, 'tm3_items', await getAllItems(), cloud.tm3_items, {
-    idField: 'ItemID',
-    cloudId: 'item_id',
-    row: item => ({ item_id: item.ItemID, trip_id: item.TripID || '', source_item_id: item.SourceItemID || null, day_date: item.DayDate || null }),
-    user,
-    deviceId,
-    tombstones,
-    entityType: 'ITEM'
-  });
-  count += await pushCollection(client, 'tm3_settings', await getAllSettings(), cloud.tm3_settings, {
-    idField: 'key',
-    cloudId: 'setting_key',
-    row: item => ({ setting_key: item.key }),
-    user,
-    deviceId,
-    tombstones: new Map(),
-    entityType: 'SETTING',
-    onConflict: 'user_id,setting_key'
-  });
-  count += await pushCollection(client, 'tm3_deletion_queue', deletions, cloud.tm3_deletion_queue, {
-    idField: 'DeletionID',
-    cloudId: 'deletion_id',
-    row: item => ({
-      deletion_id: item.DeletionID,
-      entity_type: item.EntityType || '',
-      entity_id: item.EntityId || item.EntityID || '',
-      trip_id: item.TripID || null,
-      deleted_at: item.DeletedAt || getLocalTimestamp(item)
-    }),
-    user,
-    deviceId,
-    tombstones: new Map(),
-    entityType: 'DELETION'
-  });
+  setSyncQueueWritesSuppressed(true);
+  try {
+    for (const record of pending) {
+      await updateQueueRecord({ ...record, Status: 'SYNCING', Attempts: Number(record.Attempts || 0) + 1, UpdatedAt: new Date().toISOString() });
+      try {
+        await processQueueRecord(client, record, deviceId);
+        await updateQueueRecord({ ...record, Status: 'DONE', LastError: '', UpdatedAt: new Date().toISOString() });
+        count += 1;
+      } catch (error) {
+        await updateQueueRecord({ ...record, Status: 'FAILED', LastError: getErrorMessage(error), UpdatedAt: new Date().toISOString() });
+      }
+    }
+  } finally {
+    setSyncQueueWritesSuppressed(false);
+  }
   return count;
+}
+
+export async function pullMasterNow() {
+  return pullCloudToLocal();
+}
+
+async function processQueueRecord(client, record, deviceId, user) {
+  const op = String(record.OperationType || '').toUpperCase();
+  const payload = record.Payload || {};
+  if (op === 'UPSERT_ITEM') {
+    const row = normalizeLocalPayloadForPush(payload, payload.UpdatedAt || payload.updatedAt || new Date().toISOString());
+    const { error } = await client.from('tm3_items').upsert({
+      item_id: payload.ItemID,
+      trip_id: payload.TripID || '',
+      source_item_id: payload.SourceItemID || null,
+      day_date: payload.DayDate || null,
+      user_id: user.id,
+      payload: row,
+      updated_at: row.UpdatedAt,
+      device_id: deviceId
+    }, { onConflict: 'item_id' });
+    if (error) throw error;
+    return;
+  }
+  if (op === 'DELETE_ITEM') {
+    const itemId = payload.ItemID || record.EntityID;
+    if (!itemId) throw new Error('DELETE_ITEM sin ItemID');
+    const { error } = await client.from('tm3_items').delete().eq('user_id', user.id).eq('item_id', itemId);
+    if (error) throw error;
+    return;
+  }
+  if (op === 'UPSERT_DAY') {
+    const row = normalizeLocalPayloadForPush(payload, payload.UpdatedAt || payload.updatedAt || new Date().toISOString());
+    const { error } = await client.from('tm3_trip_days').upsert({
+      day_id: payload.TripDayID,
+      trip_id: payload.TripID || '',
+      user_id: user.id,
+      payload: row,
+      updated_at: row.UpdatedAt,
+      device_id: deviceId
+    }, { onConflict: 'day_id' });
+    if (error) throw error;
+    return;
+  }
+  if (op === 'UPSERT_TRIP') {
+    const row = normalizeLocalPayloadForPush(payload, payload.UpdatedAt || payload.updatedAt || new Date().toISOString());
+    const { error } = await client.from('tm3_trips').upsert({
+      trip_id: payload.TripID,
+      user_id: user.id,
+      payload: row,
+      updated_at: row.UpdatedAt,
+      device_id: deviceId
+    }, { onConflict: 'trip_id' });
+    if (error) throw error;
+    return;
+  }
+  if (op === 'UPSERT_SETTING') {
+    const row = normalizeLocalPayloadForPush(payload, payload.UpdatedAt || payload.updatedAt || new Date().toISOString());
+    const { error } = await client.from('tm3_settings').upsert({
+      setting_key: payload.key,
+      user_id: user.id,
+      payload: row,
+      updated_at: row.UpdatedAt,
+      device_id: deviceId
+    }, { onConflict: 'user_id,setting_key' });
+    if (error) throw error;
+    return;
+  }
+  throw new Error(`Operación no soportada: ${op}`);
 }
 
 export async function pullCloudToLocal() {
@@ -205,6 +252,8 @@ export async function pullCloudToLocal() {
   if (!user || !navigator.onLine) return 0;
   const client = await getSupabaseClient();
   const cloud = await loadCloudSnapshot(client);
+  const meta = await getSyncMeta();
+  const remoteUpdatedAt = getRemoteUpdatedAt(cloud);
   const local = {
     tm3_trips: indexBy(await getAllTrips(), 'TripID'),
     tm3_trip_days: indexBy(await getTripDays(), 'TripDayID'),
@@ -217,6 +266,7 @@ export async function pullCloudToLocal() {
     ...cloud.tm3_deletion_queue.map(row => row.payload || row)
   ]);
   registerDeletedItemTombstones([...local.tm3_deletion_queue.values(), ...cloud.tm3_deletion_queue.map(row => row.payload || row)]);
+  await createLocalSyncSnapshot('pull', cloud, local);
   let applied = 0;
   state.applyingRemote = true;
   try {
@@ -229,6 +279,17 @@ export async function pullCloudToLocal() {
   } finally {
     state.applyingRemote = false;
   }
+  await updateSyncMeta({
+    ...meta,
+    deviceId: meta.deviceId || (await getOrCreateDeviceId()),
+    remoteUpdatedAt,
+    localUpdatedAt: await getLocalUpdatedAt(),
+    syncBaseRemoteUpdatedAt: remoteUpdatedAt || meta.syncBaseRemoteUpdatedAt,
+    lastSuccessfulPullAt: new Date().toISOString(),
+    hasLocalPendingChanges: false,
+    lastConflictMessage: ''
+  });
+  state.suppressCloudSyncUntil = Date.now() + 10000;
   return applied;
 }
 
@@ -239,7 +300,11 @@ export async function subscribeToCloudChanges() {
     const client = await getSupabaseClient();
     realtimeChannel = client.channel(`tm3-sync-${user.id}`);
     SYNC_TABLES.forEach(table => {
-      realtimeChannel.on('postgres_changes', { event: '*', schema: 'public', table, filter: `user_id=eq.${user.id}` }, () => queueCloudSync('realtime'));
+      realtimeChannel.on('postgres_changes', { event: '*', schema: 'public', table, filter: `user_id=eq.${user.id}` }, payload => {
+        if (Date.now() < Number(state.suppressCloudSyncUntil || 0)) return;
+        if (payload?.new?.device_id && payload.new.device_id === state.deviceId) return;
+        queueCloudSync('realtime');
+      });
     });
     realtimeChannel.subscribe(status => {
       if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') queueCloudSync('realtime-fallback');
@@ -512,6 +577,60 @@ function getTripDayDateKey(day) {
 
 function getLocalTimestamp(row) {
   return row?.UpdatedAt || row?.updatedAt || row?.UpdatedOn || row?.ModifiedAt || row?.LastUpdatedAt || row?.DeletedAt || row?.updated_at || '';
+}
+
+function getRemoteUpdatedAt(cloud) {
+  const stamps = [];
+  for (const rows of Object.values(cloud || {})) {
+    for (const row of rows || []) {
+      stamps.push(row?.updated_at || row?.payload?.UpdatedAt || row?.payload?.updatedAt || row?.payload?.ModifiedAt || row?.payload?.LastUpdatedAt || '');
+    }
+  }
+  const filtered = stamps.filter(Boolean);
+  return filtered.sort().at(-1) || '';
+}
+
+function hasLocalPendingChanges(localUpdatedAt, meta) {
+  return Boolean(meta?.hasLocalPendingChanges || compareIso(localUpdatedAt, meta?.lastSuccessfulPullAt || '') > 0);
+}
+
+async function updateSyncMeta(patch) {
+  return saveSyncMeta({ ...(await getSyncMeta()), ...patch });
+}
+
+async function createLocalSyncSnapshot(reason, cloud, local = null) {
+  const snapshot = {
+    SnapshotID: `snapshot-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    CreatedAt: new Date().toISOString(),
+    Reason: reason,
+    payload: {
+      cloud,
+      local: local || {
+        tm3_trips: indexBy(await getAllTrips(), 'TripID'),
+        tm3_trip_days: indexBy(await getTripDays(), 'TripDayID'),
+        tm3_items: indexBy(await getAllItems(), 'ItemID'),
+        tm3_settings: indexBy(await getAllSettings(), 'key'),
+        tm3_deletion_queue: indexBy(await getDeletionQueue(), 'DeletionID')
+      }
+    }
+  };
+  await saveSyncSnapshot(snapshot);
+  await updateSyncMeta({ lastSnapshotAt: snapshot.CreatedAt });
+  return snapshot;
+}
+
+async function getLocalUpdatedAt() {
+  const rows = [
+    ...(await getAllTrips()),
+    ...(await getTripDays()),
+    ...(await getAllItems()),
+    ...(await getAllSettings()),
+    ...(await getDeletionQueue())
+  ];
+  return rows.reduce((latest, row) => {
+    const stamp = getLocalTimestamp(row);
+    return compareIso(stamp, latest) > 0 ? stamp : latest;
+  }, '');
 }
 
 function getCloudTimestamp(row) {

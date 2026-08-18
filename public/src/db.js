@@ -1,10 +1,14 @@
 const DB_NAME = 'TravelManager3';
-const DB_VERSION = 4;
+const DB_VERSION = 6;
 const STORE_ITEMS = 'items';
 const STORE_SETTINGS = 'settings';
 const STORE_TRIPS = 'trips';
 const STORE_TRIP_DAYS = 'tripDays';
 const STORE_DELETION_QUEUE = 'deletionQueue';
+const STORE_SNAPSHOTS = 'syncSnapshots';
+const STORE_SYNC_QUEUE = 'syncQueue';
+const SYNC_META_KEY = 'syncMeta';
+let suppressSyncQueueWrites = false;
 
 export function openDatabase() {
   return new Promise((resolve, reject) => {
@@ -37,6 +41,18 @@ export function openDatabase() {
         store.createIndex('TripID', 'TripID', { unique: false });
         store.createIndex('SyncStatus', 'SyncStatus', { unique: false });
         store.createIndex('DeletedAt', 'DeletedAt', { unique: false });
+      }
+      if (!db.objectStoreNames.contains(STORE_SNAPSHOTS)) {
+        const store = db.createObjectStore(STORE_SNAPSHOTS, { keyPath: 'SnapshotID' });
+        store.createIndex('CreatedAt', 'CreatedAt', { unique: false });
+        store.createIndex('Reason', 'Reason', { unique: false });
+      }
+      if (!db.objectStoreNames.contains(STORE_SYNC_QUEUE)) {
+        const store = db.createObjectStore(STORE_SYNC_QUEUE, { keyPath: 'QueueID' });
+        store.createIndex('Status', 'Status', { unique: false });
+        store.createIndex('EntityType', 'EntityType', { unique: false });
+        store.createIndex('OperationType', 'OperationType', { unique: false });
+        store.createIndex('CreatedAt', 'CreatedAt', { unique: false });
       }
     };
 
@@ -119,7 +135,10 @@ export async function updateItem(item) {
     const transaction = db.transaction(STORE_ITEMS, 'readwrite');
     const store = transaction.objectStore(STORE_ITEMS);
     const request = store.put(item);
-    request.onsuccess = () => resolve(item);
+    request.onsuccess = async () => {
+      await enqueueSyncOperationFromRecord('UPSERT_ITEM', 'item', item.ItemID, item);
+      resolve(item);
+    };
     request.onerror = () => reject(request.error);
   });
 }
@@ -130,7 +149,10 @@ export async function addItem(item) {
     const transaction = db.transaction(STORE_ITEMS, 'readwrite');
     const store = transaction.objectStore(STORE_ITEMS);
     const request = store.add(item);
-    request.onsuccess = () => resolve(item);
+    request.onsuccess = async () => {
+      await enqueueSyncOperationFromRecord('UPSERT_ITEM', 'item', item.ItemID, item);
+      resolve(item);
+    };
     request.onerror = () => reject(request.error);
   });
 }
@@ -140,9 +162,15 @@ export async function deleteItem(ItemID) {
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(STORE_ITEMS, 'readwrite');
     const store = transaction.objectStore(STORE_ITEMS);
-    const request = store.delete(ItemID);
-    request.onsuccess = () => resolve();
-    request.onerror = () => reject(request.error);
+    const getRequest = store.get(ItemID);
+    getRequest.onsuccess = async () => {
+      const existing = getRequest.result || { ItemID };
+      await enqueueSyncOperationFromRecord('DELETE_ITEM', 'item', ItemID, existing);
+      const request = store.delete(ItemID);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    };
+    getRequest.onerror = () => reject(getRequest.error);
   });
 }
 
@@ -226,7 +254,10 @@ export async function saveSettingRecord(record) {
     const transaction = db.transaction(STORE_SETTINGS, 'readwrite');
     const store = transaction.objectStore(STORE_SETTINGS);
     const request = store.put(record);
-    request.onsuccess = () => resolve(record);
+    request.onsuccess = async () => {
+      await enqueueSyncOperationFromRecord('UPSERT_SETTING', 'setting', record.key, record);
+      resolve(record);
+    };
     request.onerror = () => reject(request.error);
   });
 }
@@ -238,6 +269,46 @@ export async function getOrCreateDeviceId() {
   const deviceId = `device-${random}`;
   await setSetting('deviceId', deviceId);
   return deviceId;
+}
+
+export async function getSyncMeta() {
+  return getSetting(SYNC_META_KEY, {
+    deviceId: '',
+    hasLocalPendingChanges: false,
+    syncBaseRemoteUpdatedAt: '',
+    lastSuccessfulPullAt: '',
+    lastSuccessfulPushAt: '',
+    lastSnapshotAt: '',
+    remoteUpdatedAt: '',
+    localUpdatedAt: '',
+    lastConflictMessage: ''
+  });
+}
+
+export async function saveSyncMeta(meta) {
+  return setSetting(SYNC_META_KEY, meta);
+}
+
+export async function saveSyncSnapshot(snapshot) {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_SNAPSHOTS, 'readwrite');
+    const store = transaction.objectStore(STORE_SNAPSHOTS);
+    const request = store.put(snapshot);
+    request.onsuccess = () => resolve(snapshot);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function getSyncSnapshots() {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_SNAPSHOTS, 'readonly');
+    const store = transaction.objectStore(STORE_SNAPSHOTS);
+    const request = store.getAll();
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
 }
 
 export async function enqueueDeletion(record) {
@@ -309,7 +380,10 @@ export async function saveTrip(trip) {
     const transaction = db.transaction(STORE_TRIPS, 'readwrite');
     const store = transaction.objectStore(STORE_TRIPS);
     const request = store.put(trip);
-    request.onsuccess = () => resolve(trip);
+    request.onsuccess = async () => {
+      await enqueueSyncOperationFromRecord('UPSERT_TRIP', 'trip', trip.TripID, trip);
+      resolve(trip);
+    };
     request.onerror = () => reject(request.error);
   });
 }
@@ -319,9 +393,15 @@ export async function deleteTrip(TripID) {
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(STORE_TRIPS, 'readwrite');
     const store = transaction.objectStore(STORE_TRIPS);
-    const request = store.delete(TripID);
-    request.onsuccess = () => resolve();
-    request.onerror = () => reject(request.error);
+    const getRequest = store.get(TripID);
+    getRequest.onsuccess = async () => {
+      const existing = getRequest.result || { TripID };
+      await enqueueSyncOperationFromRecord('UPSERT_TRIP', 'trip', TripID, { ...existing, _deleted: true });
+      const request = store.delete(TripID);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    };
+    getRequest.onerror = () => reject(getRequest.error);
   });
 }
 
@@ -342,7 +422,10 @@ export async function saveTripDay(day) {
     const transaction = db.transaction(STORE_TRIP_DAYS, 'readwrite');
     const store = transaction.objectStore(STORE_TRIP_DAYS);
     const request = store.put(day);
-    request.onsuccess = () => resolve(day);
+    request.onsuccess = async () => {
+      await enqueueSyncOperationFromRecord('UPSERT_DAY', 'day', day.TripDayID, day);
+      resolve(day);
+    };
     request.onerror = () => reject(request.error);
   });
 }
@@ -390,9 +473,15 @@ export async function deleteTripDay(TripDayID) {
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(STORE_TRIP_DAYS, 'readwrite');
     const store = transaction.objectStore(STORE_TRIP_DAYS);
-    const request = store.delete(TripDayID);
-    request.onsuccess = () => resolve();
-    request.onerror = () => reject(request.error);
+    const getRequest = store.get(TripDayID);
+    getRequest.onsuccess = async () => {
+      const existing = getRequest.result || { TripDayID };
+      await enqueueSyncOperationFromRecord('UPSERT_DAY', 'day', TripDayID, { ...existing, _deleted: true });
+      const request = store.delete(TripDayID);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    };
+    getRequest.onerror = () => reject(getRequest.error);
   });
 }
 
@@ -402,6 +491,68 @@ export async function getActiveTripId() {
 
 export async function setActiveTripId(TripID) {
   return setSetting('activeTripId', TripID);
+}
+
+export async function saveQueueRecord(record) {
+  const db = await openDatabase();
+  if (!db.objectStoreNames.contains(STORE_SYNC_QUEUE)) {
+    console.warn('[TM3] syncQueue store missing; skipping queue write.');
+    return record;
+  }
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_SYNC_QUEUE, 'readwrite');
+    const store = transaction.objectStore(STORE_SYNC_QUEUE);
+    const request = store.put(record);
+    request.onsuccess = () => resolve(record);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function getQueueRecords(status = null) {
+  const db = await openDatabase();
+  if (!db.objectStoreNames.contains(STORE_SYNC_QUEUE)) {
+    console.warn('[TM3] syncQueue store missing; returning empty queue.');
+    return [];
+  }
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_SYNC_QUEUE, 'readonly');
+    const store = transaction.objectStore(STORE_SYNC_QUEUE);
+    const request = status ? store.index('Status').getAll(status) : store.getAll();
+    request.onsuccess = () => resolve((request.result || []).sort((a, b) => (a.CreatedAt || '').localeCompare(b.CreatedAt || '')));
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function updateQueueRecord(record) {
+  return saveQueueRecord(record);
+}
+
+export async function countPendingQueueRecords() {
+  const records = await getQueueRecords('PENDING');
+  return records.length;
+}
+
+export function setSyncQueueWritesSuppressed(value) {
+  suppressSyncQueueWrites = Boolean(value);
+}
+
+async function enqueueSyncOperationFromRecord(operationType, entityType, entityId, payload) {
+  if (suppressSyncQueueWrites || !operationType || !entityType || !entityId) return;
+  await saveQueueRecord({
+    QueueID: `${operationType}:${entityType}:${entityId}:${Date.now()}`,
+    TripID: payload?.TripID || payload?.trip_id || '',
+    OperationType: operationType,
+    EntityType: entityType,
+    EntityID: entityId,
+    SourceItemID: payload?.SourceItemID || payload?.source_item_id || '',
+    Payload: payload,
+    CreatedAt: new Date().toISOString(),
+    UpdatedAt: new Date().toISOString(),
+    Attempts: 0,
+    LastError: '',
+    Status: 'PENDING',
+    DeviceID: await getOrCreateDeviceId()
+  });
 }
 
 export function selectDefaultTrip(trips, today = new Date()) {
@@ -423,37 +574,43 @@ export function selectDefaultTrip(trips, today = new Date()) {
 
 export async function migrateLegacyTravelData(seed) {
   const now = new Date().toISOString();
-  const existingTrip = await getTrip(seed.trip.TripID);
-  const legacyBudget = await getSetting('tripBudgetUSD', null);
-  const budget = Number(existingTrip?.BudgetAmountUSD ?? seed.trip.BudgetAmountUSD ?? legacyBudget ?? 0);
-  await saveTrip({
-    ...seed.trip,
-    BudgetAmount: budget,
-    BudgetCurrencyCode: seed.trip.BudgetCurrencyCode || 'USD',
-    BudgetAmountUSD: budget,
-    CreatedAt: existingTrip?.CreatedAt || now,
-    LastUpdatedAt: now,
-    IsActive: true
-  });
-  const existingDays = await getTripDays(seed.trip.TripID);
-  const existingById = new Map(existingDays.map(day => [day.TripDayID, day]));
-  const existingByDate = new Map(existingDays.map(day => [getTripDayDateKey(day), day]));
-  for (const day of seed.tripDays) {
-    const existing = existingById.get(day.TripDayID) || existingByDate.get(getTripDayDateKey({ ...day, TripID: day.TripID || seed.trip.TripID }));
-    if (existing) continue;
-    await saveTripDay({
-      ...day,
-      CreatedAt: now,
-      UpdatedAt: now,
-      ModifiedAt: now,
-      updatedAt: now,
+  const previousSuppression = suppressSyncQueueWrites;
+  suppressSyncQueueWrites = true;
+  try {
+    const existingTrip = await getTrip(seed.trip.TripID);
+    const legacyBudget = await getSetting('tripBudgetUSD', null);
+    const budget = Number(existingTrip?.BudgetAmountUSD ?? seed.trip.BudgetAmountUSD ?? legacyBudget ?? 0);
+    await saveTrip({
+      ...seed.trip,
+      BudgetAmount: budget,
+      BudgetCurrencyCode: seed.trip.BudgetCurrencyCode || 'USD',
+      BudgetAmountUSD: budget,
+      CreatedAt: existingTrip?.CreatedAt || now,
       LastUpdatedAt: now,
-      Version: Number(day.Version || 0) + 1
+      IsActive: true
     });
+    const existingDays = await getTripDays(seed.trip.TripID);
+    const existingById = new Map(existingDays.map(day => [day.TripDayID, day]));
+    const existingByDate = new Map(existingDays.map(day => [getTripDayDateKey(day), day]));
+    for (const day of seed.tripDays) {
+      const existing = existingById.get(day.TripDayID) || existingByDate.get(getTripDayDateKey({ ...day, TripID: day.TripID || seed.trip.TripID }));
+      if (existing) continue;
+      await saveTripDay({
+        ...day,
+        CreatedAt: now,
+        UpdatedAt: now,
+        ModifiedAt: now,
+        updatedAt: now,
+        LastUpdatedAt: now,
+        Version: Number(day.Version || 0) + 1
+      });
+    }
+    const trips = await getAllTrips();
+    const activeTripId = await getActiveTripId();
+    const selected = trips.some(trip => trip.TripID === activeTripId) ? activeTripId : (selectDefaultTrip(trips) || seed.trip.TripID);
+    await setActiveTripId(selected);
+    return selected;
+  } finally {
+    suppressSyncQueueWrites = previousSuppression;
   }
-  const trips = await getAllTrips();
-  const activeTripId = await getActiveTripId();
-  const selected = trips.some(trip => trip.TripID === activeTripId) ? activeTripId : (selectDefaultTrip(trips) || seed.trip.TripID);
-  await setActiveTripId(selected);
-  return selected;
 }

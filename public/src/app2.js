@@ -1,7 +1,7 @@
-import { addItem, deleteTrip, deleteTripDay, enqueueDeletion, getActiveTripId, getAllItems, getAllTrips, getDeletionQueue, getOrCreateDeviceId, getSetting, getTrip, getTripDays, migrateLegacyTravelData, openDatabase, replaceDatasetItems, replaceItemsByPredicate, saveTrip, saveTripDay, selectDefaultTrip, setActiveTripId, setSetting, updateItem } from './db.js';
+import { addItem, deleteTrip, deleteTripDay, enqueueDeletion, getActiveTripId, getAllItems, getAllTrips, getDeletionQueue, getOrCreateDeviceId, getQueueRecords, getSetting, getTrip, getTripDays, migrateLegacyTravelData, openDatabase, replaceDatasetItems, replaceItemsByPredicate, saveQueueRecord, saveTrip, saveTripDay, selectDefaultTrip, setActiveTripId, setSetting, updateItem } from './db.js';
 import { ITALY_DATASET_ID, ITALY_DATASET_MARK_KEY, ITALY_DAYS_KEY, getPlanningStatus, loadItalyItinerary, rebuildMultidayOccurrences } from './italyAdapter.js';
 import { getCurrentSession, onAuthStateChange, signInWithEmailPassword, signOut, signUpWithEmailPassword } from './supabaseClient.js';
-import { getSyncState, queueCloudSync, recordLocalChange, registerDeletedItemIdentityKeys, registerDeletedItemTombstones, runCloudSyncNow, startCloudSync, stopCloudSync } from './syncSupabase.js';
+import { getSyncState, pullMasterNow, recordLocalChange, registerDeletedItemIdentityKeys, registerDeletedItemTombstones, runCloudSyncNow } from './syncSupabase.js';
 
 const state = {
   activeView: 'home',
@@ -270,23 +270,17 @@ async function initAuth() {
     const session = await getCurrentSession();
     state.authUser = session?.user || null;
     state.authError = '';
-    state.authMessage = state.authUser ? 'Los cambios se guardan localmente y se sincronizan automáticamente cuando hay internet.' : '';
+    state.authMessage = state.authUser ? 'Manual / En espera. Usa Bajar master o Subir pendientes cuando quieras sincronizar.' : '';
     window.addEventListener('tm3-sync-state-change', event => {
       state.sync = event.detail || getSyncState();
       updateSyncStatus();
       if (state.activeView === 'settings') renderSettings();
     });
-    if (state.authUser) await startCloudSync({ onAppliedRemoteChanges: refreshAfterCloudPull });
     await onAuthStateChange(async (_event, session) => {
       state.authUser = session?.user || null;
       state.authLoading = false;
       state.authError = '';
-      state.authMessage = state.authUser ? 'Los cambios se guardan localmente y se sincronizan automáticamente cuando hay internet.' : 'Modo local activo. La nube requiere iniciar sesión.';
-      if (state.authUser) {
-        await startCloudSync({ onAppliedRemoteChanges: refreshAfterCloudPull });
-      } else {
-        stopCloudSync();
-      }
+      state.authMessage = state.authUser ? 'Manual / En espera. Usa Bajar master o Subir pendientes cuando quieras sincronizar.' : 'Modo local activo. La nube requiere iniciar sesión.';
       updateSyncStatus();
       if (state.activeView === 'settings') renderSettings();
     });
@@ -306,11 +300,7 @@ async function refreshAfterCloudPull() {
 }
 
 function notifyLocalChange(reason) {
-  if (!state.authUser) {
-    updateSyncStatus();
-    return;
-  }
-  queueCloudSync(reason);
+  updateSyncStatus();
 }
 
 function stampLocalChange(record, timestamp = new Date().toISOString()) {
@@ -378,7 +368,6 @@ function resolveAccessRole(pin) {
 function bindEvents() {
   window.addEventListener('online', () => {
     updateOnlineStatus();
-    if (state.authUser) queueCloudSync('online');
   });
   window.addEventListener('offline', updateOnlineStatus);
   els.menuButton.addEventListener('click', () => els.menuOverlay.classList.remove('hidden'));
@@ -1787,9 +1776,11 @@ function renderAuthPanel() {
         <div class="sync-detail-row"><span>Estado</span><strong>${escapeHtml(getSyncStatusLabel())}</strong></div>
         <div class="sync-detail-row"><span>Última sync</span><strong>${escapeHtml(state.sync.lastSyncAt ? formatDisplayDateTime(state.sync.lastSyncAt) : 'Pendiente')}</strong></div>
         ${state.sync.lastError ? `<p class="data-error">${escapeHtml(state.sync.lastError)}</p>` : ''}
-        <p>Los cambios se guardan localmente y se sincronizan automáticamente cuando hay internet.</p>
+        <p>Modo manual. Usa los botones para bajar master o subir pendientes cuando lo necesites.</p>
         <div class="settings-actions">
-          <button id="syncNowButton" class="primary-button" type="button">Sincronizar ahora</button>
+          <button id="pullMasterButton" class="primary-button" type="button">Bajar master</button>
+          <button id="pushPendingButton" class="secondary-button" type="button">Subir pendientes</button>
+          <button id="viewPendingButton" class="secondary-button" type="button">Ver pendientes</button>
           <button id="authSignOutButton" class="secondary-button" type="button">Cerrar sesión</button>
         </div>
       </div>
@@ -1815,7 +1806,7 @@ function getAuthStatusLabel() {
 }
 
 function getAuthDefaultMessage() {
-  if (state.authUser) return 'Los cambios se guardan localmente y se sincronizan automáticamente cuando hay internet.';
+  if (state.authUser) return 'Manual / En espera. Usa Bajar master o Subir pendientes cuando quieras sincronizar.';
   return 'La app sigue funcionando en modo local. La sincronización en la nube requiere iniciar sesión.';
 }
 
@@ -1823,7 +1814,20 @@ function bindAuthManager() {
   document.getElementById('authForm')?.addEventListener('submit', event => handleAuthSubmit(event, 'sign-in'));
   document.getElementById('authSignUpButton')?.addEventListener('click', event => handleAuthSubmit(event, 'sign-up'));
   document.getElementById('authSignOutButton')?.addEventListener('click', handleSignOut);
-  document.getElementById('syncNowButton')?.addEventListener('click', () => runCloudSyncNow('manual'));
+  document.getElementById('pullMasterButton')?.addEventListener('click', handlePullMaster);
+  document.getElementById('pushPendingButton')?.addEventListener('click', () => runCloudSyncNow('manual'));
+  document.getElementById('viewPendingButton')?.addEventListener('click', handleViewPending);
+}
+
+async function handlePullMaster() {
+  if (!confirm('Esto bajará la versión master de Supabase y actualizará este dispositivo. Se creará un snapshot local antes de continuar.')) return;
+  await pullMasterNow();
+  await refreshAfterCloudPull();
+}
+
+async function handleViewPending() {
+  const pending = await getQueueRecords('PENDING');
+  alert(pending.length ? pending.map(row => `${row.OperationType} ${row.EntityID || row.EntityType} - ${row.Status}`).join('\n') : 'No hay operaciones pendientes.');
 }
 
 function bindPdfReportManager() {
@@ -2033,8 +2037,7 @@ async function handleAuthSubmit(event, mode) {
     state.authError = '';
     state.authMessage = mode === 'sign-up'
       ? 'Cuenta creada. Revisa tu email si Supabase solicita confirmación.'
-      : 'Sesión iniciada. Sincronizando datos locales y nube.';
-    if (state.authUser) await startCloudSync({ onAppliedRemoteChanges: refreshAfterCloudPull });
+      : 'Sesión iniciada. Sync manual disponible desde Configuración.';
     updateSyncStatus();
     await renderSettings();
   } catch (error) {
@@ -2047,7 +2050,6 @@ async function handleSignOut() {
   try {
     const result = await signOut();
     if (result.error) throw result.error;
-    stopCloudSync();
     state.authUser = null;
     state.authError = '';
     state.authMessage = 'Sesión cerrada. Tus datos locales de IndexedDB se conservan.';
@@ -3005,6 +3007,21 @@ async function recordDeletion(EntityType, EntityId, TripID, entity = {}) {
     Version,
     DeviceId
   }, now));
+  await saveQueueRecord({
+    QueueID: `DELETE_ITEM:${EntityId}:${now}`,
+    TripID: TripID || '',
+    OperationType: 'DELETE_ITEM',
+    EntityType: EntityType.toLowerCase(),
+    EntityID: EntityId,
+    SourceItemID: entity.SourceItemID || '',
+    Payload: { ...entity, ItemID: EntityId, TripID: TripID || '', _deleted: true },
+    CreatedAt: now,
+    UpdatedAt: now,
+    Attempts: 0,
+    LastError: '',
+    Status: 'PENDING',
+    DeviceID: DeviceId
+  });
   markLocalEntity(EntityType, EntityId);
 }
 
@@ -4454,11 +4471,12 @@ function updateSyncStatus() {
 function getSyncStatusLabel() {
   if (!state.authUser) return 'Modo local; inicia sesión para nube';
   if (!navigator.onLine || state.sync.status === 'offline') return 'Sin internet; guardando localmente';
+  if (state.sync.status === 'conflict') return 'Conflicto de sincronización';
   if (state.sync.status === 'syncing') return 'Sincronizando...';
   if (state.sync.status === 'pending') return 'Pendiente de sincronizar';
   if (state.sync.status === 'error') return 'Error de sync';
-  if (state.sync.status === 'synced' || state.sync.status === 'idle') return 'Sincronizado';
-  return 'Nube conectada';
+  if (state.sync.status === 'synced' || state.sync.status === 'idle') return 'Manual / En espera';
+  return 'Manual / En espera';
 }
 
 function closeMenu() {
