@@ -27,6 +27,7 @@ import { getCurrentUser, getSupabaseClient } from './supabaseClient.js';
 const SYNC_INTERVAL_MS = 60000;
 const SYNC_DEBOUNCE_MS = 1200;
 const AUTO_SYNC_COOLDOWN_MS = 30000;
+const DIRTY_PROTECTION_MS = 5 * 60000;
 const SNAPSHOT_REASON_PULL = 'pull';
 
 const state = {
@@ -55,9 +56,13 @@ export function getSyncState() {
 }
 
 export function recordLocalChange(entityType, entityId, changedAt = new Date().toISOString()) {
-  if (!entityType || !entityId) return;
-  localRecentlyChanged.set(entityKey(entityType, entityId), changedAt);
-  pruneRecentChanges();
+  try {
+    if (!entityType || !entityId) return;
+    localRecentlyChanged.set(entityKey(entityType, entityId), changedAt);
+    pruneRecentChanges();
+  } catch (error) {
+    console.warn('[TM3] recordLocalChange failed; continuing without sync marker.', error);
+  }
 }
 
 export function registerDeletedItemIdentityKeys(itemOrTombstone) {
@@ -550,6 +555,7 @@ function isRecentlyChanged(type, id, cloudTimestamp) {
 }
 
 function pruneRecentChanges() {
+  if (typeof DIRTY_PROTECTION_MS !== 'number' || Number.isNaN(DIRTY_PROTECTION_MS)) return;
   const cutoff = Date.now() - DIRTY_PROTECTION_MS;
   localRecentlyChanged.forEach((timestamp, key) => {
     const time = Date.parse(timestamp || '');

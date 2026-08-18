@@ -316,7 +316,12 @@ function stampLocalChange(record, timestamp = new Date().toISOString()) {
 }
 
 function markLocalEntity(entityType, entityId) {
-  if (entityType && entityId) recordLocalChange(entityType, entityId);
+  if (!entityType || !entityId) return;
+  try {
+    recordLocalChange(entityType, entityId);
+  } catch (error) {
+    console.warn('[TM3] sync marker failed; local save continues.', error);
+  }
 }
 
 function getStoredAccessRole() {
@@ -3715,32 +3720,57 @@ function clearJsonInput(modal) {
 }
 
 async function copyAiJsonInstructions(modal) {
-  try {
-    if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
-    await navigator.clipboard.writeText(AI_JSON_INSTRUCTIONS);
-    setModalError(modal, 'Instrucciones copiadas.');
-  } catch (_error) {
-    const input = modal.form.querySelector('[data-json-input]');
-    input.value = AI_JSON_INSTRUCTIONS;
-    input.focus();
-    input.select();
-    setModalError(modal, 'No se pudo copiar automáticamente. Copia las instrucciones manualmente.');
-  }
+  const copied = await copyTextToClipboard(AI_JSON_INSTRUCTIONS);
+  setModalError(
+    modal,
+    copied
+      ? 'Instrucciones copiadas.'
+      : 'No se pudo copiar automáticamente. Copia las instrucciones manualmente.',
+  );
 }
 
 async function copyCurrentJson(modal) {
   const payload = buildCurrentJsonForClipboard(modal);
   const text = JSON.stringify(payload, null, 2);
+  const copied = await copyTextToClipboard(text);
+  setModalError(
+    modal,
+    copied
+      ? 'JSON actual copiado.'
+      : 'No se pudo copiar automáticamente. Intenta copiar manualmente desde el navegador.',
+  );
+}
+
+async function copyTextToClipboard(text) {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (_error) {
+      // Fall back to a temporary, hidden textarea so visible form fields remain untouched.
+    }
+  }
+
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', 'true');
+  textarea.style.position = 'fixed';
+  textarea.style.top = '-1000px';
+  textarea.style.left = '-1000px';
+  textarea.style.opacity = '0';
+  textarea.style.pointerEvents = 'none';
+  textarea.style.zIndex = '-1';
+  document.body.appendChild(textarea);
+
   try {
-    if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
-    await navigator.clipboard.writeText(text);
-    setModalError(modal, 'JSON actual copiado.');
+    textarea.select();
+    textarea.setSelectionRange(0, textarea.value.length);
+    const copied = document.execCommand('copy');
+    return Boolean(copied);
   } catch (_error) {
-    const input = modal.form.querySelector('[data-json-input]');
-    input.value = text;
-    input.focus();
-    input.select();
-    setModalError(modal, 'No se pudo copiar automáticamente. El JSON actual quedó seleccionado.');
+    return false;
+  } finally {
+    textarea.remove();
   }
 }
 
