@@ -3540,6 +3540,7 @@ function createItemModal(id, title, submitHandler) {
   modal.querySelectorAll('[data-cancel]').forEach(button => button.addEventListener('click', () => requestCloseModal(api)));
   modal.querySelector('[data-load-json]').addEventListener('click', () => loadJsonIntoForm(api));
   modal.querySelector('[data-clear-json]').addEventListener('click', () => clearJsonInput(api));
+  modal.querySelector('[data-copy-current-json]').addEventListener('click', () => copyCurrentJson(api));
   modal.querySelector('[data-copy-ai-json]').addEventListener('click', () => copyAiJsonInstructions(api));
   modal.querySelector('[data-delete-item]').addEventListener('click', () => {
     if (state.editingItem) deleteLogicalItem(state.editingItem, api);
@@ -3557,6 +3558,7 @@ function renderCompactJsonItemEditor(id) {
       <div class="item-json-actions">
         <button type="button" class="secondary-button" data-load-json>Cargar JSON en formulario</button>
         <button type="button" class="secondary-button" data-clear-json>Limpiar JSON</button>
+        <button type="button" class="secondary-button" data-copy-current-json>Copiar JSON actual</button>
         <button type="button" class="secondary-button" data-copy-ai-json>Copiar instrucciones para IA</button>
       </div>
     </div>
@@ -3724,6 +3726,72 @@ async function copyAiJsonInstructions(modal) {
     input.select();
     setModalError(modal, 'No se pudo copiar automáticamente. Copia las instrucciones manualmente.');
   }
+}
+
+async function copyCurrentJson(modal) {
+  const payload = buildCurrentJsonForClipboard(modal);
+  const text = JSON.stringify(payload, null, 2);
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
+    await navigator.clipboard.writeText(text);
+    setModalError(modal, 'JSON actual copiado.');
+  } catch (_error) {
+    const input = modal.form.querySelector('[data-json-input]');
+    input.value = text;
+    input.focus();
+    input.select();
+    setModalError(modal, 'No se pudo copiar automáticamente. El JSON actual quedó seleccionado.');
+  }
+}
+
+function buildCurrentJsonForClipboard(modal) {
+  const source = modal === editModal ? (state.editingItem || state.editJsonDraft || {}) : (state.newJsonDraft || {});
+  const merged = {
+    ...source,
+    ...formData(modal.form)
+  };
+  const normalized = normalizeJsonItemForEditor(merged, modal.form);
+  const ordered = {};
+  const primaryKeys = [
+    'ItemID', 'Title', 'ItemType', 'Category', 'PlanningStatus', 'PaymentStatus',
+    'StartDate', 'StartTime', 'EndDate', 'EndTime', 'City', 'Country', 'LocationName',
+    'Address', 'Latitude', 'Longitude', 'GooglePlusCode', 'GoogleMapsUrl', 'MapUrl',
+    'AmountUSD', 'PaidUSD', 'Currency', 'Provider', 'Website', 'Phone', 'Email',
+    'ReservationUrl', 'BookingReference', 'ConfirmationNumber', 'Description', 'Notes',
+    'Details', 'ImportantInfo', 'Instructions', 'ImageUrl', 'PhotoUrl', 'Completed',
+    'CompletedAt', 'CompletedByRole'
+  ];
+  for (const key of primaryKeys) {
+    if (normalized[key] !== undefined) ordered[key] = normalizeClipboardValue(key, normalized[key]);
+  }
+  for (const [key, value] of Object.entries(normalized)) {
+    if (key in ordered) continue;
+    ordered[key] = value;
+  }
+  return ordered;
+}
+
+function normalizeClipboardValue(key, value) {
+  if (key === 'AmountUSD' || key === 'PaidUSD') {
+    if (value === '' || value === null || value === undefined) return 0;
+    const parsed = parseLooseNumber(value);
+    return typeof parsed === 'number' && !Number.isNaN(parsed) ? parsed : 0;
+  }
+  if (key === 'Latitude' || key === 'Longitude') {
+    if (value === '' || value === null || value === undefined) return null;
+    const number = Number(value);
+    return Number.isNaN(number) ? null : number;
+  }
+  if (key === 'Completed') {
+    return value === true || String(value).toLowerCase() === 'true';
+  }
+  if (key === 'CompletedAt' || key === 'CompletedByRole') {
+    return value === '' ? null : (value ?? null);
+  }
+  if (key === 'StartTime' || key === 'EndTime') {
+    return normalizeFormTime(value);
+  }
+  return value;
 }
 
 function normalizeJsonItemForEditor(item, form) {
