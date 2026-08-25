@@ -1979,10 +1979,70 @@ h1 {
 }
 
 .edit-error {
+  position: sticky;
+  top: 0;
+  z-index: 5;
   min-height: 20px;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 0 0 2px;
+  background: #fef2f2;
   color: #b91c1c;
   font-weight: 700;
   font-size: .9rem;
+  line-height: 1.4;
+}
+
+.edit-error.hidden {
+  display: none;
+}
+
+.edit-form .item-form-error {
+  scroll-margin-top: 8px;
+}
+
+.edit-error ul {
+  margin: 6px 0 0 18px;
+  padding: 0;
+  font-weight: 600;
+}
+
+.edit-error li + li {
+  margin-top: 3px;
+}
+
+.compact-item-field.item-field-has-error,
+.edit-check-field.item-field-has-error {
+  color: #b91c1c;
+}
+
+.item-field-error-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 5px;
+  border-radius: 50%;
+  background: #dc2626;
+  opacity: 0;
+  vertical-align: middle;
+}
+
+.item-field-has-error .item-field-error-dot {
+  opacity: 1;
+}
+
+.edit-form .item-input-error {
+  border-color: #dc2626;
+  background: #fff7f7;
+  box-shadow: 0 0 0 2px rgba(220, 38, 38, .12);
+}
+
+.item-field-error-text {
+  min-height: 0;
+  color: #b91c1c;
+  font-size: .7rem;
+  font-weight: 600;
 }
 
 .edit-actions {

@@ -127,13 +127,17 @@ Usa estos campos exactamente cuando estén disponibles:
 ItemID, Title, ItemType, Category, PlanningStatus, PaymentStatus, StartDate, StartTime, EndDate, EndTime, City, Country, LocationName, Address, Latitude, Longitude, GooglePlusCode, GoogleMapsUrl, MapUrl, AmountUSD, PaidUSD, Currency, Provider, Website, Phone, Email, ReservationUrl, BookingReference, ConfirmationNumber, Description, Notes, Details, ImportantInfo, Instructions, ImageUrl, PhotoUrl, Completed, CompletedAt, CompletedByRole.
 
 Reglas:
-- ItemID déjalo vacío si no sabes el próximo número.
-- Fechas en formato YYYY-MM-DD.
-- Horas en formato HH:mm de 24 horas. Ejemplos: 08:30, 13:45, 21:00.
+  - Title, ItemType, PlanningStatus, PaymentStatus y StartDate son obligatorios.
+  - DayDate, DayID, TripID y DatasetID pueden derivarse si la app los genera, pero deben quedar coherentes.
+  - ItemID puede ir vacío en un item nuevo; la app generará un ID único antes de guardar.
+  - SourceItemID se deriva del ItemID nuevo.
+  - Fechas en formato YYYY-MM-DD.
+  - Horas en formato HH:mm o el formato aceptado por la app. Ejemplos: 08:30, 13:45, 21:00.
 - PlanningStatus solo puede ser CONFIRMED o PROPOSED.
 - PaymentStatus solo puede ser PAID, NOT_PAID, PARTIAL, INCLUDED o UNKNOWN.
 - ItemType solo puede ser TRANSPORT, LODGING, FOOD, SHOPPING, TOUR, TRIP_PURCHASE, ACTIVITY u OTHER.
-- AmountUSD y PaidUSD deben ser números sin símbolo de moneda. Ejemplo: 124.57.
+  - AmountUSD y PaidUSD deben ser números >= 0, sin símbolo de moneda. Ejemplo: 124.57.
+  - Para un item normal usa OccurrenceRole SINGLE.
 - Currency debe ser USD, EUR u otra moneda real.
 - Completed siempre debe ser false.
 - CompletedAt siempre debe ser null.
@@ -2889,6 +2893,26 @@ function getNextItemId(extraIds = new Set()) {
   throw new Error('Se superó ITEM_999; se requiere decisión de CHATGPT+.');
 }
 
+function getReservedItemIds(items = state.allItems) {
+  const ids = new Set();
+  items.forEach(item => {
+    [item.ItemID, item.SourceItemID, getCanonicalLogicalItemId(item)].forEach(id => {
+      const normalized = String(id || '').trim();
+      if (normalized) ids.add(normalized);
+    });
+  });
+  return ids;
+}
+
+function resolveNewItemId(requestedId, reservedIds) {
+  const normalized = String(requestedId || '').trim();
+  return normalized && !reservedIds.has(normalized) ? normalized : getNextItemId(reservedIds);
+}
+
+function isConstraintError(error) {
+  return error?.name === 'ConstraintError';
+}
+
 function getItemIdGapSummary() {
   const used = [...getUsedItemNumbers()].sort((a, b) => a - b);
   if (used.length === 0) return [];
@@ -3444,24 +3468,40 @@ function openNewItemModal() {
 
 async function saveEditForm(event) {
   event.preventDefault();
+  const form = event.currentTarget;
+  clearItemFormErrors(form);
   const data = formData(event.currentTarget);
-  const error = validateItemForm(data);
-  if (error) return setModalError(editModal, error);
+  const selectedDay = state.days.find(day => (day.DayDate || day.Date) === data.StartDate);
+  let validation;
+  try {
+    const existingItems = await getAllItems();
+    validation = validateItemBeforeSave({
+      ...state.editingItem,
+      ...(state.editJsonDraft || {}),
+      ...data,
+      ItemID: state.editingItem.ItemID,
+      DatasetID: data.DatasetID || state.editingItem.DatasetID || getActiveDatasetId(),
+      TripID: data.TripID || state.editingItem.TripID || state.activeTripId,
+      DayDate: data.StartDate,
+      DayID: data.DayID || selectedDay?.DayID || selectedDay?.TripDayID || state.editingItem.DayID || state.editingItem.TripDayID,
+      TripDayID: selectedDay?.TripDayID || selectedDay?.DayID || state.editingItem.TripDayID || state.editingItem.DayID
+    }, { mode: 'edit', activeTrip: state.activeTripId, selectedDay: data.StartDate, existingItems });
+  } catch (validationError) {
+    console.error('TM3-072: error validando item editado', validationError);
+    renderItemFormErrors(form, [{ field: null, message: 'No se pudo validar el item. Revisa los campos e intenta de nuevo.' }]);
+    return;
+  }
+  renderItemFormErrors(form, validation.errors);
+  if (!validation.ok) return;
   if (!confirmPaidConfirmedToProposedChange(state.editingItem, data.PlanningStatus)) return;
   const now = new Date().toISOString();
   const updated = stampLocalChange({
     ...state.editingItem,
     ...(state.editJsonDraft || {}),
-    ...data,
+    ...validation.payload,
     ItemID: state.editingItem.ItemID,
-    DayDate: data.StartDate,
-    AmountUSD: Number(data.AmountUSD),
-    PaidUSD: data.PaidUSD === '' ? '' : Number(data.PaidUSD),
-    Latitude: data.Latitude === '' ? '' : Number(data.Latitude),
-    Longitude: data.Longitude === '' ? '' : Number(data.Longitude),
     IsAllDay: state.editingItem.IsAllDay === true,
-    IsPaid: data.PaymentStatus === 'PAID',
-    IsMultiDay: data.EndDate > data.StartDate
+    IsMultiDay: validation.payload.EndDate > validation.payload.StartDate
   }, now);
   await updateItem(updated);
   markLocalEntity('ITEM', updated.ItemID);
@@ -3476,49 +3516,131 @@ async function saveEditForm(event) {
 
 async function saveNewItemForm(event) {
   event.preventDefault();
-  const data = formData(event.currentTarget);
-  const error = validateItemForm(data);
-  if (error) return setModalError(newItemModal, error);
-  let itemId = data.ItemID || '';
+  const form = event.currentTarget;
+  clearItemFormErrors(form);
+  const data = formData(form);
+  let storedItems;
+  let itemId;
   try {
-    if (!itemId) itemId = getNextItemId();
-    if (itemId && getLogicalRows().some(existing => existing.ItemID === itemId)) {
-      return setModalError(newItemModal, `ItemID ${itemId} ya existe.`);
-    }
+    storedItems = await getAllItems();
+    itemId = resolveNewItemId(data.ItemID, getReservedItemIds(storedItems));
+    data.ItemID = itemId;
+    form.elements.ItemID.value = itemId;
   } catch (idError) {
     return setModalError(newItemModal, idError.message);
   }
-  const now = new Date().toISOString();
-  const item = stampLocalChange({
+  const day = state.days.find(row => (row.DayDate || row.Date) === data.StartDate);
+  const candidate = {
     ...(state.newJsonDraft || {}),
     ...data,
     ItemID: itemId,
-    DatasetID: ITALY_DATASET_ID,
+    SourceItemID: data.SourceItemID || itemId,
+    DatasetID: data.DatasetID || getActiveDatasetId(),
+    TripID: data.TripID || state.activeTripId,
+    DayID: data.DayID || day?.DayID || day?.TripDayID || makeTripDayId(data.TripID || state.activeTripId, data.StartDate),
+    TripDayID: data.TripDayID || day?.TripDayID || day?.DayID || makeTripDayId(data.TripID || state.activeTripId, data.StartDate),
+    DayDate: data.StartDate
+  };
+  let validation;
+  try {
+    validation = validateItemBeforeSave(candidate, {
+      mode: 'new', activeTrip: state.activeTripId, selectedDay: data.StartDate, existingItems: storedItems
+    });
+  } catch (validationError) {
+    console.error('TM3-072: error validando item nuevo', validationError);
+    renderItemFormErrors(form, [{ field: null, message: 'No se pudo validar el item. Revisa los campos e intenta de nuevo.' }]);
+    return;
+  }
+  renderItemFormErrors(form, validation.errors);
+  if (!validation.ok) return;
+  const now = new Date().toISOString();
+  const buildNewItem = id => stampLocalChange({
+    ...validation.payload,
+    ItemID: id,
+    SourceItemID: id,
     TripID: state.activeTripId,
-    AmountUSD: Number(data.AmountUSD),
-    PaidUSD: data.PaidUSD === '' ? '' : Number(data.PaidUSD),
-    Latitude: data.Latitude === '' ? '' : Number(data.Latitude),
-    Longitude: data.Longitude === '' ? '' : Number(data.Longitude),
-    Currency: data.Currency || 'USD',
-    Status: data.PlanningStatus === 'CONFIRMED' ? 'CONFIRMED' : 'PLANNED',
+    DatasetID: getActiveDatasetId(),
+    DayDate: validation.payload.StartDate,
+    DayID: makeTripDayId(state.activeTripId, validation.payload.StartDate),
+    TripDayID: makeTripDayId(state.activeTripId, validation.payload.StartDate),
+    Status: validation.payload.PlanningStatus,
+    OccurrenceRole: validation.payload.StartDate === validation.payload.EndDate ? 'SINGLE' : validation.payload.OccurrenceRole,
+    IsMultiDay: validation.payload.StartDate !== validation.payload.EndDate,
     IsAllDay: false,
-    IsPaid: data.PaymentStatus === 'PAID',
-    IsMultiDay: data.EndDate > data.StartDate,
-    DayDate: data.StartDate,
     LodgingDisplayMode: 'NORMAL',
-    SortOrder: Date.now()
+    SortOrder: getNewItemSortOrder(validation.payload)
   }, now);
-  await addItem(item);
-  markLocalEntity('ITEM', item.ItemID);
+  let item = buildNewItem(itemId);
+  try {
+    await addItem(item);
+  } catch (saveError) {
+    if (!isConstraintError(saveError)) {
+      return setModalError(newItemModal, saveError.message || 'No se pudo guardar el item.');
+    }
+    try {
+      storedItems = await getAllItems();
+      itemId = getNextItemId(getReservedItemIds(storedItems));
+      data.ItemID = itemId;
+      form.elements.ItemID.value = itemId;
+      item = buildNewItem(itemId);
+      await addItem(item);
+    } catch (retryError) {
+      if (isConstraintError(retryError)) {
+        return setModalError(newItemModal, 'No se pudo crear el item porque el ID ya existe. Intenta guardar de nuevo.');
+      }
+      return setModalError(newItemModal, retryError.message || 'No se pudo guardar el item.');
+    }
+  }
   state.activeTab = item.PlanningStatus;
   state.activeView = 'home';
   state.openDayKey = item.DayDate;
   state.openItemId = item.ItemID;
-  closeModal(newItemModal);
-  await loadState();
+  markLocalEntity('ITEM', item.ItemID);
+  let savedItem;
+  let visibleOnDay;
+  let tombstones = [];
+  try {
+    await loadState();
+    savedItem = (await getAllItems()).find(row => row.ItemID === item.ItemID);
+    const visibleItems = state.items.filter(row => getItemPlanningStatus(row) === item.PlanningStatus);
+    visibleOnDay = savedItem && getHomeDayItems(visibleItems, item.DayDate).some(row => row.ItemID === item.ItemID || getCanonicalLogicalItemId(row) === item.SourceItemID);
+    tombstones = await getDeletionQueue();
+  } catch (verificationError) {
+    console.warn('[TM3] New item post-save verification failed.', item, verificationError);
+    renderItemFormErrors(newItemModal.form, [{ field: null, message: 'El item se guardó, pero no se pudo verificar su visibilidad. Revisa DayDate, DayID, TripID o tombstones.' }]);
+    await render();
+    return;
+  }
+  if (!savedItem || !visibleOnDay) {
+    const diagnostics = [
+      `ItemID=${item.ItemID}`,
+      `SourceItemID=${item.SourceItemID || ''}`,
+      `DayDate=${item.DayDate || ''}`,
+      `DayID=${item.DayID || ''}`,
+      `TripID=${item.TripID || ''}`,
+      `DatasetID=${item.DatasetID || ''}`,
+      `StartDate=${item.StartDate || ''}`,
+      `OccurrenceRole=${item.OccurrenceRole || ''}`,
+      `SyncStatus=${item.SyncStatus || ''}`,
+      `stored=${Boolean(savedItem)}`,
+      `tombstoneMatch=${savedItem ? isDeletedIdentityMatch(savedItem, tombstones) : 'unknown'}`
+    ].join(' · ');
+    console.warn('[TM3] New item saved but not visible after verification.', item, diagnostics);
+    renderItemFormErrors(newItemModal.form, [{ field: null, message: `El item se guardó, pero no aparece en el día esperado. ${diagnostics}` }]);
+    await render();
+    return;
+  }
   els.statusSync.textContent = 'Nuevo item guardado';
   notifyLocalChange('item-new');
+  closeModal(newItemModal);
   await render();
+}
+
+function getNewItemSortOrder(item) {
+  const date = String(item.StartDate || item.DayDate || '').replaceAll('-', '');
+  const time = String(item.StartTime || '00:00').replace(':', '');
+  const numeric = Number(`${date}${time}`);
+  return Number.isFinite(numeric) ? numeric : Date.now();
 }
 
 function createItemModal(id, title, submitHandler) {
@@ -3556,7 +3678,7 @@ function createItemModal(id, title, submitHandler) {
 
 function renderCompactJsonItemEditor(id) {
   return `
-    <div class="edit-error" role="alert"></div>
+    <div class="edit-error hidden item-form-error" role="alert" aria-live="polite"></div>
     <div class="item-json-panel">
       <label for="${id}JsonInput">Pegar JSON del item</label>
       <textarea id="${id}JsonInput" class="item-json-textarea" data-json-input rows="4" placeholder="Pega aquí un objeto JSON {...} o un array con un item [{...}]"></textarea>
@@ -3591,16 +3713,17 @@ function renderItemEditorField(field) {
   ].filter(Boolean).join(' ');
   const labelClass = ` class="compact-item-field${field.wide || EDITOR_TEXTAREA_FIELDS.has(field.name) ? ' compact-item-field--full' : ''}"`;
 
+  const label = `${escapeHtml(field.label)}<span class="item-field-error-dot" aria-hidden="true"></span>`;
   if (field.type === 'select') {
-    return `<label${labelClass} for="${id}">${escapeHtml(field.label)}<select ${commonAttrs}>${field.options.map(([value, label]) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`).join('')}</select></label>`;
+    return `<label${labelClass} data-item-field="${escapeHtml(field.name)}" for="${id}">${label}<select ${commonAttrs}>${field.options.map(([value, label]) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`).join('')}</select><small class="item-field-error-text"></small></label>`;
   }
   if (field.type === 'textarea') {
-    return `<label${labelClass} for="${id}">${escapeHtml(field.label)}<textarea ${commonAttrs} rows="${field.rows || 3}"></textarea></label>`;
+    return `<label${labelClass} data-item-field="${escapeHtml(field.name)}" for="${id}">${label}<textarea ${commonAttrs} rows="${field.rows || 3}"></textarea><small class="item-field-error-text"></small></label>`;
   }
   if (field.type === 'checkbox') {
     return `<label class="edit-check-field" for="${id}"><input ${commonAttrs} type="checkbox" /> ${escapeHtml(field.label)}</label>`;
   }
-  return `<label${labelClass} for="${id}">${escapeHtml(field.label)}<input ${commonAttrs} type="${escapeHtml(field.type || 'text')}" /></label>`;
+  return `<label${labelClass} data-item-field="${escapeHtml(field.name)}" for="${id}">${label}<input ${commonAttrs} type="${escapeHtml(field.type || 'text')}" /><small class="item-field-error-text"></small></label>`;
 }
 
 function requestCloseModal(modal) {
@@ -3890,7 +4013,7 @@ function validateItemForm(data) {
   if (!data.Title) return 'El título es requerido.';
   const amount = Number(data.AmountUSD);
   if (data.AmountUSD === '' || Number.isNaN(amount) || amount < 0) return 'AmountUSD debe ser numérico y mayor o igual a 0.';
-  for (const field of EDITOR_NUMERIC_FIELDS) {
+  for (const field of inferNumericFields()) {
     if (field === 'AmountUSD') continue;
     const value = data[field];
     if (value !== '' && value !== undefined && Number.isNaN(Number(value))) return `${field} debe ser numérico.`;
@@ -3900,8 +4023,128 @@ function validateItemForm(data) {
   return '';
 }
 
+function inferNumericFields() {
+  if (Array.isArray(EDITOR_NUMERIC_FIELDS)) return [...EDITOR_NUMERIC_FIELDS];
+  if (EDITOR_NUMERIC_FIELDS instanceof Set) return [...EDITOR_NUMERIC_FIELDS];
+  if (EDITOR_NUMERIC_FIELDS && typeof EDITOR_NUMERIC_FIELDS === 'object') return Object.keys(EDITOR_NUMERIC_FIELDS);
+  return [];
+}
+
 function setModalError(modal, message) {
-  modal.form.querySelector('.edit-error').textContent = message;
+  const error = modal.form.querySelector('.edit-error');
+  clearItemFormErrors(modal.form);
+  error.textContent = message || '';
+  error.classList.toggle('hidden', !message);
+  error.style.display = message ? 'block' : 'none';
+}
+
+function validateItemBeforeSave(input, context = {}) {
+  const payload = { ...input };
+  const errors = [];
+  const existingItems = context.existingItems || [];
+  const activeTrip = context.activeTrip || state.activeTripId || '';
+  const selectedDay = typeof context.selectedDay === 'object' ? context.selectedDay : state.days.find(day => (day.DayDate || day.Date) === context.selectedDay);
+  const expectedDate = selectedDay?.DayDate || selectedDay?.Date || (typeof context.selectedDay === 'string' ? context.selectedDay : '');
+  const startDate = String(payload.StartDate || payload.DayDate || '').trim();
+  const endDate = String(payload.EndDate || startDate).trim();
+  const planningStatuses = new Set(['CONFIRMED', 'PROPOSED']);
+  const paymentStatuses = new Set(['PAID', 'NOT_PAID', 'PARTIAL', 'INCLUDED', 'UNKNOWN']);
+  const add = (field, message) => errors.push({ field, message });
+  const required = field => { if (!String(payload[field] ?? '').trim()) add(field, `${field} requerido.`); };
+
+  payload.StartDate = startDate;
+  payload.EndDate = endDate;
+  payload.DayDate = payload.DayDate || startDate;
+  payload.TripID = String(payload.TripID || activeTrip).trim();
+  payload.DatasetID = String(payload.DatasetID || getActiveDatasetId()).trim();
+  payload.ItemID = String(payload.ItemID || '').trim();
+  payload.SourceItemID = String(payload.SourceItemID || payload.ItemID || '').trim();
+  payload.DayID = String(payload.DayID || selectedDay?.DayID || selectedDay?.TripDayID || (payload.TripID && startDate ? makeTripDayId(payload.TripID, startDate) : '')).trim();
+  payload.TripDayID = payload.TripDayID || payload.DayID;
+  payload.Currency = String(payload.Currency || 'USD').trim() || 'USD';
+  payload.PlanningStatus = String(payload.PlanningStatus || '').trim();
+  payload.PaymentStatus = String(payload.PaymentStatus || '').trim();
+  payload.Status = payload.PlanningStatus;
+  payload.IsPaid = payload.PaymentStatus === 'PAID' || payload.PaymentStatus === 'INCLUDED'
+    || (payload.PaymentStatus === 'PARTIAL' && Number(payload.PaidUSD) > 0);
+
+  ['Title', 'ItemType', 'PlanningStatus', 'PaymentStatus', 'StartDate', 'DayDate', 'TripID', 'DatasetID', 'DayID', 'ItemID', 'SourceItemID'].forEach(required);
+  if (startDate && !isValidDate(startDate)) add('StartDate', 'StartDate debe ser una fecha válida.');
+  if (endDate && !isValidDate(endDate)) add('EndDate', 'EndDate debe ser una fecha válida.');
+  if (startDate && endDate && endDate < startDate) add('EndDate', 'EndDate no puede ser anterior a StartDate.');
+  if (!isValidTime(payload.StartTime)) add('StartTime', 'StartTime debe usar formato HH:mm.');
+  if (!isValidTime(payload.EndTime)) add('EndTime', 'EndTime debe usar formato HH:mm.');
+  if (startDate === endDate && payload.StartTime && payload.EndTime && payload.EndTime < payload.StartTime && payload.IsMultiDay !== true) {
+    add('EndTime', 'EndTime no puede ser anterior a StartTime en el mismo día.');
+  }
+  if (!planningStatuses.has(payload.PlanningStatus)) add('PlanningStatus', 'PlanningStatus debe ser CONFIRMED o PROPOSED.');
+  if (!paymentStatuses.has(payload.PaymentStatus)) add('PaymentStatus', 'PaymentStatus no es válido.');
+
+  ['AmountUSD', 'PaidUSD'].forEach(field => {
+    const value = payload[field] === '' || payload[field] === null || payload[field] === undefined ? 0 : Number(payload[field]);
+    payload[field] = value;
+    if (!Number.isFinite(value) || value < 0) add(field, `${field} debe ser numérico y mayor o igual a 0.`);
+  });
+  if (payload.PaymentStatus === 'PAID' && payload.PaidUSD <= 0 && payload.AmountUSD > 0 && payload.IncludedLabel !== 'Incluido en item') {
+    add('PaidUSD', 'PaidUSD debe ser mayor que 0 cuando PaymentStatus es PAID.');
+  }
+  for (const field of inferNumericFields().filter(name => !['AmountUSD', 'PaidUSD'].includes(name))) {
+    if (payload[field] !== '' && payload[field] !== undefined && !Number.isFinite(Number(payload[field]))) add(field, `${field} debe ser numérico.`);
+  }
+
+  const duplicateItem = existingItems.find(item => item.ItemID === payload.ItemID && context.mode !== 'edit');
+  if (duplicateItem) add(null, `Ya existe un item con ItemID ${payload.ItemID}.`);
+  const duplicateSource = existingItems.find(item => item.SourceItemID && item.SourceItemID === payload.SourceItemID && item.ItemID !== payload.ItemID);
+  if (duplicateSource) add(null, `Ya existe un item con SourceItemID ${payload.SourceItemID}.`);
+  if (activeTrip && payload.TripID !== activeTrip) add('TripID', 'TripID no coincide con el viaje activo.');
+  if (expectedDate && payload.DayDate !== expectedDate) add('DayDate', `DayDate no corresponde al día ${expectedDate}.`);
+  const expectedDayId = selectedDay?.DayID || selectedDay?.TripDayID || (payload.TripID && payload.DayDate ? makeTripDayId(payload.TripID, payload.DayDate) : '');
+  if (expectedDayId && payload.DayID !== expectedDayId) add('DayID', `DayID no corresponde al día ${payload.DayDate}.`);
+  const isMultiDay = endDate > startDate;
+  payload.IsMultiDay = isMultiDay;
+  payload.OccurrenceRole = payload.OccurrenceRole || (isMultiDay ? '' : 'SINGLE');
+  if (!isMultiDay && payload.OccurrenceRole !== 'SINGLE') add('OccurrenceRole', 'OccurrenceRole debe ser SINGLE para un item normal.');
+  if (isMultiDay && !['START', 'END', 'SINGLE', ''].includes(payload.OccurrenceRole)) add('OccurrenceRole', 'OccurrenceRole no es coherente con un item multi-day.');
+  if (payload.SyncStatus === 'LOCAL_PENDING' && isDeletedIdentityMatch(payload, [])) add(null, 'El item nuevo está oculto por un tombstone existente.');
+  return { ok: errors.length === 0, errors, payload };
+}
+
+function clearItemFormErrors(form) {
+  form.querySelectorAll('[data-item-field]').forEach(field => {
+    field.classList.remove('item-field-has-error');
+    field.querySelectorAll('input, select, textarea').forEach(input => input.classList.remove('item-input-error'));
+    const text = field.querySelector('.item-field-error-text');
+    if (text) text.textContent = '';
+  });
+}
+
+function renderItemFormErrors(form, errors = []) {
+  clearItemFormErrors(form);
+  const panel = form.querySelector('.edit-error');
+  if (!errors.length) {
+    panel.textContent = '';
+    panel.classList.add('hidden');
+    panel.style.display = 'none';
+    return;
+  }
+  const byField = new Map();
+  const generalErrors = [];
+  errors.forEach(error => {
+    if (error.field && !byField.has(error.field)) byField.set(error.field, error.message);
+    if (!error.field && !generalErrors.includes(error.message)) generalErrors.push(error.message);
+  });
+  byField.forEach((message, fieldName) => {
+    const field = [...form.querySelectorAll('[data-item-field]')].find(element => element.dataset.itemField === fieldName);
+    if (!field) return;
+    field.classList.add('item-field-has-error');
+    field.querySelectorAll('input, select, textarea').forEach(input => input.classList.add('item-input-error'));
+    const text = field.querySelector('.item-field-error-text');
+    if (text) text.textContent = message;
+  });
+  panel.innerHTML = `<strong>No se pudo guardar. Corrige los campos marcados antes de continuar.</strong>${generalErrors.length ? `<ul>${generalErrors.map(message => `<li>${escapeHtml(message)}</li>`).join('')}</ul>` : ''}`;
+  panel.classList.remove('hidden');
+  panel.style.display = 'block';
+  requestAnimationFrame(() => panel.scrollIntoView({ behavior: 'smooth', block: 'start' }));
 }
 
 function getFormSnapshot(form) {
@@ -3954,9 +4197,37 @@ function getItemIdentityKeys(item) {
 }
 
 function isDeletedIdentityMatch(item, tombstones = []) {
-  const tombstoneKeys = getDeletedIdentityKeySet(tombstones);
-  if (!tombstoneKeys.size) return false;
-  return getItemIdentityKeys(item).some(key => tombstoneKeys.has(key) || state.deletedItemIdentityKeys.has(key));
+  if (!tombstones.length && item.SyncStatus === 'LOCAL_PENDING') return false;
+  const identityKeys = new Set(getItemIdentityKeys(item));
+  for (const tombstone of tombstones) {
+    const tombstoneKeys = getTombstoneIdentityKeys(tombstone);
+    const strongKeys = getTombstoneStrongIdentityKeys(tombstone);
+    const strongMatch = [...identityKeys].some(key => strongKeys.has(key));
+    if (strongMatch) return !isExplicitNewLocalItem(item, tombstone);
+    if (item.SyncStatus !== 'LOCAL_PENDING' && [...identityKeys].some(key => tombstoneKeys.has(key))) return true;
+  }
+  return item.SyncStatus === 'LOCAL_PENDING'
+    ? false
+    : [...identityKeys].some(key => state.deletedItemIdentityKeys.has(key));
+}
+
+function getTombstoneStrongIdentityKeys(tombstone) {
+  const keys = new Set();
+  [tombstone.ItemID, tombstone.SourceItemID, tombstone.EntityId, tombstone.EntityID, tombstone.entity_id]
+    .filter(Boolean)
+    .forEach(value => keys.add(`id:${String(value)}`));
+  (tombstone.IdentityKeys || tombstone.identityKeys || []).forEach(key => {
+    if (String(key).startsWith('id:')) keys.add(String(key));
+  });
+  return keys;
+}
+
+function isExplicitNewLocalItem(item, tombstone) {
+  if (item.SyncStatus !== 'LOCAL_PENDING') return false;
+  if (!item.ItemID || item.SourceItemID !== item.ItemID) return false;
+  const itemTimestamp = Date.parse(item.UpdatedAt || item.ModifiedAt || item.LastUpdatedAt || item.CreatedAt || '');
+  const deletedTimestamp = Date.parse(tombstone.DeletedAt || tombstone.deletedAt || '');
+  return Number.isFinite(itemTimestamp) && Number.isFinite(deletedTimestamp) && itemTimestamp > deletedTimestamp;
 }
 
 function getDeletedIdentityKeySet(tombstones = []) {
