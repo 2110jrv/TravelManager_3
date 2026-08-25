@@ -1878,6 +1878,44 @@ h1 {
   box-sizing: border-box;
 }
 
+.menu-sync-submenu {
+  display: grid;
+  gap: 4px;
+  margin: -2px 0 6px 12px;
+  padding: 7px;
+  border-left: 2px solid #cbd5e1;
+  background: #f8fafc;
+}
+
+.menu-sync-submenu.hidden {
+  display: none;
+}
+
+.menu-sync-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 8px 3px;
+  color: #334155;
+  font-size: .74rem;
+  font-weight: 800;
+}
+
+.menu-sync-heading small,
+.menu-sync-login-note {
+  color: #64748b;
+  font-size: .68rem;
+  font-weight: 600;
+}
+
+.menu-sync-submenu button {
+  min-height: 32px;
+  padding: 6px 8px;
+  text-align: left;
+  font-size: .78rem;
+}
+
 .edit-form label {
   display: grid;
   gap: 6px;

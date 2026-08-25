@@ -392,6 +392,16 @@ function bindEvents() {
       persistViewState();
       closeMenu();
       render();
+      });
+  });
+  els.menuOverlay.querySelectorAll('[data-sync-action]').forEach(button => {
+    button.addEventListener('click', async () => {
+      if (button.hasAttribute('data-sync-auth') && !state.authUser) return;
+      closeMenu();
+      if (button.dataset.syncAction === 'pending') return handleViewPending();
+      if (button.dataset.syncAction === 'push') return runCloudSyncNow('manual');
+      if (button.dataset.syncAction === 'pull') return handlePullMaster();
+      if (button.dataset.syncAction === 'signout') return handleSignOut();
     });
   });
   els.tabs.forEach(button => {
@@ -685,6 +695,14 @@ function syncAccessUi() {
   els.menuOverlay.querySelectorAll('[data-view]').forEach(button => {
     button.classList.toggle('hidden', !canView(button.dataset.view));
   });
+  const syncSubmenu = document.getElementById('menuSyncSubmenu');
+  if (syncSubmenu) {
+    syncSubmenu.classList.toggle('hidden', !canView('settings'));
+    syncSubmenu.querySelectorAll('[data-sync-auth]').forEach(button => button.classList.toggle('hidden', !state.authUser));
+    syncSubmenu.querySelector('[data-sync-login-note]')?.classList.toggle('hidden', Boolean(state.authUser));
+    const status = syncSubmenu.querySelector('#menuSyncStatus');
+    if (status) status.textContent = getSyncStatusLabel();
+  }
   els.tabs.forEach(button => {
     const hide = (button.dataset.action === 'new-item' && !canEditApp())
       || (button.dataset.tab === 'PROPOSED' && shouldShowOnlyConfirmed());
@@ -1000,7 +1018,30 @@ function renderDays(items) {
       ${showDayDetails ? renderDayDetails(day) : ''}
       <div class="day-items${isOpen ? '' : ' hidden'}"></div>
     `;
-    card.querySelector('.day-summary').addEventListener('click', () => {
+    const daySummary = card.querySelector('.day-summary');
+    let dayHoldTimer = null;
+    let ignoreDayClick = false;
+    daySummary.addEventListener('pointerdown', event => {
+      if (event.button && event.button !== 0) return;
+      if (!canEditApp()) return;
+      dayHoldTimer = window.setTimeout(() => {
+        ignoreDayClick = true;
+        openDayEditModal(day);
+      }, 600);
+    });
+    ['pointerup', 'pointerleave', 'pointercancel'].forEach(type => {
+      daySummary.addEventListener(type, () => window.clearTimeout(dayHoldTimer));
+    });
+    daySummary.addEventListener('contextmenu', event => {
+      event.preventDefault();
+      window.clearTimeout(dayHoldTimer);
+      if (canEditApp()) openDayEditModal(day);
+    });
+    daySummary.addEventListener('click', () => {
+      if (ignoreDayClick) {
+        ignoreDayClick = false;
+        return;
+      }
       if (!isOpen) {
         state.openDayKey = day.DayDate;
         state.openDayDetailsKey = null;
@@ -2048,6 +2089,7 @@ async function handleAuthSubmit(event, mode) {
       ? 'Cuenta creada. Revisa tu email si Supabase solicita confirmación.'
       : 'Sesión iniciada. Sync manual disponible desde Configuración.';
     updateSyncStatus();
+    syncAccessUi();
     await renderSettings();
   } catch (error) {
     setAuthMessage(getAuthErrorMessage(error), true);
@@ -2063,6 +2105,7 @@ async function handleSignOut() {
     state.authError = '';
     state.authMessage = 'Sesión cerrada. Tus datos locales de IndexedDB se conservan.';
     updateSyncStatus();
+    syncAccessUi();
     await renderSettings();
   } catch (error) {
     setAuthMessage(getAuthErrorMessage(error), true);
@@ -2251,6 +2294,156 @@ function openDayEditor(day = null) {
   `;
   document.getElementById('cancelDayEdit').addEventListener('click', () => editor.classList.add('hidden'));
   document.getElementById('saveDayButton').addEventListener('click', () => saveDayEditor(day?.TripDayID || ''));
+}
+
+function openDayEditModal(day) {
+  if (!canEditApp() || !day) return;
+  let modal = document.getElementById('dayEditModal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'dayEditModal';
+    modal.className = 'edit-modal hidden';
+    document.body.append(modal);
+  }
+  const date = day.Date || day.DayDate || '';
+  modal._dayJsonDraft = { ...day };
+  modal.innerHTML = `
+    <div class="edit-modal-panel day-edit-modal-panel" role="dialog" aria-modal="true" aria-labelledby="dayEditModalTitle">
+      <header class="edit-modal-header">
+        <h2 id="dayEditModalTitle">Editar día</h2>
+        <button type="button" class="icon-button" data-day-modal-cancel aria-label="Cerrar">×</button>
+      </header>
+      <form class="edit-form day-edit-form" novalidate>
+        <div class="day-edit-message settings-message" role="alert"></div>
+        <section class="day-json-tools item-json-panel">
+          <label for="dayJsonInput">JSON del día</label>
+          <textarea id="dayJsonInput" data-day-json-input rows="6" placeholder="Pega aquí un objeto JSON del tripDay"></textarea>
+          <div class="item-json-actions">
+            <button type="button" class="secondary-button" data-copy-day-json>Copiar JSON actual</button>
+            <button type="button" class="secondary-button" data-apply-day-json>Usar JSON</button>
+          </div>
+        </section>
+        <label>TripDayID<input name="TripDayID" value="${escapeHtml(day.TripDayID || day.DayID || '')}" readonly /></label>
+        <label>TripID<input name="TripID" value="${escapeHtml(day.TripID || state.activeTripId)}" readonly /></label>
+        <div class="edit-grid">
+          <label>Date / DayDate<input name="Date" value="${escapeHtml(date)}" readonly /></label>
+          <label>DayOrder<input name="DayOrder" type="number" min="0" value="${Number(day.DayOrder || 0)}" /></label>
+        </div>
+        <label>DayLabel<input name="DayLabel" value="${escapeHtml(day.DayLabel || '')}" /></label>
+        <label>Title<input name="Title" value="${escapeHtml(day.Title || '')}" /></label>
+        <label>PrimaryCity<input name="PrimaryCity" value="${escapeHtml(day.PrimaryCity || day.City || '')}" /></label>
+        <label>PrimaryCountryCode<input name="PrimaryCountryCode" value="${escapeHtml(day.PrimaryCountryCode || day.CountryCode || '')}" /></label>
+        <label>DayNotes<textarea name="DayNotes" rows="3">${escapeHtml(day.DayNotes || day.Notes || '')}</textarea></label>
+        <label>DayImageUrl<input name="DayImageUrl" value="${escapeHtml(day.DayImageUrl || '')}" /></label>
+        <footer class="edit-actions"><button type="button" class="secondary-button" data-day-modal-cancel>Cancelar</button><button type="submit" class="primary-button">Guardar día</button></footer>
+      </form>
+    </div>
+  `;
+  const form = modal.querySelector('form');
+  modal.classList.remove('hidden');
+  modal.onclick = event => {
+    if (event.target === modal) modal.classList.add('hidden');
+  };
+  modal.querySelectorAll('[data-day-modal-cancel]').forEach(button => button.addEventListener('click', () => modal.classList.add('hidden')));
+  modal.querySelector('[data-copy-day-json]').addEventListener('click', () => copyCurrentDayJson(modal));
+  modal.querySelector('[data-apply-day-json]').addEventListener('click', () => applyDayJson(day, modal, form));
+  form.addEventListener('submit', event => {
+    event.preventDefault();
+    saveDayModal(day, modal, form);
+  });
+  form.elements.DayLabel.focus();
+}
+
+async function saveDayModal(originalDay, modal, form) {
+  const message = form.querySelector('.day-edit-message');
+  const dayOrderValue = form.elements.DayOrder.value.trim();
+  const dayOrder = Number(dayOrderValue);
+  const dayLabel = form.elements.DayLabel.value.trim();
+  const title = form.elements.Title.value.trim();
+  if (!dayOrderValue || !Number.isFinite(dayOrder) || dayOrder < 0) return setInlineMessage(message, 'DayOrder debe ser numérico.', true);
+  if (!dayLabel && !title) return setInlineMessage(message, 'DayLabel o Title debe tener un valor.', true);
+  const now = new Date().toISOString();
+  const date = originalDay.Date || originalDay.DayDate || '';
+  const tripDayId = originalDay.TripDayID || originalDay.DayID;
+  const tripId = originalDay.TripID || state.activeTripId;
+  if (!tripDayId || !tripId || !date) return setInlineMessage(message, 'TripDayID, TripID y Date son obligatorios y no se pueden borrar.', true);
+  const jsonDraft = modal._dayJsonDraft || {};
+  const updated = stampLocalChange({
+    ...originalDay,
+    ...jsonDraft,
+    TripDayID: tripDayId,
+    DayID: originalDay.DayID || tripDayId,
+    TripID: tripId,
+    Date: date,
+    DayDate: date,
+    DayOrder: dayOrder,
+    DayLabel: dayLabel,
+    Title: title,
+    PrimaryCity: form.elements.PrimaryCity.value.trim(),
+    PrimaryCountryCode: form.elements.PrimaryCountryCode.value.trim(),
+    DayNotes: form.elements.DayNotes.value.trim(),
+    DayImageUrl: form.elements.DayImageUrl.value.trim(),
+    CreatedAt: originalDay.CreatedAt || now
+  }, now);
+  try {
+    await saveTripDay(updated);
+  } catch (error) {
+    console.error('No se pudo guardar el día desde Inicio.', error);
+    return setInlineMessage(message, error.message || 'No se pudo guardar el día.', true);
+  }
+  markLocalEntity('TRIP_DAY', tripDayId);
+  await refreshTripsAndDays();
+  modal.classList.add('hidden');
+  notifyLocalChange('day-save');
+  await render();
+}
+
+async function copyCurrentDayJson(modal) {
+  const source = modal._dayJsonDraft || {};
+  const copied = await copyTextToClipboard(JSON.stringify(source, null, 2));
+  setInlineMessage(modal.querySelector('.day-edit-message'), copied ? 'JSON actual del día copiado.' : 'No se pudo copiar el JSON del día.', !copied);
+}
+
+function applyDayJson(originalDay, modal, form) {
+  const message = modal.querySelector('.day-edit-message');
+  const input = form.querySelector('[data-day-json-input]');
+  const text = input.value.trim();
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch (_error) {
+    return setInlineMessage(message, 'El JSON del día no es válido.', true);
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return setInlineMessage(message, 'Pega un objeto JSON de tripDay, no un array.', true);
+  }
+  const dayOrderValue = parsed.DayOrder === undefined ? form.elements.DayOrder.value.trim() : String(parsed.DayOrder ?? '').trim();
+  const dayOrder = Number(dayOrderValue);
+  if (!dayOrderValue || !Number.isFinite(dayOrder) || dayOrder < 0) {
+    return setInlineMessage(message, 'DayOrder debe ser numérico.', true);
+  }
+  const merged = {
+    ...(modal._dayJsonDraft || originalDay),
+    ...parsed,
+    TripDayID: originalDay.TripDayID || originalDay.DayID,
+    DayID: originalDay.DayID || originalDay.TripDayID,
+    TripID: originalDay.TripID || state.activeTripId,
+    Date: originalDay.Date || originalDay.DayDate || '',
+    DayDate: originalDay.Date || originalDay.DayDate || '',
+    DayOrder: dayOrder
+  };
+  const dayLabel = String(merged.DayLabel || '').trim();
+  const title = String(merged.Title || '').trim();
+  if (!dayLabel && !title) return setInlineMessage(message, 'DayLabel o Title debe tener un valor.', true);
+  modal._dayJsonDraft = merged;
+  form.elements.DayOrder.value = String(dayOrder);
+  form.elements.DayLabel.value = dayLabel;
+  form.elements.Title.value = title;
+  form.elements.PrimaryCity.value = String(merged.PrimaryCity || merged.City || '').trim();
+  form.elements.PrimaryCountryCode.value = String(merged.PrimaryCountryCode || merged.CountryCode || '').trim();
+  form.elements.DayNotes.value = String(merged.DayNotes || merged.Notes || '').trim();
+  form.elements.DayImageUrl.value = String(merged.DayImageUrl || '').trim();
+  setInlineMessage(message, 'JSON del día aplicado. Revisa los campos y guarda.');
 }
 
 async function saveDayEditor(originalDayId = '') {

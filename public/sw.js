@@ -1,4 +1,4 @@
-const CACHE_NAME = 'travelmanager3-cache-v19';
+const CACHE_NAME = 'travelmanager3-cache-v22';
 const TILE_CACHE_NAME = 'travelmanager3-tiles-v1';
 const APP_SCOPE = new URL('./', self.location.href).href;
 const SUPABASE_HOST = 'cslludzuejkhsydqiabx.supabase.co';
