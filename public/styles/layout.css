@@ -10,7 +10,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 20px 0 10px;
+  padding: 20px 68px 10px 0;
 }
 
 .eyebrow {
@@ -696,10 +696,12 @@ h1 {
 
 .menu-button {
   min-width: 44px;
-  position: fixed;
-  top: 16px;
-  right: 16px;
-  z-index: 20;
+  position: fixed !important;
+  top: calc(env(safe-area-inset-top, 0px) + 12px);
+  right: calc(env(safe-area-inset-right, 0px) + 12px);
+  left: auto;
+  bottom: auto;
+  z-index: 1010;
   box-shadow: 0 8px 24px rgba(15, 23, 42, .18);
 }
 
@@ -711,7 +713,7 @@ h1 {
 .menu-overlay {
   position: fixed;
   inset: 0;
-  z-index: 15;
+  z-index: 1000;
   background: rgba(15, 23, 42, 0.32);
   display: flex;
   justify-content: flex-end;
@@ -735,6 +737,24 @@ h1 {
   background: #f1f5f9;
   color: #111827;
   text-align: left;
+}
+
+.menu-home-group {
+  display: grid;
+  gap: 4px;
+}
+
+.menu-home-submenu {
+  display: grid;
+  gap: 4px;
+  margin-left: 12px;
+  padding-left: 10px;
+  border-left: 2px solid #cbd5e1;
+}
+
+.menu-home-submenu button {
+  padding: 8px 10px;
+  font-size: .86rem;
 }
 
 .tabs {

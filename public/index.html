@@ -24,9 +24,13 @@
 
     <div id="menuOverlay" class="menu-overlay hidden">
       <nav class="menu-panel" aria-label="Principal">
-        <button type="button" data-view="home">Inicio</button>
-        <button type="button" data-menu-action="new-item">Nuevo Item</button>
-        <button type="button" data-menu-action="new-day">Nuevo Día</button>
+        <div class="menu-home-group">
+          <button type="button" data-view="home">Inicio</button>
+          <div class="menu-home-submenu" aria-label="Acciones de Inicio">
+            <button type="button" data-menu-action="new-item">Nuevo Item</button>
+            <button type="button" data-menu-action="new-day">Nuevo Día</button>
+          </div>
+        </div>
         <button type="button" data-view="calendar">Calendario</button>
         <button type="button" data-view="map">Mapa</button>
         <button type="button" data-view="budget">Presupuesto</button>
@@ -37,7 +41,6 @@
           <button type="button" data-sync-action="push" data-sync-auth>Subir pendientes</button>
           <button type="button" data-sync-action="pull" data-sync-auth>Bajar master</button>
           <button type="button" data-menu-action="export-backup">Exportar backup completo</button>
-          <button type="button" data-sync-action="signout" data-sync-auth>Cerrar sesión Supabase</button>
           <small class="menu-sync-login-note" data-sync-login-note>Inicia sesión para sincronizar con la nube.</small>
         </div>
         <button type="button" data-menu-action="switch-access">Cambiar PIN</button>
@@ -73,6 +76,6 @@
   </div>
 
   <script src="./vendor/leaflet/leaflet.js"></script>
-  <script type="module" src="./src/app2.js?v=tm3-096"></script>
+  <script type="module" src="./src/app2.js?v=tm3-100"></script>
 </body>
 </html>
