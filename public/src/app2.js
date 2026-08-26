@@ -2600,7 +2600,6 @@ function buildTripAudit() {
       if (!dayDates.has(date)) errors.push(itemIssue(item, `Rango multiday con fecha faltante: ${date}.`));
     }
     if (item.AmountUSD === '' || item.AmountUSD === null || item.AmountUSD === undefined || Number.isNaN(Number(item.AmountUSD)) || Number(item.AmountUSD) < 0) errors.push(itemIssue(item, 'AmountUSD inválido.'));
-    if (Number(item.AmountUSD) === 0) warnings.push(itemIssue(item, 'Precio $0.00 — confirmar si es gratuito.'));
     if (!PLANNING_STATUSES.includes(getItemPlanningStatus(item))) errors.push(itemIssue(item, 'PlanningStatus inválido.'));
     if (!isAllowedItemId(key)) errors.push(itemIssue(item, 'Formato ItemID inválido.'));
     if (ALLOWED_LEGACY_ITEM_IDS.has(key)) warnings.push(itemIssue(item, 'ItemID legacy permitido; no modificar automáticamente.'));
