@@ -1470,6 +1470,7 @@ function renderItem(item) {
   itemEl.dataset.itemId = item.ItemID;
   const time = item.IsAllDay ? 'Todo el día' : formatDisplayTime(item.StartTime);
   const plannedTimeRange = getItineraryTimeRange(item);
+  const durationLabel = plannedTimeRange ? getItemDurationLabel(item) : '';
   const fallbackDisplayTime = plannedTimeRange || time;
   const categoryChip = renderCategoryChip(categoryVisual);
   const categoryIcon = renderCategoryCardIcon(categoryVisual);
@@ -1488,7 +1489,7 @@ function renderItem(item) {
   itemEl.innerHTML = `
     <div class="item-summary" role="button" tabindex="0" aria-expanded="${isOpen}">
       ${paymentStatusIcon}
-      <span class="item-time${timeClass}">${escapeHtml(displayTime)}</span>
+      <span class="item-time${timeClass}">${escapeHtml(displayTime)}${durationLabel ? `<strong class="item-duration">${escapeHtml(durationLabel)}</strong>` : ''}</span>
       <span class="item-title">${escapeHtml(getDisplayTitle(item))}</span>
       <span class="item-meta">
         ${categoryChip}
@@ -4671,6 +4672,19 @@ function getCategoryLabel(type = 'OTHER') {
 function getItineraryTimeRange(item) {
   if (!shouldShowItineraryTimeRange(item)) return '';
   return formatDisplayTimeRange(item.StartTime, item.EndTime);
+}
+
+function getItemDurationLabel(item) {
+  if (!shouldShowItineraryTimeRange(item)) return null;
+  const startDate = item.StartDate || '';
+  const endDate = item.EndDate || '';
+  const start = parseLocalDateTime(startDate, normalizeFormTime(item.StartTime));
+  const end = parseLocalDateTime(endDate, normalizeFormTime(item.EndTime));
+  if (!start || !end) return null;
+
+  const minutes = Math.round((end.getTime() - start.getTime()) / 60000);
+  if (!Number.isFinite(minutes) || minutes <= 0) return null;
+  return minutes < 60 ? `${minutes} min` : `${(minutes / 60).toFixed(1)} h`;
 }
 
 function shouldShowItineraryTimeRange(item) {

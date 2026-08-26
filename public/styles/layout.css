@@ -531,6 +531,15 @@ h1 {
   white-space: normal;
 }
 
+.item-duration {
+  display: block;
+  margin-top: 2px;
+  color: #475569;
+  font-size: .68rem;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
 .item-title {
   grid-column: 3;
   min-width: 0;
