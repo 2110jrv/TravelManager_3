@@ -510,6 +510,7 @@ h1 {
   outline: none;
   touch-action: manipulation;
   user-select: none;
+  min-height: 64px;
 }
 
 .item-summary:focus-visible {
@@ -573,20 +574,18 @@ h1 {
 }
 
 .item-card-icon {
-  grid-column: 4;
-  grid-row: 1 / span 2;
+  position: absolute;
+  left: 10px;
+  bottom: 8px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  justify-self: end;
-  align-self: center;
-  width: 40px;
-  height: 40px;
+  width: 32px;
+  height: 32px;
   color: #334155;
-  font-size: 34px;
+  font-size: 27px;
   line-height: 1;
   filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.42));
-  position: relative;
   z-index: 1;
 }
 
@@ -697,6 +696,16 @@ h1 {
 
 .menu-button {
   min-width: 44px;
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 20;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, .18);
+}
+
+#refreshButton,
+#resetSeedButton {
+  display: none !important;
 }
 
 .menu-overlay {
@@ -747,7 +756,7 @@ h1 {
 }
 
 .planning-toggle {
-  display: inline-flex;
+  display: none !important;
   align-items: center;
   gap: 0;
   padding: 3px;
@@ -1439,6 +1448,28 @@ h1 {
   text-align: left;
 }
 
+.calendar-day-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 4px;
+  width: 100%;
+}
+
+.calendar-day-title {
+  display: flex;
+  min-height: 2.4em;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  overflow: hidden;
+  color: #334155;
+  font-size: .78rem;
+  font-weight: 800;
+  line-height: 1.2;
+  text-align: center;
+}
+
 .calendar-day.empty {
   background: #fff7e6;
 }
@@ -1468,10 +1499,9 @@ h1 {
 }
 
 .calendar-confirmed-count {
-  align-self: center;
-  justify-self: center;
+  flex: 0 0 auto;
   color: #2563eb;
-  font-size: 2.45rem;
+  font-size: 1rem;
   font-weight: 900;
   line-height: 1;
 }
@@ -1644,7 +1674,11 @@ h1 {
   }
 
   .calendar-confirmed-count {
-    font-size: 1.9rem;
+    font-size: .9rem;
+  }
+
+  .calendar-day-title {
+    font-size: .68rem;
   }
 
   .calendar-day.muted .calendar-confirmed-count {

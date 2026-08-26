@@ -22,10 +22,11 @@ const state = {
   newJsonDraft: null,
   pendingBackup: null,
   daysPanelOpen: false,
+  dataManagerOpen: false,
   auditPanelOpen: false,
   calendarMonth: '',
   calendarMessage: '',
-  mapFilters: { planning: 'ALL', type: 'ALL', city: 'ALL', date: 'ALL' },
+  mapFilters: { planning: 'CONFIRMED', type: 'ALL', city: 'ALL', date: 'ALL' },
   map: null,
   mapLayer: null,
   tileLayer: null,
@@ -404,6 +405,35 @@ function bindEvents() {
       if (button.dataset.syncAction === 'signout') return handleSignOut();
     });
   });
+  els.menuOverlay.querySelectorAll('[data-menu-action]').forEach(button => {
+    button.addEventListener('click', async () => {
+      if (button.dataset.menuAction === 'new-item') {
+        if (!canEditApp()) return;
+        closeMenu();
+        openNewItemModal();
+        return;
+      }
+      if (button.dataset.menuAction === 'new-day') {
+        if (!canEditApp()) return;
+        closeMenu();
+        state.activeView = 'settings';
+        state.daysPanelOpen = true;
+        await render();
+        openDayEditor();
+        return;
+      }
+      if (button.dataset.menuAction === 'export-backup') {
+        if (!canView('settings')) return;
+        closeMenu();
+        await exportBackup();
+        return;
+      }
+      if (button.dataset.menuAction === 'switch-access') {
+        closeMenu();
+        await switchAccessRole();
+      }
+    });
+  });
   els.tabs.forEach(button => {
     button.addEventListener('click', () => {
       if (!state.accessRole) return;
@@ -700,6 +730,7 @@ function syncAccessUi() {
     syncSubmenu.classList.toggle('hidden', !canView('settings'));
     syncSubmenu.querySelectorAll('[data-sync-auth]').forEach(button => button.classList.toggle('hidden', !state.authUser));
     syncSubmenu.querySelector('[data-sync-login-note]')?.classList.toggle('hidden', Boolean(state.authUser));
+    syncSubmenu.querySelector('[data-menu-action="export-backup"]')?.classList.toggle('hidden', !canView('settings'));
     const status = syncSubmenu.querySelector('#menuSyncStatus');
     if (status) status.textContent = getSyncStatusLabel();
   }
@@ -709,6 +740,10 @@ function syncAccessUi() {
     button.classList.toggle('hidden', hide);
   });
   els.resetButton.classList.toggle('hidden', !canEditApp());
+  els.refreshButton.classList.add('hidden');
+  els.resetButton.classList.add('hidden');
+  els.menuOverlay.querySelector('[data-menu-action="new-item"]')?.classList.toggle('hidden', !canEditApp());
+  els.menuOverlay.querySelector('[data-menu-action="new-day"]')?.classList.toggle('hidden', !canEditApp());
   let roleButton = document.getElementById('accessSwitchButton');
   if (!roleButton) {
     roleButton = document.createElement('button');
@@ -1233,12 +1268,13 @@ function renderCalendar() {
 function renderCalendarDay(date) {
   const counts = getCalendarCounts(date);
   const inMonth = date.slice(0, 7) === state.calendarMonth;
-  const hasTripDay = state.days.some(day => day.DayDate === date);
+  const tripDay = state.days.find(day => day.DayDate === date);
+  const hasTripDay = Boolean(tripDay);
   const hasItems = counts.total > 0;
   return `
     <button class="calendar-day${inMonth ? '' : ' muted'}${hasTripDay ? '' : ' no-trip-day'}${inMonth && !hasItems ? ' empty' : ''}${inMonth && hasItems ? ' populated' : ''}" type="button" data-calendar-date="${escapeHtml(date)}">
-      <span class="calendar-number">${Number(date.slice(8, 10))}</span>
-      ${hasItems ? `<span class="calendar-confirmed-count">${counts.confirmed}</span>` : ''}
+      <span class="calendar-day-header"><span class="calendar-number">${Number(date.slice(8, 10))}</span>${hasItems ? `<span class="calendar-confirmed-count">${counts.confirmed}</span>` : ''}</span>
+      ${tripDay ? `<span class="calendar-day-title">${escapeHtml(tripDay.Title || tripDay.DayLabel || 'Día')}</span>` : ''}
     </button>
   `;
 }
@@ -1758,15 +1794,18 @@ async function renderSettings() {
           <h2>Administrar itinerario</h2>
           <p>${rows.length} filas lógicas únicas</p>
         </div>
+        <button id="toggleDataManager" class="secondary-button" type="button">${state.dataManagerOpen ? 'Ocultar' : 'Mostrar'}</button>
+      </header>
+      <div id="dataManagerBody" class="${state.dataManagerOpen ? '' : 'hidden'}">
         <div class="data-actions">
           <input id="dataSearch" type="search" placeholder="Buscar título, ciudad o ItemID" />
           <button id="addDataRow" class="secondary-button" type="button">Añadir fila</button>
           <button id="pasteDataRows" class="secondary-button" type="button">Pegar TSV</button>
         </div>
-      </header>
-      <div id="dataMessage" class="settings-message"></div>
-      <div id="dataManagerTable">${renderDataTable(rows)}</div>
-      <div id="pastePreview" class="paste-preview hidden"></div>
+        <div id="dataMessage" class="settings-message"></div>
+        <div id="dataManagerTable">${renderDataTable(rows)}</div>
+        <div id="pastePreview" class="paste-preview hidden"></div>
+      </div>
     </section>
     <section class="backup-panel">
       <header class="data-manager-header">
@@ -1833,7 +1872,7 @@ function renderAuthPanel() {
           <button id="pullMasterButton" class="primary-button" type="button">Bajar master</button>
           <button id="pushPendingButton" class="secondary-button" type="button">Subir pendientes</button>
           <button id="viewPendingButton" class="secondary-button" type="button">Ver pendientes</button>
-          <button id="authSignOutButton" class="secondary-button" type="button">Cerrar sesión</button>
+          <button id="authSignOutButton" class="secondary-button" type="button">Cerrar sesión Supabase</button>
         </div>
       </div>
     `;
@@ -2152,7 +2191,7 @@ function bindTripManager() {
     state.openItemId = null;
     state.calendarMonth = getInitialCalendarMonth();
     state.calendarMessage = '';
-    state.mapFilters = { planning: 'ALL', type: 'ALL', city: 'ALL', date: 'ALL' };
+    state.mapFilters = { planning: 'CONFIRMED', type: 'ALL', city: 'ALL', date: 'ALL' };
     persistViewState();
     notifyLocalChange('active-trip');
     await render();
@@ -2981,6 +3020,10 @@ function getBackupTripDays(payload, tripId) {
 }
 
 function bindDataManager() {
+  document.getElementById('toggleDataManager')?.addEventListener('click', async () => {
+    state.dataManagerOpen = !state.dataManagerOpen;
+    await renderSettings();
+  });
   const table = document.getElementById('dataManagerTable');
   const search = document.getElementById('dataSearch');
   document.getElementById('addDataRow').addEventListener('click', () => addLogicalRow());
