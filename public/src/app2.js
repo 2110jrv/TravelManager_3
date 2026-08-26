@@ -1834,6 +1834,7 @@ async function renderSettings() {
         <button id="toggleAuditPanel" class="secondary-button" type="button">${state.auditPanelOpen ? 'Ocultar' : 'Mostrar'}</button>
       </header>
       <div id="auditPanelBody" class="${state.auditPanelOpen ? '' : 'hidden'}">
+        <p class="audit-edit-hint">Mantén presionado un item para editarlo.</p>
         <div class="settings-actions"><button id="refreshAuditButton" class="secondary-button" type="button">Volver a auditar</button></div>
         ${renderAudit(audit)}
       </div>
@@ -2654,11 +2655,11 @@ function bindAuditManager() {
   });
   document.getElementById('refreshAuditButton')?.addEventListener('click', () => renderSettings());
   document.querySelectorAll('[data-audit-edit-item]').forEach(button => button.addEventListener('click', () => {
-    const item = state.items.find(row => getLogicalKey(row) === button.dataset.auditEditItem);
+    const item = findAuditItem(button.dataset.auditEditItem);
     if (item) openEditModal(item);
   }));
   document.querySelectorAll('[data-audit-delete-item]').forEach(button => button.addEventListener('click', () => {
-    const item = state.items.find(row => getLogicalKey(row) === button.dataset.auditDeleteItem);
+    const item = findAuditItem(button.dataset.auditDeleteItem);
     if (item) deleteLogicalItem(item);
   }));
   document.querySelectorAll('[data-audit-edit-day]').forEach(button => button.addEventListener('click', () => {
@@ -2671,7 +2672,7 @@ function bindAuditManager() {
   document.querySelectorAll('.audit-issue[data-issue-type="item"]').forEach(el => {
     let timer = null;
     const open = () => {
-      const item = state.items.find(row => getLogicalKey(row) === el.dataset.issueId);
+      const item = findAuditItem(el.dataset.issueId);
       if (item) openEditModal(item);
     };
     el.addEventListener('contextmenu', event => {
@@ -2683,6 +2684,14 @@ function bindAuditManager() {
     });
     ['pointerup', 'pointerleave', 'pointercancel'].forEach(type => el.addEventListener(type, () => window.clearTimeout(timer)));
   });
+}
+
+function findAuditItem(issueId) {
+  const key = String(issueId || '');
+  return state.items.find(item => String(item.ItemID || '') === key)
+    || state.items.find(item => String(item.SourceItemID || '') === key)
+    || state.items.find(item => getLogicalKey(item) === key)
+    || null;
 }
 
 function bindBackupManager() {
