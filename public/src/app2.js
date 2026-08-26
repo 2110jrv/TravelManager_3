@@ -1489,7 +1489,8 @@ function renderItem(item) {
   itemEl.innerHTML = `
     <div class="item-summary" role="button" tabindex="0" aria-expanded="${isOpen}">
       ${paymentStatusIcon}
-      <span class="item-time${timeClass}">${escapeHtml(displayTime)}${durationLabel ? `<strong class="item-duration">${escapeHtml(durationLabel)}</strong>` : ''}</span>
+      <span class="item-time${timeClass}">${escapeHtml(displayTime)}</span>
+      ${durationLabel ? `<strong class="item-time-duration">${escapeHtml(durationLabel)}</strong>` : ''}
       <span class="item-title">${escapeHtml(getDisplayTitle(item))}</span>
       <span class="item-meta">
         ${categoryChip}
