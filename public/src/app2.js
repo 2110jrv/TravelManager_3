@@ -2516,8 +2516,11 @@ async function deleteDay(TripDayID) {
   }
   if (!confirm(`Eliminar día ${date}?`)) return;
   await createDataSnapshot('Antes de eliminar día');
+  console.log('[TM3 DELETE_TRIP_DAY] tombstone y pendiente por crear', { TripDayID, TripID: day.TripID || state.activeTripId });
   await recordDeletion('TRIP_DAY', TripDayID, day.TripID || state.activeTripId, day);
+  console.log('[TM3 DELETE_TRIP_DAY] tombstone creado y syncQueue DELETE_TRIP_DAY creado', { TripDayID, TripID: day.TripID || state.activeTripId });
   await deleteTripDay(TripDayID);
+  console.log('[TM3 DELETE_TRIP_DAY] borrado local completado', { TripDayID });
   markLocalEntity('TRIP_DAY', TripDayID);
   await refreshTripsAndDays();
   await loadState();
@@ -2573,6 +2576,9 @@ function buildTripAudit() {
   const warnings = [];
   const info = [];
   const dayDates = new Set(state.days.map(day => day.Date || day.DayDate));
+  const validTripDayIds = new Set(state.days
+    .filter(day => day.TripID === state.activeTripId)
+    .flatMap(day => [day.DayID, day.TripDayID].filter(Boolean)));
   const dayIds = new Set();
   const seenDayDates = new Set();
   for (const day of state.days) {
@@ -2605,7 +2611,10 @@ function buildTripAudit() {
     if (!isAllowedItemId(key)) errors.push(itemIssue(item, 'Formato ItemID inválido.'));
     if (ALLOWED_LEGACY_ITEM_IDS.has(key)) warnings.push(itemIssue(item, 'ItemID legacy permitido; no modificar automáticamente.'));
     const trip = state.trips.find(row => row.TripID === state.activeTripId);
-    if (trip && start && (start < trip.StartDate || start > trip.EndDate)) warnings.push(itemIssue(item, 'Item fuera del rango del Trip.'));
+    const hasValidTripDay = [item.DayID, item.TripDayID].some(id => id && validTripDayIds.has(id));
+    if (trip && start && (start < trip.StartDate || start > trip.EndDate) && !hasValidTripDay) {
+      warnings.push(itemIssue(item, 'Item fuera del rango del Trip.'));
+    }
   }
   return { errors, warnings, info };
 }
@@ -2653,7 +2662,11 @@ function bindAuditManager() {
     state.auditPanelOpen = !state.auditPanelOpen;
     await renderSettings();
   });
-  document.getElementById('refreshAuditButton')?.addEventListener('click', () => renderSettings());
+  document.getElementById('refreshAuditButton')?.addEventListener('click', async () => {
+    await refreshTripsAndDays();
+    await loadState();
+    await renderSettings();
+  });
   document.querySelectorAll('[data-audit-edit-item]').forEach(button => button.addEventListener('click', () => {
     const item = findAuditItem(button.dataset.auditEditItem);
     if (item) openEditModal(item);
@@ -2970,7 +2983,8 @@ function normalizeImportedItem(item, reservedIds = new Set()) {
 
 async function restoreTripMetadata(payload) {
   const trips = getBackupTrips(payload);
-  const tripDays = getBackupTripDays(payload, trips[0]?.TripID || 'TRIP_ITALY_2026');
+  const tombstones = await getDeletionQueue();
+  const tripDays = getBackupTripDays(payload, trips[0]?.TripID || 'TRIP_ITALY_2026', tombstones);
   for (const trip of trips) {
     const existing = await getTrip(trip.TripID);
     const now = new Date().toISOString();
@@ -3010,7 +3024,7 @@ function getBackupTrips(payload) {
   }];
 }
 
-function getBackupTripDays(payload, tripId) {
+function getBackupTripDays(payload, tripId, tombstones = []) {
   if (Array.isArray(payload.tripDays) && payload.tripDays.length) return payload.tripDays;
   const sourceDays = Array.isArray(payload.preferences?.days) ? payload.preferences.days : state.days;
   return sourceDays.map((day, index) => ({
@@ -3024,7 +3038,25 @@ function getBackupTripDays(payload, tripId) {
     PrimaryCountryCode: day.PrimaryCountryCode || day.CountryCode || '',
     DayNotes: day.DayNotes || day.Notes || '',
     DayImageUrl: day.DayImageUrl || ''
-  }));
+  })).filter(day => {
+    if (!isDeletedTripDayMatch(day, tombstones)) return true;
+    console.log('[TM3 DELETE_TRIP_DAY] TripDay omitido por tombstone en seed/merge', { TripDayID: day.TripDayID, TripID: day.TripID });
+    return false;
+  });
+}
+
+function isDeletedTripDayMatch(day, tombstones = []) {
+  return tombstones.some(tombstone => {
+    if ((tombstone.EntityType || tombstone.entity_type) !== 'TRIP_DAY') return false;
+    const tombstoneId = tombstone.TripDayID || tombstone.DayID || tombstone.EntityId || tombstone.EntityID || tombstone.entity_id || '';
+    const tombstoneTripId = tombstone.TripID || tombstone.trip_id || '';
+    const tombstoneDate = tombstone.DayDate || tombstone.day_date || tombstone.Date || '';
+    return (
+      (day.TripDayID && day.TripDayID === tombstoneId) ||
+      (day.DayID && day.DayID === tombstoneId) ||
+      (day.TripID && day.DayDate && day.TripID === tombstoneTripId && day.DayDate === tombstoneDate)
+    );
+  });
 }
 
 function bindDataManager() {
@@ -3282,14 +3314,22 @@ async function recordDeletion(EntityType, EntityId, TripID, entity = {}) {
     Version,
     DeviceId
   }, now));
-  await saveQueueRecord({
-    QueueID: `DELETE_ITEM:${EntityId}:${now}`,
+  const isTripDay = EntityType === 'TRIP_DAY';
+  const operationType = isTripDay ? 'DELETE_TRIP_DAY' : 'DELETE_ITEM';
+  const payload = {
+    ...entity,
+    ...(isTripDay ? { TripDayID: EntityId, DayID: entity.DayID || EntityId } : { ItemID: EntityId }),
     TripID: TripID || '',
-    OperationType: 'DELETE_ITEM',
+    _deleted: true
+  };
+  await saveQueueRecord({
+    QueueID: `${operationType}:${EntityId}:${now}`,
+    TripID: TripID || '',
+    OperationType: operationType,
     EntityType: EntityType.toLowerCase(),
     EntityID: EntityId,
     SourceItemID: entity.SourceItemID || '',
-    Payload: { ...entity, ItemID: EntityId, TripID: TripID || '', _deleted: true },
+    Payload: payload,
     CreatedAt: now,
     UpdatedAt: now,
     Attempts: 0,

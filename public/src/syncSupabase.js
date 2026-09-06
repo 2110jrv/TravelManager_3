@@ -170,10 +170,11 @@ export async function pushPendingQueue(records = null) {
     for (const record of pending) {
       await updateQueueRecord({ ...record, Status: 'SYNCING', Attempts: Number(record.Attempts || 0) + 1, UpdatedAt: new Date().toISOString() });
       try {
-        await processQueueRecord(client, record, deviceId);
+        await processQueueRecord(client, record, deviceId, user);
         await updateQueueRecord({ ...record, Status: 'DONE', LastError: '', UpdatedAt: new Date().toISOString() });
         count += 1;
       } catch (error) {
+        console.error('[TM3 DELETE_TRIP_DAY] fallo al procesar syncQueue', { QueueID: record.QueueID, OperationType: record.OperationType, error });
         await updateQueueRecord({ ...record, Status: 'FAILED', LastError: getErrorMessage(error), UpdatedAt: new Date().toISOString() });
       }
     }
@@ -210,6 +211,18 @@ async function processQueueRecord(client, record, deviceId, user) {
     if (!itemId) throw new Error('DELETE_ITEM sin ItemID');
     const { error } = await client.from('tm3_items').delete().eq('user_id', user.id).eq('item_id', itemId);
     if (error) throw error;
+    return;
+  }
+  if (op === 'DELETE_TRIP_DAY') {
+    const dayId = payload.TripDayID || payload.DayID || record.EntityID;
+    if (!dayId) throw new Error('DELETE_TRIP_DAY sin TripDayID');
+    console.log('[TM3 DELETE_TRIP_DAY] delete remoto procesado', { dayId });
+    const { error } = await client.from('tm3_trip_days').delete().eq('user_id', user.id).eq('day_id', dayId);
+    if (error) {
+      console.error('[TM3 DELETE_TRIP_DAY] resultado remoto con error', { dayId, error });
+      throw error;
+    }
+    console.log('[TM3 DELETE_TRIP_DAY] resultado remoto OK', { dayId });
     return;
   }
   if (op === 'UPSERT_DAY') {
@@ -367,7 +380,12 @@ async function pullCollection(cloudRows, localById, options) {
     const payload = row.payload;
     if (!id || !payload) continue;
     const tombstone = findTombstoneForEntity(options.tombstones, options.entityType, payload, id);
-    if (tombstone && compareIso(getLocalTimestamp(tombstone), row.updated_at) >= 0) continue;
+    if (tombstone && compareIso(getLocalTimestamp(tombstone), row.updated_at) >= 0) {
+      if (options.entityType === 'TRIP_DAY') {
+        console.log('[TM3 DELETE_TRIP_DAY] TripDay omitido por tombstone en pull', { TripDayID: id });
+      }
+      continue;
+    }
     if (options.entityType === 'ITEM' && isDeletedItem(payload)) {
       await deleteItem(id).catch(() => {});
       count += 1;
@@ -508,12 +526,14 @@ function findTombstoneForEntity(tombstones, type, entity, fallbackId = '') {
 
 function getDeletionIdentityKeys(type, tombstone) {
   if (type === 'ITEM') return getItemIdentityKeys(tombstone);
+  if (type === 'TRIP_DAY') return getTripDayIdentityKeys(tombstone);
   const id = tombstone.EntityId || tombstone.EntityID || tombstone.entity_id;
   return id ? [tombstoneKey(type, `id:${id}`)] : [];
 }
 
 function getEntityIdentityKeys(type, entity, fallbackId = '') {
   if (type === 'ITEM') return getItemIdentityKeys({ ...entity, ItemID: entity?.ItemID || fallbackId });
+  if (type === 'TRIP_DAY') return getTripDayIdentityKeys({ ...entity, TripDayID: entity?.TripDayID || entity?.DayID || fallbackId });
   const id = entity?.EntityId || entity?.EntityID || entity?.entity_id || fallbackId;
   return id ? [tombstoneKey(type, `id:${id}`)] : [];
 }
@@ -529,6 +549,17 @@ function getItemIdentityKeys(item) {
   const date = item.DayDate || item.StartDate || item.day_date || '';
   const title = normalizeIdentityText(item.Title || item.title);
   if (tripId && date && title) keys.add(tombstoneKey('ITEM', `natural:${tripId}:${date}:${title}`));
+  return [...keys];
+}
+
+function getTripDayIdentityKeys(day) {
+  const keys = new Set();
+  [day.TripDayID, day.DayID, day.EntityId, day.EntityID, day.entity_id].filter(Boolean).forEach(value => {
+    keys.add(tombstoneKey('TRIP_DAY', `id:${String(value)}`));
+  });
+  const tripId = day.TripID || day.trip_id || '';
+  const date = day.DayDate || day.Date || day.day_date || '';
+  if (tripId && date) keys.add(tombstoneKey('TRIP_DAY', `natural:${tripId}:${date}`));
   return [...keys];
 }
 

@@ -411,7 +411,11 @@ export async function getTripDays(TripID) {
     const transaction = db.transaction(STORE_TRIP_DAYS, 'readonly');
     const store = transaction.objectStore(STORE_TRIP_DAYS);
     const request = TripID ? store.index('TripID').getAll(TripID) : store.getAll();
-    request.onsuccess = () => resolve(dedupeTripDays(request.result).sort((a, b) => (a.Date || a.DayDate || '').localeCompare(b.Date || b.DayDate || '') || Number(a.DayOrder || 0) - Number(b.DayOrder || 0)));
+    request.onsuccess = async () => {
+      const tombstones = await getDeletionQueue().catch(() => []);
+      const filtered = dedupeTripDays(request.result).filter(day => !isDeletedTripDay(day, tombstones));
+      resolve(filtered.sort((a, b) => (a.Date || a.DayDate || '').localeCompare(b.Date || b.DayDate || '') || Number(a.DayOrder || 0) - Number(b.DayOrder || 0)));
+    };
     request.onerror = () => reject(request.error);
   });
 }
@@ -472,16 +476,10 @@ export async function deleteTripDay(TripDayID) {
   const db = await openDatabase();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(STORE_TRIP_DAYS, 'readwrite');
-    const store = transaction.objectStore(STORE_TRIP_DAYS);
-    const getRequest = store.get(TripDayID);
-    getRequest.onsuccess = async () => {
-      const existing = getRequest.result || { TripDayID };
-      await enqueueSyncOperationFromRecord('UPSERT_DAY', 'day', TripDayID, { ...existing, _deleted: true });
-      const request = store.delete(TripDayID);
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
-    };
-    getRequest.onerror = () => reject(getRequest.error);
+    const request = transaction.objectStore(STORE_TRIP_DAYS).delete(TripDayID);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error || request.error);
+    transaction.onabort = () => reject(transaction.error || request.error);
   });
 }
 
@@ -595,6 +593,7 @@ export async function migrateLegacyTravelData(seed) {
     for (const day of seed.tripDays) {
       const existing = existingById.get(day.TripDayID) || existingByDate.get(getTripDayDateKey({ ...day, TripID: day.TripID || seed.trip.TripID }));
       if (existing) continue;
+      if (await isSeedTripDayDeleted(day, seed.trip.TripID)) continue;
       await saveTripDay({
         ...day,
         CreatedAt: now,
@@ -613,4 +612,28 @@ export async function migrateLegacyTravelData(seed) {
   } finally {
     suppressSyncQueueWrites = previousSuppression;
   }
+}
+
+async function isSeedTripDayDeleted(day, tripId) {
+  const tombstones = await getDeletionQueue().catch(() => []);
+  return isDeletedTripDay({ ...day, TripID: day.TripID || tripId }, tombstones);
+}
+
+function isDeletedTripDay(day, tombstones = []) {
+  if (!day) return false;
+  const tripDayId = day.TripDayID || day.DayID || '';
+  const tripId = day.TripID || '';
+  const date = day.Date || day.DayDate || '';
+  return tombstones.some(tombstone => {
+    if ((tombstone.EntityType || tombstone.entity_type) !== 'TRIP_DAY') return false;
+    const tombstoneId = tombstone.EntityId || tombstone.EntityID || tombstone.entity_id || '';
+    const tombstoneTripDayId = tombstone.TripDayID || tombstone.DayID || tombstoneId;
+    const tombstoneTripId = tombstone.TripID || tombstone.trip_id || '';
+    const tombstoneDate = tombstone.DayDate || tombstone.day_date || tombstone.Date || '';
+    return Boolean(
+      (tripDayId && tombstoneTripDayId && tripDayId === tombstoneTripDayId) ||
+      (tripDayId && tombstoneId && tripDayId === tombstoneId) ||
+      (tripId && date && tombstoneTripId === tripId && tombstoneDate === date)
+    );
+  });
 }
