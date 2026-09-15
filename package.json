@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "start": "npx http-server ./public -c-1 -p 5003",
+    "mock:server": "node tests/mock-server/server.mjs",
     "test:e2e": "playwright test",
     "test:smoke": "playwright test tests/agenda-viajera.spec.js --grep \"inicia|navega\""
   },
