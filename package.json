@@ -5,7 +5,7 @@
   "scripts": {
     "start": "npx http-server ./public -c-1 -p 5003",
     "test:e2e": "playwright test",
-    "test:smoke": "playwright test tests/agenda-viajera.spec.js tests/core-scenarios.spec.js --grep \"01 boot|02 console clean|03 navigation\""
+    "test:smoke": "playwright test tests/agenda-viajera.spec.js --grep \"inicia|navega\""
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0"
