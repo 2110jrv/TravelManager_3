@@ -1,4 +1,4 @@
-const CACHE_NAME = 'travelmanager3-cache-v36';
+const CACHE_NAME = 'agenda-viajera-shell-v1';
 const TILE_CACHE_NAME = 'travelmanager3-tiles-v1';
 const APP_SCOPE = new URL('./', self.location.href).href;
 const SUPABASE_HOST = 'cslludzuejkhsydqiabx.supabase.co';
@@ -16,6 +16,7 @@ const ASSET_PATHS = [
   'assets/tm3-favicon-16.png',
   'styles/base.css',
   'styles/layout.css',
+  'styles/agenda.css',
   'vendor/leaflet/leaflet.css',
   'vendor/leaflet/leaflet.js',
   'vendor/leaflet/images/layers-2x.png',
@@ -23,7 +24,13 @@ const ASSET_PATHS = [
   'vendor/leaflet/images/marker-icon-2x.png',
   'vendor/leaflet/images/marker-icon.png',
   'vendor/leaflet/images/marker-shadow.png',
-  'src/app2.js',
+  'src/app/main.js',
+  'src/models/seed.js',
+  'src/db/localRepository.js',
+  'src/auth/permissions.js',
+  'src/services/audit.js',
+  'src/services/timeline.js',
+  'src/sync/foundation.js',
   'src/supabaseClient.js',
   'src/syncSupabase.js',
   'src/db.js',
