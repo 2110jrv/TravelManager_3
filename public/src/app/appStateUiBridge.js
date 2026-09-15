@@ -1,0 +1,2 @@
+import {appState,subscribeAppState} from './appState.js';
+subscribeAppState(state=>{document.querySelectorAll('.sync').forEach(node=>{node.textContent=navigator.onLine?`● En línea · ${state.pendingOperations||0} cambios pendientes`:`● Sin conexión · ${state.pendingOperations||0} cambios pendientes`});document.querySelectorAll('[data-pending-count]').forEach(node=>{node.textContent=String(state.pendingOperations||0)})});
