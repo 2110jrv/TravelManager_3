@@ -1,0 +1,2 @@
+export const appState={currentUser:null,activeTrip:null,device:null,remoteStatus:'offline',pendingOperations:0,devices:[],restoreRequests:[],conflicts:[],documents:[],agenda:[],ideas:[],messages:[]};
+const listeners=new Set();export const subscribeAppState=listener=>{listeners.add(listener);return()=>listeners.delete(listener)};export function patchAppState(patch){Object.assign(appState,patch);listeners.forEach(listener=>listener(appState));return appState}
