@@ -1,0 +1,3 @@
+export const ChangeOperation={UPSERT:'UPSERT',DELETE:'DELETE'};
+export function mergeRecords(base,left,right){const result={...base},conflicts=[];for(const key of new Set([...Object.keys(left),...Object.keys(right)])){if(left[key]===right[key])result[key]=left[key];else if(left[key]===base[key])result[key]=right[key];else if(right[key]===base[key])result[key]=left[key];else conflicts.push({field:key,left:left[key],right:right[key]});}return{result,conflicts};}
+export function createTombstone(record,deviceId){return{recordId:record.id,deletedAt:new Date().toISOString(),deletedByDevice:deviceId,version:(record.version||0)+1};}

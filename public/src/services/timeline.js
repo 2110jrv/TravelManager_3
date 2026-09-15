@@ -1,0 +1,3 @@
+export const GAP_THRESHOLDS={short:45};
+export function analyzeDay(items){const sorted=items.filter(x=>x.status!=='IDEA').filter(x=>x.startTime||x.endTime).sort((a,b)=>`${a.date||''}${a.startTime||''}`.localeCompare(`${b.date||''}${b.startTime||''}`));return sorted.slice(1).map((next,i)=>{const prev=sorted[i];const end=minutes(prev.endTime),start=minutes(next.startTime);if(end===null||start===null)return{type:'UNKNOWN',from:prev.id,to:next.id};const gap=start-end;return{type:gap<0?'OVERLAP':gap<GAP_THRESHOLDS.short?'SHORT_WARNING':'NORMAL',minutes:gap,from:prev.id,to:next.id};});}
+const minutes=t=>{if(!t)return null;const [h,m]=t.split(':').map(Number);return Number.isFinite(h)&&Number.isFinite(m)?h*60+m:null;};
