@@ -1,4 +1,5 @@
 import {test,expect} from '@playwright/test';import {analyzeDay} from '../public/src/services/timeline.js';import {audit} from '../public/src/services/audit.js';import {mergeRecords,createTombstone} from '../public/src/sync/foundation.js';import {MockRemoteSyncAdapter} from '../public/src/services/remoteSyncAdapter.js';import {calculateTripBudget} from '../public/src/services/budget.js';
+test.beforeEach(async()=>{await fetch('http://127.0.0.1:5055/reset',{method:'POST'})});
 test('timeline normal gap',()=>expect(analyzeDay([{id:'a',date:'2026-01-01',startTime:'09:00',endTime:'10:00'},{id:'b',date:'2026-01-01',startTime:'11:00',endTime:'12:00'}])[0].type).toBe('NORMAL'));
 test('timeline short gap',()=>expect(analyzeDay([{id:'a',date:'2026-01-01',startTime:'09:00',endTime:'10:00'},{id:'b',date:'2026-01-01',startTime:'10:20',endTime:'12:00'}])[0].type).toBe('SHORT_WARNING'));
 test('timeline overlap',()=>expect(analyzeDay([{id:'a',date:'2026-01-01',startTime:'09:00',endTime:'11:00'},{id:'b',date:'2026-01-01',startTime:'10:00',endTime:'12:00'}])[0].type).toBe('OVERLAP'));
@@ -21,8 +22,8 @@ test('merge base local unchanged',()=>expect(mergeRecords({a:1,b:1},{a:2,b:1},{a
 test('merge reports local and remote values',()=>expect(mergeRecords({a:1},{a:2},{a:3}).conflicts[0]).toMatchObject({left:2,right:3}));
 test('tombstone preserves record identity',()=>expect(createTombstone({id:'x',version:2},'device-a')).toMatchObject({recordId:'x',deletedByDevice:'device-a',version:3}));
 test('remote adapter pushes operations',async()=>{const r=new MockRemoteSyncAdapter();await r.pushOperations([{operationId:'1'}]);expect((await r.pullChanges())).toHaveLength(1)});
-test('remote adapter registers device',async()=>{const r=new MockRemoteSyncAdapter();await r.registerDevice({deviceId:'a'});expect(r.devices.has('a')).toBe(true)});
-test('remote adapter revokes device',async()=>{const r=new MockRemoteSyncAdapter();await r.registerDevice({deviceId:'a',state:'TRUSTED'});await r.revokeDevice('a');expect(r.devices.get('a').state).toBe('REVOKED')});
+test('remote adapter registers device',async()=>{const r=new MockRemoteSyncAdapter();await r.registerDevice({deviceId:'a'});expect((await r.getDevice('a')).deviceId).toBe('a')});
+test('remote adapter revokes device',async()=>{const r=new MockRemoteSyncAdapter();await r.registerDevice({deviceId:'a',state:'TRUSTED'});await r.updateDevice('a',{state:'REVOKED'});expect((await r.getDevice('a')).state).toBe('REVOKED')});
 test('remote adapter conflict resolution',async()=>{const r=new MockRemoteSyncAdapter();expect((await r.submitConflictResolution({recordId:'x'})).status).toBe('RESOLVED')});
 test('budget excludes cancelled refunded',()=>expect(calculateTripBudget('t',[{tripId:'t',status:'CANCELLED',refundStatus:'REFUNDED',amount:12}]).plannedExact).toBe(0));
 test('budget includes pending refund',()=>expect(calculateTripBudget('t',[{tripId:'t',status:'CANCELLED',refundStatus:'PENDING',amount:12}]).plannedExact).toBe(12));
