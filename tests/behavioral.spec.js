@@ -2,7 +2,7 @@ import {test,expect} from '@playwright/test';
 import {calculateTripBudget} from '../public/src/services/budget.js';
 import {mergeRecords} from '../public/src/sync/foundation.js';
 import {audit} from '../public/src/services/audit.js';
-test.beforeEach(async({page})=>{await page.goto('/');await page.evaluate(()=>new Promise(resolve=>{localStorage.clear();const r=indexedDB.deleteDatabase('agenda-viajera-core');r.onsuccess=r.onerror=r.onblocked=()=>resolve()}));await page.reload();});
+test.beforeEach(async({page})=>{await page.goto('/');await page.evaluate(()=>localStorage.clear());await page.reload();});
 const agenda=async p=>{await p.getByRole('button',{name:'Agenda'}).click();await expect(p.locator('h2').filter({hasText:'Agenda'})).toBeVisible()};const dialog=(p,v)=>p.once('dialog',d=>d.accept(v));
 test('create persists in IndexedDB after reload',async({page})=>{await agenda(page);dialog(page,'New entry');await page.getByRole('button',{name:'+ Nuevo'}).click();await expect(page.getByText('New entry')).toBeVisible();await page.reload();await agenda(page);await expect(page.getByText('New entry')).toBeVisible()});
 test('create uses stable UUID',async({page})=>{await agenda(page);dialog(page,'UUID entry');await page.getByRole('button',{name:'+ Nuevo'}).click();expect(await page.locator('.item').filter({hasText:'UUID entry'}).getAttribute('data-id')).toMatch(/^(local-|[0-9a-f-]{20,})/) });
