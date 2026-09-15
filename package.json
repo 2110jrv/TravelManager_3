@@ -3,6 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "start": "npx http-server ./public -c-1 -p 5003"
+    "start": "npx http-server ./public -c-1 -p 5003",
+    "test:e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0"
   }
 }
