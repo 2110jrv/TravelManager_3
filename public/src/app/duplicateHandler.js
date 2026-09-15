@@ -1,0 +1,1 @@
+export function duplicateEntry(repository,entry,collection='items'){const copy={...entry,id:undefined,version:undefined,deletedAt:null,createdAt:undefined,updatedAt:undefined,title:`${entry.title} (copia)`};return repository.addItem(copy,collection);}
