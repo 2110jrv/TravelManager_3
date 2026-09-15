@@ -1,0 +1,3 @@
+import {DB_NAME,DB_VERSION,STORES} from './localRepository.js';
+export const openCoreDatabase=()=>new Promise((resolve,reject)=>{const request=indexedDB.open(DB_NAME,Math.max(DB_VERSION,3));request.onupgradeneeded=()=>{const db=request.result;for(const name of STORES)if(!db.objectStoreNames.contains(name))db.createObjectStore(name,{keyPath:'id'});};request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});
+export const withTransaction=(db,stores,mode,work)=>new Promise((resolve,reject)=>{const tx=db.transaction(stores,mode);let result;try{result=work(tx)}catch(e){reject(e);return}tx.oncomplete=()=>resolve(result);tx.onerror=()=>reject(tx.error);});

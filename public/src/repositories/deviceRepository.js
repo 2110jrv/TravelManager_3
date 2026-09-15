@@ -1,0 +1,1 @@
+export const createDeviceRepository=storage=>({current:async()=>({deviceId:storage.getItem('agenda-viajera.device'),state:storage.getItem('agenda-viajera.deviceState')||'TRUSTED'}),purgeSensitive:async()=>{}});

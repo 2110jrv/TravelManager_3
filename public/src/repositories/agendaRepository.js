@@ -1,0 +1,1 @@
+export const createAgendaRepository=local=>({list:()=>local.snapshot().items,create:e=>local.addItem(e,'items'),update:(id,p)=>local.updateItem(id,p,'items'),moveToIdeas:id=>local.move(id,'items','ideas'),cancel:(id,p)=>local.updateItem(id,{...p,status:'CANCELLED'},'items')});

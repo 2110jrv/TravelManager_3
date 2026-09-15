@@ -1,0 +1,1 @@
+export async function securityBootGate(deviceRepository){const device=await deviceRepository.current();if(!device)return{allowed:true,device:null};if(['REVOKED','BLOCKED','PURGE_PENDING'].includes(device.state)){await deviceRepository.purgeSensitive(device.deviceId);return{allowed:false,device:{...device,state:'REVOKED'}}}return{allowed:true,device};}

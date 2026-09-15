@@ -1,0 +1,1 @@
+export const createSyncRepository=()=>({operations:new Map(),add(op){if(this.operations.has(op.operationId))return false;this.operations.set(op.operationId,op);return true},list(){return [...this.operations.values()]}});

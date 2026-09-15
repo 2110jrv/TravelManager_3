@@ -1,5 +1,5 @@
 import { seed } from '../models/seed.js';
-export const DB_NAME='agenda-viajera-core'; export const DB_VERSION=2;
+export const DB_NAME='agenda-viajera-core'; export const DB_VERSION=3;
 export const STORES=['trips','users','tripMemberships','devices','agendaEntries','travelers','reservations','documents','deviceDocumentCache','restoreRequests','conversations','messages','changeOperations','recordVersions','conflicts','tombstones','auditState'];
 const KEY='root';const clone=v=>JSON.parse(JSON.stringify(v));
 function openDB(){return new Promise((resolve,reject)=>{const request=indexedDB.open(DB_NAME,DB_VERSION);request.onupgradeneeded=()=>{const db=request.result;for(const name of STORES)if(!db.objectStoreNames.contains(name))db.createObjectStore(name,{keyPath:name==='auditState'?'id':'id'});};request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});}
