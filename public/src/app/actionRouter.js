@@ -1,4 +1,4 @@
-export function createActionRouter({agenda,navigation,access,render,admin,restore}) {
+export function createActionRouter({agenda,navigation,access,render,admin,restore,login}) {
   return {
     async route(action,element) {
       const id=element.dataset.entryId;
@@ -17,7 +17,8 @@ export function createActionRouter({agenda,navigation,access,render,admin,restor
         case 'device-kill':
         case 'device-revoke': access.revoke(); return render();
         case 'restore': return restore();
-        default: if(action.startsWith('device-')) return admin(element);
+        case 'session-login': return login?.();
+        default: if(action.startsWith('device-')||action.startsWith('restore-')) return admin(element);
       }
     }
   };
