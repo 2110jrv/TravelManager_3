@@ -1,0 +1,24 @@
+export function createActionRouter({agenda,navigation,access,render,admin,restore}) {
+  return {
+    async route(action,element) {
+      const id=element.dataset.entryId;
+      switch(action) {
+        case 'menu': return navigation.toggleMenu();
+        case 'agenda-create': case 'new': return agenda.create(element.dataset.idea==='true');
+        case 'agenda-edit': case 'edit': return agenda.edit(id);
+        case 'agenda-detail': case 'detail': return agenda.detail(id);
+        case 'agenda-duplicate': case 'duplicate': return agenda.duplicate(id,element.dataset.idea==='true');
+        case 'agenda-move-to-idea': case 'move': return agenda.move(id,element.dataset.idea==='true');
+        case 'agenda-move-to-agenda': return agenda.move(id,true);
+        case 'agenda-cancel': case 'cancel': return agenda.cancel(id);
+        case 'agenda-delete': return agenda.remove(id);
+        case 'document-cache': return alert('Documento cacheado para este dispositivo');
+        case 'document-purge': return alert('Copia offline marcada PURGE_PENDING');
+        case 'device-kill':
+        case 'device-revoke': access.revoke(); return render();
+        case 'restore': return restore();
+        default: if(action.startsWith('device-')) return admin(element);
+      }
+    }
+  };
+}

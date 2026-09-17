@@ -1,0 +1,1 @@
+export function createNavigationController({getState,setState,onChanged}) { return { navigate(view){setState({view,menu:false});onChanged?.()}, toggleMenu(){setState({menu:!getState().menu});onChanged?.()} }; }
