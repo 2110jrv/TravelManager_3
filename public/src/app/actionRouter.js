@@ -1,8 +1,13 @@
-export function createActionRouter({agenda,navigation,access,render,admin,restore,login}) {
+export function createActionRouter({agenda,navigation,access,render,admin,restore,login,chat}) {
+  chat=chat||globalThis.__tm3Chat;
   return {
     async route(action,element) {
       const id=element.dataset.entryId;
       switch(action) {
+        case 'chat-open-general': return chat.openConversation(`trip:trip-italy-2026`);
+        case 'chat-open-direct': return await chat.openDirect(element.dataset.userId||'b');
+        case 'chat-send': return chat.sendMessage(new FormData(element).get('message'));
+        case 'chat-retry': return chat.syncPendingMessages();
         case 'menu': return navigation.toggleMenu();
         case 'agenda-create': case 'new': return agenda.create(element.dataset.idea==='true');
         case 'agenda-edit': case 'edit': return agenda.edit(id);
