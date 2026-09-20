@@ -23,7 +23,7 @@ export function createActionRouter({agenda,navigation,access,render,admin,restor
         case 'device-revoke': access.revoke(); return render();
         case 'restore': return restore();
         case 'session-login': return login?.();
-        default: if(action.startsWith('device-')||action.startsWith('restore-')) return admin(element);
+        default: if(action.startsWith('device-')||action.startsWith('restore-')||action.startsWith('conflict-')) return admin(element);
       }
     }
   };

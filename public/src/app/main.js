@@ -3,7 +3,7 @@ import {createAccess} from '../auth/permissions.js';
 import {audit} from '../services/audit.js';
 import {appState,patchAppState,subscribeAppState} from './appState.js';
 import {createAgendaController} from '../controllers/agendaController.js';
-import {loadAdminDevices,handleAdminDeviceAction} from './adminDeviceController.js';
+import {loadAdminDevices,handleAdminAction} from './adminDeviceController.js';
 import {createActionRouter} from './actionRouter.js';
 import {renderHome} from './render/renderHome.js';
 import {renderAgenda} from './render/renderAgenda.js';
@@ -30,7 +30,7 @@ function render(){access.refresh();if(['REVOKED','BLOCKED'].includes(access.devi
 function renderChangedState(next,prev){if(next.pendingOperations!==prev.pendingOperations)document.querySelectorAll('[data-pending-count]').forEach(x=>x.textContent=String(next.pendingOperations||0));render();if(view==='chat')app.innerHTML=renderChat(snapshot());}
 const navigation={navigate(next){view=next;menu=false;if(next==='admin')adminLoaded=false;render()},toggleMenu(){menu=!menu;render()}};
 const agenda=createAgendaController({repository:repo,access,onChanged:()=>render()});
-const router=createActionRouter({agenda,navigation,access,render,admin:handleAdminDeviceAction,restore:async()=>{const reason=prompt('Nota explicativa obligatoria');if(!reason||reason.trim().length<10)return alert('La nota debe tener al menos 10 caracteres');try{await new MockRemoteSyncAdapter().createRestoreRequest({deviceId:access.deviceId,reason});restoreRequested=true;alert('Solicitud enviada');render()}catch(error){console.error('[TM3 restore]',error);alert('No se pudo enviar la solicitud')}},login:()=>{sessionClosed=false;render()}});
+const router=createActionRouter({agenda,navigation,access,render,admin:handleAdminAction,restore:async()=>{const reason=prompt('Nota explicativa obligatoria');if(!reason||reason.trim().length<10)return alert('La nota debe tener al menos 10 caracteres');try{await new MockRemoteSyncAdapter().createRestoreRequest({deviceId:access.deviceId,reason});restoreRequested=true;render()}catch(error){console.error('[TM3 restore]',error);alert('No se pudo enviar la solicitud')}},login:()=>{sessionClosed=false;render()}});
 document.addEventListener('click',async event=>{const target=event.target.closest('[data-action]');if(!target)return;try{await router.route(target.dataset.action,target)}catch(error){console.error('[TM3 action]',error);alert('No se pudo completar la acción')}});
 document.addEventListener('click',event=>{const target=event.target.closest('[data-view]');if(target)navigation.navigate(target.dataset.view)});
 document.addEventListener('click',event=>{const target=event.target.closest('[data-view="chat"]');if(target){chat.openConversation('trip:trip-italy-2026').then(()=>chat.pullMessages()).then(()=>{app.innerHTML=renderChat(snapshot())})}});

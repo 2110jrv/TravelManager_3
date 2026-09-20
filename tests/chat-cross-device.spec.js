@@ -3,7 +3,7 @@ import {test,expect} from '@playwright/test';
 const trip='trip-chat-e2e';
 async function reset(request){await request.post('http://127.0.0.1:5055/reset');}
 async function context(browser,userId,userName,deviceId){return browser.newContext({storageState:{origins:[{origin:'http://127.0.0.1:5003',localStorage:[{name:'agenda-viajera.user',value:userId},{name:'agenda-viajera.userName',value:userName},{name:'agenda-viajera.device',value:deviceId},{name:'agenda-viajera.deviceState',value:'TRUSTED'}]}]}})}
-async function openChat(page){await page.goto('/');await page.getByRole('button',{name:'Chat'}).click();await expect(page.getByRole('heading',{name:'Chat del viaje'})).toBeVisible();}
+async function openChat(page){await page.goto('/');await page.getByRole('button',{name:'Chat'}).click();await expect(page.getByRole('heading',{name:'Chat del viaje'})).toBeVisible();await expect(page.locator('[data-chat-ready="true"]')).toBeVisible();}
 async function openDirect(page){await page.getByRole('button',{name:'Directos'}).click();await expect(page.locator('[data-chat-ready="true"]')).toBeVisible();}
 async function send(page,text,count){const input=page.getByLabel('Mensaje');await expect(input).toBeVisible();await input.fill(text);await page.getByRole('button',{name:'Enviar'}).click();await expect(page.locator('.chat-bubble')).toHaveCount(count);await expect(input).toBeVisible();}
 async function pull(page){await page.reload();await page.getByRole('button',{name:'Chat'}).click();}
