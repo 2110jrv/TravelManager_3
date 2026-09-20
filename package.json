@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "build": "node scripts/validate-build.mjs",
     "start": "npx http-server ./public -c-1 -p 5003",
     "mock:server": "node tests/mock-server/server.mjs",
     "test:e2e": "playwright test",

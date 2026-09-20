@@ -8,6 +8,8 @@ export function createActionRouter({agenda,navigation,access,render,admin,restor
         case 'chat-open-direct': return await chat.openDirect(element.dataset.userId||'b');
         case 'chat-send': return chat.sendMessage(new FormData(element).get('message'));
         case 'chat-retry': return chat.syncPendingMessages();
+        case 'budget-jump': return navigation.navigateToEntry(element.dataset.entryId);
+        case 'audit-jump': return navigation.navigateToEntry(element.dataset.entryId);
         case 'menu': return navigation.toggleMenu();
         case 'agenda-create': case 'new': return agenda.create(element.dataset.idea==='true');
         case 'agenda-edit': case 'edit': return agenda.edit(id);
