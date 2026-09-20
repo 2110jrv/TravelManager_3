@@ -10,7 +10,7 @@ import {renderAgenda} from './render/renderAgenda.js';
 import {renderBudget} from './render/renderBudget.js';
 import {renderDocuments} from './render/renderDocuments.js';
 import {renderAdmin} from './render/renderAdmin.js';
-import {initRemoteRuntime} from '../services/remoteRuntime.js';
+import {initRemoteRuntime,pullRemoteChanges} from '../services/remoteRuntime.js';
 import {flushPendingOperations} from '../controllers/mutationController.js';
 import {platformRepository} from '../services/localPlatform.js';
 import {MockRemoteSyncAdapter} from '../services/remoteSyncAdapter.js';
@@ -38,5 +38,5 @@ document.addEventListener('submit',async event=>{const target=event.target.close
 document.addEventListener('input',event=>{if(event.target.classList.contains('search')){filter=event.target.value;render()}});
 let press;document.addEventListener('pointerdown',event=>{const item=event.target.closest('.item');if(item)press=setTimeout(()=>agenda.edit(item.dataset.entryId),550)});document.addEventListener('pointerup',()=>clearTimeout(press));document.addEventListener('contextmenu',event=>{const item=event.target.closest('.item');if(item){event.preventDefault();agenda.edit(item.dataset.entryId)}});
 subscribeAppState(next=>{const prev=previousState;previousState={...next};renderChangedState(next,prev)});
-window.addEventListener('online',()=>{patchAppState({remoteStatus:'online'});flushPendingOperations().catch(error=>console.warn('Flush unavailable',error.message))});window.addEventListener('offline',()=>patchAppState({remoteStatus:'offline'}));window.addEventListener('tm3-device-locked',()=>render());window.addEventListener('tm3-remote-command',event=>{if(event.detail?.command==='CLOSE_SESSION')sessionClosed=true;render()});
+window.addEventListener('online',()=>{patchAppState({remoteStatus:'online'});flushPendingOperations().then(()=>pullRemoteChanges()).catch(error=>console.warn('Sync unavailable',error.message))});window.addEventListener('offline',()=>patchAppState({remoteStatus:'offline'}));window.addEventListener('tm3-canonical-pulled',async()=>{await repo.hydrate();render()});window.addEventListener('tm3-device-locked',()=>render());window.addEventListener('tm3-remote-command',event=>{if(event.detail?.command==='CLOSE_SESSION')sessionClosed=true;render()});
 await repo.ready;const platform=await platformRepository();const pending=(await platform.all('changeOperations')).filter(x=>x.status==='PENDING').length;patchAppState({agenda:repo.snapshot().items,ideas:repo.snapshot().ideas,pendingOperations:pending,remoteStatus:navigator.onLine?'online':'offline'});render();initRemoteRuntime().catch(error=>console.warn('Remote runtime unavailable',error.message));
