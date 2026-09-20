@@ -5,6 +5,8 @@ const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_8k8xhMZtkay30ZB45aPjGw_4u69Dp0U
 // local-only IndexedDB mode keeps working even when the network is unavailable.
 const SUPABASE_ESM_URL = 'https://esm.sh/@supabase/supabase-js@2.45.4';
 
+export { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY };
+
 let clientPromise = null;
 
 async function createBrowserClient() {

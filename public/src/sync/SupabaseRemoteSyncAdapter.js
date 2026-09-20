@@ -1,0 +1,32 @@
+import {getSupabaseClient} from '../supabaseClient.js';
+
+const tableNames={devices:'av_devices',commands:'av_device_commands',restores:'av_restore_requests',records:'av_records',conflicts:'av_conflicts',messages:'av_messages'};
+const unwrap=async promise=>{const {data,error}=await promise;if(error)throw error;return data};
+const first=data=>Array.isArray(data)?data[0]||null:data;
+const toDeviceRow=(d={})=>({device_id:d.deviceId,app_installation_id:d.appInstallationId||null,user_id:d.userId||null,state:d.state||'NEW',name:d.name||null,last_seen_at:d.lastSeenAt||null,trusted_at:d.trustedAt||null,revoked_at:d.revokedAt||null,purge_requested_at:d.purgeRequestedAt||null,metadata:d.metadata||{}});
+const fromDeviceRow=d=>d&&({...d,deviceId:d.device_id,appInstallationId:d.app_installation_id,userId:d.user_id,lastSeenAt:d.last_seen_at,trustedAt:d.trusted_at,revokedAt:d.revoked_at,purgeRequestedAt:d.purge_requested_at});
+const fromRecordRow=r=>r&&({...r,recordId:r.record_id,tripId:r.trip_id,recordType:r.record_type,updatedAt:r.updated_at,deletedAt:r.deleted_at,updatedByUser:r.updated_by_user,updatedByDevice:r.updated_by_device});
+const fromConflictRow=c=>c&&({...c,conflictId:c.conflict_id,tripId:c.trip_id,recordId:c.record_id,recordType:c.record_type,baseValue:c.base_value,currentValue:c.current_value,incomingValue:c.incoming_value});
+const fromMessageRow=m=>m&&({...m,messageId:m.message_id,tripId:m.trip_id,conversationId:m.conversation_id,conversationType:m.conversation_type,senderUserId:m.sender_user_id,recipientUserId:m.recipient_user_id,localCreatedAt:m.local_created_at,serverCreatedAt:m.server_created_at});
+
+export class SupabaseRemoteSyncAdapter{
+  constructor({client=null,userId=null,deviceId=null}={}){this.client=client;this.userId=userId;this.deviceId=deviceId}
+  async db(){return this.client||=await getSupabaseClient()}
+  async registerDevice(device){const c=await this.db();return fromDeviceRow(first(await unwrap(c.from(tableNames.devices).upsert(toDeviceRow({...device,deviceId:device.deviceId||this.deviceId}),{onConflict:'device_id'}).select())))}
+  async getDevice(deviceId){const c=await this.db();return fromDeviceRow(first(await unwrap(c.from(tableNames.devices).select('*').eq('device_id',deviceId).maybeSingle())))}
+  async listDevices(){const c=await this.db();return (await unwrap(c.from(tableNames.devices).select('*').order('created_at'))).map(fromDeviceRow)}
+  async updateDevice(deviceId,changes){const c=await this.db();const row=toDeviceRow({...changes,deviceId});return fromDeviceRow(first(await unwrap(c.from(tableNames.devices).update(row).eq('device_id',deviceId).select())))}
+  async getDeviceCommands(deviceId){const c=await this.db();return unwrap(c.from(tableNames.commands).select('*').eq('device_id',deviceId).eq('status','PENDING').order('created_at'))}
+  async completeDeviceCommand(id,result={}){const c=await this.db();return first(await unwrap(c.from(tableNames.commands).update({status:'COMPLETED',completed_at:new Date().toISOString(),result}).eq('id',id).select()))}
+  async createRestoreRequest(input){const c=await this.db();return first(await unwrap(c.from(tableNames.restores).insert({device_id:input.deviceId||this.deviceId,user_id:input.userId||this.userId,reason:input.reason,status:'PENDING'}).select()))}
+  async listRestoreRequests(){const c=await this.db();return unwrap(c.from(tableNames.restores).select('*').order('created_at',{ascending:false}))}
+  async resolveRestoreRequest(id,patch){const c=await this.db();return first(await unwrap(c.from(tableNames.restores).update({...patch,resolved_at:new Date().toISOString(),resolved_by:patch.resolvedBy||this.userId}).eq('id',id).select()))}
+  async pushOperations(operations=[]){const c=await this.db();return Promise.all(operations.map(async operation=>{const data=await unwrap(c.rpc('av_apply_change_operation',{p_operation_id:operation.operationId,p_trip_id:operation.tripId,p_record_type:operation.recordType,p_record_id:operation.recordId,p_action:operation.action,p_base_version:operation.baseVersion||0,p_changes:operation.changes||{},p_user_id:operation.userId||this.userId,p_device_id:operation.deviceId||this.deviceId,p_created_at:operation.createdAt||new Date().toISOString()}));return first(data)}))}
+  async pullRecords({tripId,sinceVersion=0}={}){const c=await this.db();let q=c.from(tableNames.records).select('*').eq('trip_id',tripId);if(sinceVersion)q=q.gt('version',sinceVersion);return (await unwrap(q.order('version'))).map(fromRecordRow)}
+  async getRecord(recordId){const c=await this.db();return fromRecordRow(first(await unwrap(c.from(tableNames.records).select('*').eq('record_id',recordId).maybeSingle())))}
+  async listConflicts({tripId,status}={}){const c=await this.db();let q=c.from(tableNames.conflicts).select('*');if(tripId)q=q.eq('trip_id',tripId);if(status)q=q.eq('status',status);return (await unwrap(q.order('created_at',{ascending:false}))).map(fromConflictRow)}
+  async resolveConflict(input){const c=await this.db();return first(await unwrap(c.rpc('av_resolve_conflict',{p_conflict_id:input.conflictId,p_resolution_type:input.resolutionType,p_resolved_value:input.resolvedValue??null,p_resolved_by_user_id:input.resolverUserId||this.userId,p_resolved_by_device_id:input.resolverDeviceId||this.deviceId,p_resolution_note:input.resolutionNote||null})))}
+  async sendMessage(message){const c=await this.db();return fromMessageRow(first(await unwrap(c.from(tableNames.messages).upsert({message_id:message.messageId,trip_id:message.tripId,conversation_id:message.conversationId,conversation_type:message.conversationType,sender_user_id:message.senderUserId||this.userId,recipient_user_id:message.recipientUserId||null,text:message.text,local_created_at:message.localCreatedAt||new Date().toISOString()},{onConflict:'message_id'}).select())))}
+  async sendMessages(messages=[]){return Promise.all(messages.map(message=>this.sendMessage(message)))}
+  async listMessages({tripId,conversationId,userId}={}){const c=await this.db();let q=c.from(tableNames.messages).select('*');if(tripId)q=q.eq('trip_id',tripId);if(conversationId)q=q.eq('conversation_id',conversationId);if(userId)q=q.or(`sender_user_id.eq.${userId},recipient_user_id.eq.${userId}`);return (await unwrap(q.order('server_created_at'))).map(fromMessageRow)}
+}
