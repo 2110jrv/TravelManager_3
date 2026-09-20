@@ -115,7 +115,7 @@ create policy av_restore_owner_insert on public.av_restore_requests for insert w
 create policy av_restore_admin_update on public.av_restore_requests for update using (exists(select 1 from av_trip_memberships m where m.user_id=auth.uid() and m.role='ADMIN' and m.status='ACTIVE'));
 
 do $$ declare t text; begin
-  foreach t in array array['av_records','av_record_versions','av_change_operations','av_conflicts','av_messages','av_documents','av_device_document_cache_metadata','av_audit_issues'] loop
+  foreach t in array array['av_records','av_record_versions','av_change_operations','av_conflicts','av_messages','av_documents','av_audit_issues'] loop
     execute format('create policy %I on public.%I for select using (av_is_member(trip_id))',t||'_member_read',t);
   end loop;
 end $$;
@@ -125,7 +125,17 @@ create policy av_operations_member_write on public.av_change_operations for inse
 create policy av_conflicts_admin_write on public.av_conflicts for update using (av_is_admin(trip_id)) with check (av_is_admin(trip_id));
 create policy av_messages_member_insert on public.av_messages for insert with check (av_is_member(trip_id) and sender_user_id=auth.uid());
 create policy av_documents_write on public.av_documents for all using (av_can_write(trip_id)) with check (av_can_write(trip_id));
-create policy av_cache_write on public.av_device_document_cache_metadata for all using (device_id in (select device_id from av_devices where user_id=auth.uid()));
+create policy av_cache_member_read on public.av_device_document_cache_metadata for select using (
+  device_id in (select device_id from av_devices where user_id=auth.uid())
+  and exists (select 1 from av_documents d where d.document_id=av_device_document_cache_metadata.document_id and av_is_member(d.trip_id))
+);
+create policy av_cache_owner_write on public.av_device_document_cache_metadata for all using (
+  device_id in (select device_id from av_devices where user_id=auth.uid())
+  and exists (select 1 from av_documents d where d.document_id=av_device_document_cache_metadata.document_id and av_can_write(d.trip_id))
+) with check (
+  device_id in (select device_id from av_devices where user_id=auth.uid())
+  and exists (select 1 from av_documents d where d.document_id=av_device_document_cache_metadata.document_id and av_can_write(d.trip_id))
+);
 create policy av_audit_admin_write on public.av_audit_issues for all using (av_is_admin(trip_id)) with check (av_is_admin(trip_id));
 
 create or replace function public.av_apply_change_operation(p_operation_id uuid,p_trip_id uuid,p_record_type text,p_record_id uuid,p_action text,p_base_version bigint,p_changes jsonb,p_user_id uuid,p_device_id text,p_created_at timestamptz default now())
