@@ -9,6 +9,7 @@
     "test:e2e": "playwright test --grep-invert \"authenticated Supabase sandbox\"",
     "test:supabase": "playwright test tests/supabase-adapter.spec.js",
     "test:supabase:live": "playwright test tests/supabase-live.spec.js",
+    "test:italy:live": "playwright test tests/italy-live-ui.spec.js",
     "test:smoke": "playwright test tests/agenda-viajera.spec.js --grep \"inicia|navega\""
   },
   "devDependencies": {
