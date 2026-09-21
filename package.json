@@ -6,9 +6,9 @@
     "build": "node scripts/validate-build.mjs",
     "start": "npx http-server ./public -c-1 -p 5003",
     "mock:server": "node tests/mock-server/server.mjs",
-    "test:e2e": "playwright test",
+    "test:e2e": "playwright test --grep-invert \"authenticated Supabase sandbox\"",
     "test:supabase": "playwright test tests/supabase-adapter.spec.js",
-    "test:supabase": "playwright test tests/supabase-adapter.spec.js",
+    "test:supabase:live": "playwright test tests/supabase-live.spec.js",
     "test:smoke": "playwright test tests/agenda-viajera.spec.js --grep \"inicia|navega\""
   },
   "devDependencies": {
