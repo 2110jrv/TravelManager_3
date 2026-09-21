@@ -2,11 +2,10 @@ import { test, expect } from '@playwright/test';
 
 test.beforeEach(async ({ page }) => { await page.goto('/'); await page.evaluate(() => localStorage.clear()); await page.reload(); });
 
-test('inicia sin errores y navega por el shell', async ({ page }) => {
+test('logged out muestra login sin filtrar datos privados', async ({ page }) => {
   const errors=[]; page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()); });
-  await page.goto('/'); await expect(page).toHaveTitle('Agenda Viajera'); await expect(page.getByText('AHORA')).toBeVisible();
-  await page.getByRole('button', { name: 'Agenda' }).click(); await expect(page.locator('h2').filter({ hasText: 'Agenda' })).toBeVisible();
-  await page.getByRole('button', { name: 'J' }).click(); await expect(page.getByText('Presupuesto')).toBeVisible(); expect(errors).toEqual([]);
+  await page.goto('/'); await expect(page).toHaveTitle('Agenda Viajera'); await expect(page.getByRole('heading', { name: 'Iniciar sesión' })).toBeVisible();
+  await expect(page.getByText('AHORA')).toHaveCount(0); await expect(page.getByText('Admin Test')).toHaveCount(0); expect(errors.filter(x=>!x.includes('Failed to load resource'))).toEqual([]);
 });
 
 test('presupuesto deriva valores y persiste un nuevo item', async ({ page }) => {

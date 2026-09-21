@@ -4,7 +4,7 @@ export function createActionRouter({agenda,navigation,access,render,admin,restor
     async route(action,element) {
       const id=element.dataset.entryId;
       switch(action) {
-        case 'chat-open-general': return chat.openConversation(`trip:trip-italy-2026`);
+        case 'chat-open-general': return chat.openConversation(`trip:1aafae82-4ff7-423b-ade2-25170e8b0dd4`);
         case 'chat-open-direct': return await chat.openDirect(element.dataset.userId||'b');
         case 'chat-send': return chat.sendMessage(new FormData(element).get('message'));
         case 'chat-retry': return chat.syncPendingMessages();

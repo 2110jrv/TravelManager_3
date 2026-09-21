@@ -1,1 +1,1 @@
-export const createMembershipRepository=()=>({roleFor:(userId,tripId)=>userId==='jonathan'&&tripId==='trip-italy-2026'?'ADMIN':'VIEWER'});
+export const createMembershipRepository=()=>({roleFor:(userId,tripId)=>userId==='jonathan'&&tripId==='1aafae82-4ff7-423b-ade2-25170e8b0dd4'?'ADMIN':'VIEWER'});

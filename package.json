@@ -8,9 +8,10 @@
     "mock:server": "node tests/mock-server/server.mjs",
     "test:e2e": "playwright test --grep-invert \"authenticated Supabase sandbox\"",
     "test:supabase": "playwright test tests/supabase-adapter.spec.js",
+    "test:auth": "node --test tests/auth-boot-contract.test.mjs",
     "test:supabase:live": "playwright test tests/supabase-live.spec.js",
     "test:italy:live": "playwright test tests/italy-live-ui.spec.js",
-    "test:smoke": "playwright test tests/agenda-viajera.spec.js --grep \"inicia|navega\""
+    "test:smoke": "playwright test tests/agenda-viajera.spec.js --grep \"logged out|inicia|navega\""
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0"
