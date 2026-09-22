@@ -1,0 +1,5 @@
+import {platformRepository} from './localPlatform.js';
+const now=()=>new Date().toISOString();
+export async function listPhotos(){return (await platformRepository()).all('photos')}
+export async function savePhoto(input){const repo=await platformRepository();const externalUrl=input.externalUrl||null;const row={id:input.id||crypto.randomUUID(),tripId:input.tripId||'1aafae82-4ff7-423b-ade2-25170e8b0dd4',caption:String(input.caption||''),capturedAt:input.capturedAt||now(),place:String(input.place||''),agendaItemId:input.agendaItemId||null,uploader:input.uploader||localStorage.getItem('agenda-viajera.user')||'current-user',state:input.state||(externalUrl?'EXTERNAL_REF':'LOCAL_ONLY'),externalUrl,provider:input.provider||null,externalId:input.externalId||null,blob:input.blob||null,updatedAt:now()};await repo.put('photos',row);return row}
+export async function deletePhoto(id){const repo=await platformRepository();const row=await repo.read('photos',id);if(row)await repo.put('photos',{...row,blob:null,state:'DELETED',deletedAt:now(),updatedAt:now()});return row}
