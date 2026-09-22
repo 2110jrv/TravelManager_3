@@ -1,0 +1,5 @@
+export const QR_SOURCE_TYPES=Object.freeze(['CAMERA','MANUAL','IMPORTED']);
+export const QR_DYNAMIC_STATES=Object.freeze(['UNKNOWN','STATIC','DYNAMIC']);
+export function normalizeQr(value={},fallback={}){return{qrPayload:String(value.qrPayload??fallback.qrPayload??''),qrCapturedAt:value.qrCapturedAt??fallback.qrCapturedAt??null,qrSourceType:QR_SOURCE_TYPES.includes(value.qrSourceType)?value.qrSourceType:(fallback.qrSourceType||'UNKNOWN'),qrLabel:value.qrLabel??fallback.qrLabel??'',qrIsDynamic:QR_DYNAMIC_STATES.includes(value.qrIsDynamic)?value.qrIsDynamic:(fallback.qrIsDynamic||'UNKNOWN'),qrLastVerifiedAt:value.qrLastVerifiedAt??fallback.qrLastVerifiedAt??null}}
+export function hasQr(value){return Boolean(String(value?.qrPayload||''));}
+export function qrPatch(payload,sourceType='MANUAL',existing={}){const qr=normalizeQr(existing);return{qrPayload:String(payload||''),qrCapturedAt:new Date().toISOString(),qrSourceType:QR_SOURCE_TYPES.includes(sourceType)?sourceType:'MANUAL',qrLabel:qr.qrLabel,qrIsDynamic:qr.qrIsDynamic,qrLastVerifiedAt:qr.qrLastVerifiedAt}}
