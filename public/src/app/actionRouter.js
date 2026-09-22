@@ -1,4 +1,4 @@
-export function createActionRouter({agenda,navigation,access,render,admin,restore,login,chat}) {
+export function createActionRouter({agenda,navigation,access,render,admin,restore,login,chat,toggleAgenda}) {
   chat=chat||globalThis.__tm3Chat;
   return {
     async route(action,element) {
@@ -12,6 +12,7 @@ export function createActionRouter({agenda,navigation,access,render,admin,restor
         case 'audit-jump': return navigation.navigateToEntry(element.dataset.entryId);
         case 'menu': return navigation.toggleMenu();
         case 'agenda-create': case 'new': return agenda.create(element.dataset.idea==='true');
+        case 'agenda-toggle': return toggleAgenda?.(id);
         case 'agenda-edit': case 'edit': return agenda.edit(id);
         case 'agenda-detail': case 'detail': return agenda.detail(id);
         case 'agenda-duplicate': case 'duplicate': return agenda.duplicate(id,element.dataset.idea==='true');
