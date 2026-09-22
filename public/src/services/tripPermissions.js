@@ -1,3 +1,13 @@
 const fixture={jonathan:{'1aafae82-4ff7-423b-ade2-25170e8b0dd4':'ADMIN','trip-rd':'ADMIN'},jennifer:{'1aafae82-4ff7-423b-ade2-25170e8b0dd4':'TRAVELER_EDITOR','trip-rd':'TRAVELER_EDITOR'},reymond:{'1aafae82-4ff7-423b-ade2-25170e8b0dd4':'VIEWER','trip-rd':'TRAVELER_SAFE'},marina:{'1aafae82-4ff7-423b-ade2-25170e8b0dd4':'VIEWER','trip-rd':'TRAVELER_SAFE'},oscar:{'trip-rd':'TRAVELER'},beatriz:{'trip-rd':'TRAVELER'}};
 const rules={VIEWER:{view:true,budget:false,docs:false,edit:false,create:false},TRAVELER_SAFE:{view:true,budget:true,docs:true,edit:false,create:false,note:true},TRAVELER_EDITOR:{view:true,budget:true,docs:true,edit:true,create:true},TRAVELER:{view:true,budget:true,docs:true,edit:false,create:false},ADMIN:{view:true,budget:true,docs:true,edit:true,create:true,manage:true}};
-export function membership(userId,tripId){return fixture[userId]?.[tripId]||'NO_ACCESS'}export function canTrip(userId,tripId,permission){if(userId==='jonathan'&&permission!=='selfDowngrade'&&permission!=='selfRemove')return true;return Boolean(rules[membership(userId,tripId)]?.[permission])}export function assertTrip(userId,tripId,permission){if(!canTrip(userId,tripId,permission))throw Error(`Denied ${permission}`);return true}
+export function membership(userId,tripId){return fixture[userId]?.[tripId]||'NO_ACCESS'}
+export function canTrip(userId,tripId,permission){
+  if(userId==='jonathan'&&permission!=='selfDowngrade'&&permission!=='selfRemove')return true;
+  const role=membership(userId,tripId);
+  if(role!=='NO_ACCESS')return Boolean(rules[role]?.[permission]);
+  const runtimeRole=globalThis.localStorage?.getItem('agenda-viajera.role');
+  if(runtimeRole==='ADMIN'&&permission!=='selfDowngrade'&&permission!=='selfRemove')return true;
+  if(runtimeRole==='TRAVELER_EDITOR'&&['view','budget','docs','edit','create'].includes(permission))return true;
+  return false;
+}
+export function assertTrip(userId,tripId,permission){if(!canTrip(userId,tripId,permission))throw Error(`Denied ${permission}`);return true}
