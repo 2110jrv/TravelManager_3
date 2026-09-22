@@ -1,0 +1,3 @@
+import {test,expect} from '@playwright/test';
+
+test('login remains usable at mobile and desktop widths',async({browser})=>{const context=await browser.newContext({viewport:{width:390,height:800}});await context.addInitScript(()=>localStorage.clear());const page=await context.newPage();for(const width of [360,390,430,1280]){await page.setViewportSize({width,height:width<600?800:900});await page.goto('/');await expect(page.locator('.login-screen')).toBeVisible();expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);expect(await page.locator('.login-screen').evaluate(el=>el.getBoundingClientRect().width)).toBeLessThanOrEqual(430)}await context.close()});

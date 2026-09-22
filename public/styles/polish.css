@@ -1,0 +1,1 @@
+.budget-currency-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0 18px 12px}.currency-card{display:grid;gap:5px}.currency-card strong{font-size:1.08rem}.currency-card span{color:#687286;font-size:.78rem;font-weight:700}@media(max-width:640px){.budget-currency-grid{grid-template-columns:1fr;margin-left:10px;margin-right:10px}}
