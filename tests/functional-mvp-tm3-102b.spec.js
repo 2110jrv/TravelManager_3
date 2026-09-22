@@ -19,6 +19,10 @@ test('functional map photos chat surfaces',async({page})=>{
   await page.locator('[data-photo-form] input[name="caption"]').fill('Roma');
   await page.getByRole('button',{name:'Guardar foto'}).click();
   await expect(page.getByText('LOCAL_ONLY')).toBeVisible();
+  await page.getByText('Editar metadata').click();
+  await page.locator('[data-photo-edit] input[name="caption"]').fill('Roma editada');
+  await page.locator('[data-photo-edit]').getByRole('button',{name:'Guardar metadata'}).click();
+  await expect(page.getByText('Roma editada')).toBeVisible();
   await page.locator('[data-view="chat"]').first().click();
   await expect(page.locator('h2',{hasText:'Chat del viaje'})).toBeVisible();
   await expect(page.getByLabel('Mensaje')).toBeEnabled();
