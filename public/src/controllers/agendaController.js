@@ -9,7 +9,7 @@ export function createAgendaController({repository,access,onChanged,onEdit}){
   const mutate=(action,recordId,changes,fn)=>performMutation({recordId,action,changes,mutateLocal:async()=>fn()}).then(r=>{onChanged?.();return r});
   return {
     find,
-    async create(idea=false){if(!access.permissions.create)return alert('Tu rol no puede crear items');const title=prompt('Título del item');if(title)await mutate('CREATE',null,{title},()=>repository.addItem(normalize({title,time:'10:00',type:'ACTIVITY',place:'Por definir',payment:'UNKNOWN',amount:0,paid:0},idea),idea?'ideas':'items'))},
+    async create(idea=false,initialChanges=null){if(!access.permissions.create)throw Error('Tu rol no puede crear items');const changes=initialChanges||{};const title=String(changes.title||'').trim();if(!title)throw Error('El título es obligatorio');await mutate('CREATE',null,changes,()=>repository.addItem(normalize({...changes,title,time:changes.startTime||'10:00',type:changes.type||'ACTIVITY',place:changes.place||'Por definir',payment:changes.paymentStatus||'UNKNOWN',amount:Number(changes.amount||0),paid:Number(changes.paid||0)},idea?'ideas':'items')))},
     async edit(id){if(!access.permissions.edit)return alert('Tu rol no puede editar la estructura de Agenda');const x=find(id);if(x)return onEdit?.(x)},
     async save(id,changes){if(!access.permissions.edit)throw Error('Tu rol no puede editar la estructura de Agenda');const x=find(id);if(!x)throw Error('Item no encontrado');return mutate('EDIT',id,changes,()=>repository.updateItem(id,changes,collection(id)))},
     async duplicate(id,idea=false){if(!access.permissions.create)return alert('Tu rol no puede crear items');const x=find(id);if(x)await mutate('DUPLICATE',id,{},()=>duplicateEntry(repository,x,idea?'ideas':'items'))},
@@ -19,3 +19,5 @@ export function createAgendaController({repository,access,onChanged,onEdit}){
     detail(id){const x=find(id);if(x)alert(`${x.title}\n${x.place||''}\n${x.status||'AGENDA'}`)}
   }
 }
+
+

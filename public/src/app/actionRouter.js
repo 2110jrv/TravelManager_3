@@ -1,4 +1,4 @@
-export function createActionRouter({agenda,navigation,access,render,admin,restore,login,chat,toggleAgenda,editAgenda,qrScan,qrShow}) {
+export function createActionRouter({agenda,navigation,access,render,admin,restore,login,chat,toggleAgenda,editAgenda,qrScan,qrShow,newAgenda}) {
   chat=chat||globalThis.__tm3Chat;
   return {
     async route(action,element) {
@@ -11,7 +11,7 @@ export function createActionRouter({agenda,navigation,access,render,admin,restor
         case 'budget-jump': return navigation.navigateToEntry(element.dataset.entryId);
         case 'audit-jump': return navigation.navigateToEntry(element.dataset.entryId);
         case 'menu': return navigation.toggleMenu();
-        case 'agenda-create': case 'new': return agenda.create(element.dataset.idea==='true');
+        case 'agenda-create': case 'new': return newAgenda?newAgenda(element.dataset.idea==='true'):agenda.create(element.dataset.idea==='true');
         case 'agenda-toggle': return toggleAgenda?.(id);
         case 'agenda-edit': case 'edit': return editAgenda?editAgenda(id):agenda.edit(id);
         case 'qr-scan': return qrScan?.(id,Number(element.dataset.passengerIndex||-1));
@@ -33,4 +33,3 @@ export function createActionRouter({agenda,navigation,access,render,admin,restor
     }
   };
 }
-
