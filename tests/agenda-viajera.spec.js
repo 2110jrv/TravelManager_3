@@ -4,7 +4,7 @@ test.beforeEach(async ({ page }) => { await page.goto('/'); await page.evaluate(
 
 test('logged out muestra login sin filtrar datos privados', async ({ page }) => {
   const errors=[]; page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()); });
-  await page.goto('/'); await expect(page).toHaveTitle('Agenda Viajera'); await expect(page.getByRole('heading', { name: 'Iniciar sesión' })).toBeVisible();
+  await page.goto('/'); await expect(page).toHaveTitle('Agenda Viajera'); await expect(page.getByRole('heading', { name: 'Aplicación privada' })).toBeVisible(); await expect(page.locator('input[name="pin"]')).toBeVisible();
   await expect(page.getByText('AHORA')).toHaveCount(0); await expect(page.getByText('Admin Test')).toHaveCount(0); expect(errors.filter(x=>!x.includes('Failed to load resource'))).toEqual([]);
 });
 

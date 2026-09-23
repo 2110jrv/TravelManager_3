@@ -36,6 +36,15 @@ export async function verifyAppPin(pin,userId){
   return data;
 }
 
+export async function signInWithPin(pin){
+  const client=await getSupabaseClient();
+  const {data,error}=await client.functions.invoke('admin-user-management',{body:{action:'verify_pin_login',pin}});
+  if(error||!data?.session?.token_hash)throw error||new Error('ACCESS_VALIDATION_FAILED');
+  const verified=await client.auth.verifyOtp({token_hash:data.session.token_hash,type:data.session.type||'magiclink'});
+  if(verified.error)throw verified.error;
+  return verified;
+}
+
 export async function checkAppAccess(userId){
   const client=await getSupabaseClient();
   const {data,error}=await client.functions.invoke('admin-user-management',{body:{action:'check_access',userId}});

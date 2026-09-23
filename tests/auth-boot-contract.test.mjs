@@ -5,8 +5,8 @@ import {readFile} from 'node:fs/promises';
 const main=await readFile(new URL('../public/src/app/main.js',import.meta.url),'utf8');
 const runtime=await readFile(new URL('../public/src/services/remoteRuntime.js',import.meta.url),'utf8');
 
-test('production boot is auth-gated and uses real Supabase password login',()=>{
-  assert.match(main,/signInWithEmailPassword/);
+test('production boot is auth-gated and uses real PIN-only login',()=>{
+  assert.match(main,/signInWithPin/);
   assert.match(main,/data-login-form/);
   assert.match(main,/if\(!authReady\)\{renderLogin\(\);return\}/);
   assert.match(main,/av_trip_memberships/);
@@ -23,9 +23,7 @@ test('login surface contains no test labels or credential hints',()=>{
   for(const label of ['Admin Test','Traveler Test','Viewer Test','Outsider Test','.env.test.local','PIN legacy'])assert.doesNotMatch(main,new RegExp(label.replace('.', '\\.'),'i'));
 });
 
-test('recovery callback presents safe new-password form',()=>{
-  assert.match(main,/type=recovery/);
-  assert.match(main,/data-recovery-password/);
-  assert.match(main,/Crea una nueva contraseña/);
-  assert.match(main,/history\.replaceState/);
+test('login exposes no user recovery or password flow',()=>{
+  assert.doesNotMatch(main,/type=recovery|data-recovery-password|forgot-password|send-own-reset|name="email"|name="password"/);
+  assert.match(main,/Si olvidaste tu PIN, comunícate con Jonathan para que te asigne un nuevo PIN de acceso\./);
 });
