@@ -1,6 +1,6 @@
 import { addItem, deleteTrip, deleteTripDay, enqueueDeletion, getActiveTripId, getAllItems, getAllTrips, getDeletionQueue, getOrCreateDeviceId, getQueueRecords, getSetting, getTrip, getTripDays, migrateLegacyTravelData, openDatabase, replaceDatasetItems, replaceItemsByPredicate, saveQueueRecord, saveTrip, saveTripDay, selectDefaultTrip, setActiveTripId, setSetting, updateItem } from './db.js';
 import { ITALY_DATASET_ID, ITALY_DATASET_MARK_KEY, ITALY_DAYS_KEY, getPlanningStatus, loadItalyItinerary, rebuildMultidayOccurrences } from './italyAdapter.js';
-import { getCurrentSession, onAuthStateChange, signInWithEmailPassword, signOut, signUpWithEmailPassword } from './supabaseClient.js';
+import { getCurrentSession, onAuthStateChange, signInWithEmailPassword, signOut } from './supabaseClient.js';
 import { getSyncState, pullMasterNow, recordLocalChange, registerDeletedItemIdentityKeys, registerDeletedItemTombstones, runCloudSyncNow } from './syncSupabase.js';
 
 const state = {
@@ -210,11 +210,7 @@ const APP_VERSION = '0.1.0';
 const MULTIDAY_OCCURRENCE_MIGRATION_VERSION = '2026-07-10-v3-legacy-derived-cleanup';
 const ITEM_ID_PATTERN = /^ITEM_\d{3}$/;
 const ALLOWED_LEGACY_ITEM_IDS = new Set(['ITEM_121_B']);
-const ACCESS_PINS = {
-  family: '0000',
-  traveler: '1991',
-  admin: '1891'
-};
+const ACCESS_PINS = Object.freeze({});
 const ACCESS_ROLES = {
   family: { label: 'Familia', views: ['home', 'map'], confirmedOnly: true, prices: false, edit: false, complete: false, settings: false },
   traveler: { label: 'Viajero', views: ['home', 'calendar', 'map'], confirmedOnly: false, prices: true, edit: false, complete: false, settings: false },
@@ -1883,7 +1879,6 @@ function renderAuthPanel() {
       <label>Email<input id="authEmail" name="email" type="email" autocomplete="email" required /></label>
       <label>Contraseña<input id="authPassword" name="password" type="password" autocomplete="current-password" required /></label>
       <div class="settings-actions">
-        <button id="authSignUpButton" class="secondary-button" type="button">Crear cuenta</button>
         <button id="authSignInButton" class="primary-button" type="submit">Iniciar sesión</button>
       </div>
     </form>
@@ -1904,7 +1899,6 @@ function getAuthDefaultMessage() {
 
 function bindAuthManager() {
   document.getElementById('authForm')?.addEventListener('submit', event => handleAuthSubmit(event, 'sign-in'));
-  document.getElementById('authSignUpButton')?.addEventListener('click', event => handleAuthSubmit(event, 'sign-up'));
   document.getElementById('authSignOutButton')?.addEventListener('click', handleSignOut);
   document.getElementById('pullMasterButton')?.addEventListener('click', handlePullMaster);
   document.getElementById('pushPendingButton')?.addEventListener('click', () => runCloudSyncNow('manual'));
@@ -2119,17 +2113,13 @@ async function handleAuthSubmit(event, mode) {
   const password = form?.elements.password.value;
   if (!email || !password) return setAuthMessage('Ingresa email y contraseña.', true);
   if (password.length < 6) return setAuthMessage('La contraseña debe tener al menos 6 caracteres.', true);
-  setAuthMessage(mode === 'sign-up' ? 'Creando cuenta...' : 'Iniciando sesión...');
+  setAuthMessage('Iniciando sesión...');
   try {
-    const result = mode === 'sign-up'
-      ? await signUpWithEmailPassword(email, password)
-      : await signInWithEmailPassword(email, password);
+    const result = await signInWithEmailPassword(email, password);
     if (result.error) throw result.error;
     state.authUser = result.data.session?.user || (mode === 'sign-in' ? result.data.user : null) || state.authUser;
     state.authError = '';
-    state.authMessage = mode === 'sign-up'
-      ? 'Cuenta creada. Revisa tu email si Supabase solicita confirmación.'
-      : 'Sesión iniciada. Sync manual disponible desde Configuración.';
+    state.authMessage = 'Sesión iniciada. Sync manual disponible desde Configuración.';
     updateSyncStatus();
     syncAccessUi();
     await renderSettings();

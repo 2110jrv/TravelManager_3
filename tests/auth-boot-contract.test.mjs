@@ -22,3 +22,10 @@ test('production boot does not auto-start remote sync before authentication',()=
 test('login surface contains no test labels or credential hints',()=>{
   for(const label of ['Admin Test','Traveler Test','Viewer Test','Outsider Test','.env.test.local','PIN legacy'])assert.doesNotMatch(main,new RegExp(label.replace('.', '\\.'),'i'));
 });
+
+test('recovery callback presents safe new-password form',()=>{
+  assert.match(main,/type=recovery/);
+  assert.match(main,/data-recovery-password/);
+  assert.match(main,/Crea una nueva contraseña/);
+  assert.match(main,/history\.replaceState/);
+});

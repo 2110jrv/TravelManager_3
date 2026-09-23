@@ -1,8 +1,8 @@
-const CACHE_NAME = 'agenda-viajera-shell-v1';
+const CACHE_NAME = 'tm3-126-private-access';
 const TILE_CACHE_NAME = 'travelmanager3-tiles-v1';
 const APP_SCOPE = new URL('./', self.location.href).href;
 const SUPABASE_HOST = 'cslludzuejkhsydqiabx.supabase.co';
-const NETWORK_ONLY_HOSTS = new Set([SUPABASE_HOST, 'esm.sh']);
+const NETWORK_ONLY_HOSTS = new Set([SUPABASE_HOST]);
 const ASSET_PATHS = [
   '',
   'index.html',

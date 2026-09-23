@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "build": "node scripts/validate-build.mjs",
+    "build": "node scripts/bundle-supabase.mjs && node scripts/validate-build.mjs",
     "start": "npx http-server ./public -c-1 -p 5003",
     "mock:server": "node tests/mock-server/server.mjs",
     "test:e2e": "playwright test --grep-invert \"authenticated Supabase sandbox\"",
@@ -14,6 +14,8 @@
     "test:smoke": "playwright test tests/agenda-viajera.spec.js --grep \"logged out|inicia|navega\""
   },
   "devDependencies": {
-    "@playwright/test": "^1.63.0"
+    "@playwright/test": "^1.63.0",
+    "@supabase/supabase-js": "^2.117.0",
+    "esbuild": "^0.28.2"
   }
 }

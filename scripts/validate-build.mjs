@@ -9,7 +9,8 @@ const required = [
   'public/src/app/main.js',
   'public/src/db/localRepository.js',
   'public/src/services/audit.js',
-  'public/src/supabaseClient.js'
+  'public/src/supabaseClient.js',
+  'public/vendor/supabase-client.mjs'
 ];
 const missing = required.filter(path => !existsSync(resolve(root, path)));
 const index = readFileSync(resolve(root, 'public/index.html'), 'utf8');
@@ -21,4 +22,11 @@ if (missing.length) {
   process.exitCode = 1;
 } else {
   console.log(`Static build validation passed (${required.length} required files).`);
+}
+const browserAssets = ['public/index.html', 'public/src/supabaseClient.js', 'public/vendor/supabase-client.mjs', 'public/service-worker.js'];
+const forbidden = /esm\.sh|unpkg|jsdelivr/;
+const remoteSdk = browserAssets.filter(path => forbidden.test(readFileSync(resolve(root, path), 'utf8')));
+if (remoteSdk.length) {
+  console.error(`Static build validation failed: remote SDK references in ${remoteSdk.join(', ')}`);
+  process.exitCode = 1;
 }
