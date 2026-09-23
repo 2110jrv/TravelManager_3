@@ -29,6 +29,13 @@ export async function adminUserAction(action,payload){
   return data;
 }
 
+export async function getUserPin(userId,tripId){
+  const client=await getSupabaseClient();
+  const {data,error}=await client.functions.invoke('admin-user-management',{body:{action:'get_user_pin',userId,tripId}});
+  if(error)throw error;
+  return data;
+}
+
 export async function verifyAppPin(pin,userId){
   const client=await getSupabaseClient();
   const {data,error}=await client.functions.invoke('admin-user-management',{body:{action:'verify_pin',pin,userId}});

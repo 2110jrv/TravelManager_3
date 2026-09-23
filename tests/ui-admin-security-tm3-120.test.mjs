@@ -8,7 +8,7 @@ test('TM3-120 visual/admin surfaces expose secure controls',()=>{
   const settings=renderSettings({profile:{display_name:'Jonathan'},authUser:{email:'admin@example.com'},access:{role:'ADMIN',deviceState:'TRUSTED'},trip:{name:'Italy October/November 2026'}});
   assert.doesNotMatch(settings,/Cambiar mi contraseña|Enviar enlace de recuperación/);assert.match(settings,/Recuperación WhatsApp/);assert.match(settings,/Usuarios/);assert.match(settings,/solo puede asignarlo o restablecerlo un administrador/);assert.doesNotMatch(settings,/password.*value=/i);
   const users=renderAdminUsers([{id:'u',display_name:'Traveler',email:'t@example.com',membership:{role:'TRAVELER',status:'ACTIVE'},devices:[]}]);
-  assert.match(users,/Buscar por nombre o email/);assert.match(users,/Gestionar/);assert.match(users,/Invitar/);assert.doesNotMatch(users,/contraseña actual/i);
+  assert.match(users,/Buscar por nombre o email/);assert.match(users,/Gestionar/);assert.match(users,/Ver PIN/);assert.match(users,/Invitar/);assert.doesNotMatch(users,/contraseña actual/i);
 });
 
 test('TM3-120 never ships service_role in browser assets',()=>{

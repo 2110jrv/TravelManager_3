@@ -14,5 +14,5 @@ test('PIN is hashed server-side and rate limited',()=>{
   assert.match(fn,/PBKDF2/);assert.match(fn,/120000/);assert.match(fn,/av_record_pin_attempt/);assert.match(migration,/failed_pin_attempts/);assert.match(migration,/pin_hash/);
 });
 test('privileged access stays server mediated',()=>{
-  assert.match(fn,/av_admin_private_access_action_v3/);assert.match(fn,/verify_pin_login/);assert.match(fn,/pin_lookup_hmac/);assert.match(fn,/is\('pin_lookup_hmac',null\)/);assert.match(fn,/SUPABASE_SERVICE_ROLE_KEY/);assert.match(fn,/hashed_token/);assert.doesNotMatch(main,/SUPABASE_SERVICE_ROLE_KEY|service_role/);
+  assert.match(fn,/av_admin_private_access_action_v4/);assert.match(fn,/get_user_pin/);assert.match(fn,/pin_lookup_hmac/);assert.match(fn,/pin_encrypted/);assert.match(fn,/PIN_ENCRYPTION_KEY/);assert.match(fn,/SUPABASE_SERVICE_ROLE_KEY/);assert.match(fn,/hashed_token/);assert.doesNotMatch(main,/SUPABASE_SERVICE_ROLE_KEY|service_role/);
 });

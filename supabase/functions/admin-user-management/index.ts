@@ -9,6 +9,8 @@ const genericError=()=>json({error:'ACCESS_VALIDATION_FAILED'},403);
 async function hashPin(pin:string){const salt=crypto.getRandomValues(new Uint8Array(16)),iterations=120000;const key=await crypto.subtle.importKey('raw',encoder.encode(pin),'PBKDF2',false,['deriveBits']);const bits=await crypto.subtle.deriveBits({name:'PBKDF2',salt,iterations,hash:'SHA-256'},key,256);return `pbkdf2$${iterations}$${b64(salt)}$${b64(new Uint8Array(bits))}`;}
 async function verifyPin(pin:string,encoded:string){try{const [scheme,rawIterations,saltText,hashText]=String(encoded||'').split('$');if(scheme!=='pbkdf2'||!rawIterations||!saltText||!hashText)return false;const iterations=Number(rawIterations);if(!Number.isSafeInteger(iterations)||iterations<1)return false;const key=await crypto.subtle.importKey('raw',encoder.encode(pin),'PBKDF2',false,['deriveBits']);const bits=new Uint8Array(await crypto.subtle.deriveBits({name:'PBKDF2',salt:unb64(saltText),iterations,hash:'SHA-256'},key,256));const expected=unb64(hashText);if(bits.length!==expected.length)return false;let diff=0;for(let i=0;i<bits.length;i++)diff|=bits[i]^expected[i];return diff===0;}catch{return false;}}
 const validPin=(pin:string)=>/^\d{6}$/.test(pin);
+const b64encode=(bytes:Uint8Array)=>btoa(String.fromCharCode(...bytes));
+const b64decode=(value:string)=>Uint8Array.from(atob(value),char=>char.charCodeAt(0));
 async function pinLookup(pin:string){
   const secret=Deno.env.get('PIN_LOOKUP_SECRET');
   if(!secret)throw Error('PIN_LOOKUP_SECRET_UNAVAILABLE');
@@ -16,6 +18,9 @@ async function pinLookup(pin:string){
   const digest=await crypto.subtle.sign('HMAC',key,encoder.encode(pin));
   return Array.from(new Uint8Array(digest),byte=>byte.toString(16).padStart(2,'0')).join('');
 }
+async function pinCipherKey(){const secret=Deno.env.get('PIN_ENCRYPTION_KEY');if(!secret)throw Error('PIN_ENCRYPTION_KEY_UNAVAILABLE');const digest=await crypto.subtle.digest('SHA-256',encoder.encode(secret));return crypto.subtle.importKey('raw',digest,{name:'AES-GCM'},false,['encrypt','decrypt']);}
+async function encryptPin(pin:string){const iv=crypto.getRandomValues(new Uint8Array(12));const encrypted=await crypto.subtle.encrypt({name:'AES-GCM',iv},await pinCipherKey(),encoder.encode(pin));return {ciphertext:b64encode(new Uint8Array(encrypted)),iv:b64encode(iv),version:'v1'};}
+async function decryptPin(ciphertext:string,iv:string){const decoded=await crypto.subtle.decrypt({name:'AES-GCM',iv:b64decode(iv)},await pinCipherKey(),b64decode(ciphertext));return new TextDecoder().decode(decoded);}
 async function issueSession(admin:any,userId:string){
   const {data:user,error:userError}=await admin.auth.admin.getUserById(userId);if(userError||!user?.user?.email)throw Error('SESSION_BOOTSTRAP_FAILED');
   const generated=await admin.auth.admin.generateLink({type:'magiclink',email:user.user.email});
@@ -76,8 +81,15 @@ Deno.serve(async req=>{
     }
     if(action==='set_pin'||action==='reset_pin'){
       if(!validPin(String(body.pin||'')))return json({error:'PIN_MUST_BE_SIX_DIGITS'},400);
-      const pinValue=String(body.pin),pinHash=await hashPin(pinValue),lookup=await pinLookup(pinValue);const {data,error}=await callerClient.rpc('av_admin_private_access_action_v3',{p_trip_id:tripId,p_target_user_id:body.userId||caller.id,p_action:'set_pin',p_role:body.role||null,p_access_status:body.accessStatus||'ACTIVE',p_pin_hash:pinHash,p_pin_lookup_hmac:lookup,p_permissions:body.permissions||null});
+      const pinValue=String(body.pin),pinHash=await hashPin(pinValue),lookup=await pinLookup(pinValue),encrypted=await encryptPin(pinValue);const {data,error}=await callerClient.rpc('av_admin_private_access_action_v4',{p_trip_id:tripId,p_target_user_id:body.userId||caller.id,p_action:'set_pin',p_role:body.role||null,p_access_status:body.accessStatus||'ACTIVE',p_pin_hash:pinHash,p_pin_lookup_hmac:lookup,p_pin_encrypted:encrypted.ciphertext,p_pin_iv:encrypted.iv,p_pin_key_version:encrypted.version,p_permissions:body.permissions||null});
       if(error){if(String(error.message||'').includes('AV_PIN_ALREADY_ASSIGNED'))return json({error:'PIN_ALREADY_ASSIGNED'},409);throw error;}return json({ok:true,access:data});
+    }
+    if(action==='get_user_pin'){
+      const target=String(body.userId||'');if(!target)return json({error:'TARGET_REQUIRED'},400);
+      const {data:isAdmin,error:adminError}=await callerClient.rpc('av_is_admin',{p_trip_id:tripId});if(adminError||!isAdmin)return json({error:'ADMIN_REQUIRED'},403);if(!service)return json({error:'SERVER_ADMIN_SECRET_UNAVAILABLE'},503);const serverAdmin=createClient(url,service);
+      const {data:access,error:accessError}=await serverAdmin.from('av_app_access').select('pin_encrypted,pin_iv,pin_key_version').eq('user_id',target).maybeSingle();if(accessError)throw accessError;if(!access?.pin_encrypted||!access?.pin_iv)return json({error:'PIN_NOT_AVAILABLE'},404);
+      const pin=await decryptPin(access.pin_encrypted,access.pin_iv);const auditResult=await callerClient.rpc('av_admin_record_pin_view',{p_trip_id:tripId,p_target_user_id:target});if(auditResult.error)throw auditResult.error;
+      const response=json({ok:true,pin});response.headers.set('Cache-Control','no-store');return response;
     }
     if(['set_access_status','set_role','set_trip_access'].includes(action)){
       const {data,error}=await callerClient.rpc('av_admin_private_access_action',{p_trip_id:tripId,p_target_user_id:body.userId,p_action:action,p_role:body.role||null,p_access_status:body.accessStatus||null,p_permissions:body.permissions||null});
