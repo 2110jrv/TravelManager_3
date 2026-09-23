@@ -97,6 +97,15 @@ Deno.serve(async req=>{
     }
     if(!service)return json({error:'SERVER_ADMIN_SECRET_UNAVAILABLE'},503);const admin=createClient(url,service);
     const {data:isAdmin,error:adminError}=await callerClient.rpc('av_is_admin',{p_trip_id:tripId});if(adminError||!isAdmin)return json({error:'ADMIN_REQUIRED'},403);
+    if(action==='create_internal_user'){
+      const displayName=String(body.displayName||'').trim();if(!displayName||!validPin(String(body.pin||'')))return json({error:'INVALID_INTERNAL_USER'},400);
+      const internalEmail=`internal-${crypto.randomUUID()}@agenda-viajera.invalid`;const password=`${crypto.randomUUID()}-${crypto.randomUUID()}`;
+      const created=await admin.auth.admin.createUser({email:internalEmail,password,email_confirm:true,user_metadata:{display_name:displayName}});if(created.error||!created.data.user)throw created.error||Error('USER_CREATE_FAILED');
+      const userId=created.data.user.id;const profile=await admin.from('av_users').upsert({id:userId,display_name:displayName,email:internalEmail});if(profile.error)throw profile.error;
+      const access=await callerClient.rpc('av_admin_private_access_action',{p_trip_id:tripId,p_target_user_id:userId,p_action:'set_trip_access',p_role:body.role||'VIEWER',p_access_status:body.accessStatus||'ACTIVE',p_permissions:{}});if(access.error)throw access.error;
+      const pinValue=String(body.pin),pinHash=await hashPin(pinValue),lookup=await pinLookup(pinValue),encrypted=await encryptPin(pinValue);const pinResult=await callerClient.rpc('av_admin_private_access_action_v4',{p_trip_id:tripId,p_target_user_id:userId,p_action:'set_pin',p_role:body.role||'VIEWER',p_access_status:body.accessStatus||'ACTIVE',p_pin_hash:pinHash,p_pin_lookup_hmac:lookup,p_pin_encrypted:encrypted.ciphertext,p_pin_iv:encrypted.iv,p_pin_key_version:encrypted.version,p_permissions:{}});if(pinResult.error)throw pinResult.error;
+      return json({ok:true,userId});
+    }
     if(action==='invite'){
       const invited=await admin.auth.admin.inviteUserByEmail(body.email,{data:{display_name:body.displayName||''},redirectTo:body.redirectTo});if(invited.error)throw invited.error;const userId=invited.data.user.id;const profile=await admin.from('av_users').upsert({id:userId,display_name:body.displayName||body.email,email:body.email});if(profile.error)throw profile.error;const access=await callerClient.rpc('av_admin_private_access_action',{p_trip_id:tripId,p_target_user_id:userId,p_action:'set_trip_access',p_role:body.role||'VIEWER',p_access_status:'INVITED',p_permissions:body.permissions||{}});if(access.error)throw access.error;return json({ok:true,userId});
     }

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tm3-126-private-access';
+const CACHE_NAME = 'tm3-142-admin-users';
 const TILE_CACHE_NAME = 'travelmanager3-tiles-v1';
 const APP_SCOPE = new URL('./', self.location.href).href;
 const SUPABASE_HOST = 'cslludzuejkhsydqiabx.supabase.co';

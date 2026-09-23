@@ -13,9 +13,9 @@ export async function sendPasswordReset(email){
 export async function loadAdminUsers(tripId){
   const client=await getSupabaseClient();
   const [{data:users,error:userError},{data:memberships,error:membershipError},{data:devices,error:deviceError}]=await Promise.all([
-    client.from('av_users').select('id,display_name,email,created_at').order('display_name'),
+    client.from('av_users').select('id,display_name,created_at').order('display_name'),
     client.from('av_trip_memberships').select('id,user_id,trip_id,role,status,permissions,updated_at').eq('trip_id',tripId),
-    client.from('av_devices').select('device_id,user_id,state,last_seen_at').eq('user_id','not.is',null)
+    client.from('av_devices').select('device_id,user_id,state,last_seen_at').not('user_id','is',null)
   ]);
   if(userError)throw userError;if(membershipError)throw membershipError;if(deviceError)throw deviceError;
   const byUser=new Map((memberships||[]).map(x=>[x.user_id,x]));
