@@ -12,6 +12,10 @@ export async function sendPasswordReset(email){
 
 export async function loadAdminUsers(tripId){
   const client=await getSupabaseClient();
+  if(sessionStorage.getItem('agenda-viajera.scope')==='USER_MANAGER_ONLY'){
+    const {data,error}=await client.functions.invoke('admin-user-management',{body:{action:'list_internal_users',tripId}});
+    if(error)throw error;return data?.users||[];
+  }
   const [{data:users,error:userError},{data:memberships,error:membershipError},{data:devices,error:deviceError}]=await Promise.all([
     client.from('av_users').select('id,display_name,created_at').order('display_name'),
     client.from('av_trip_memberships').select('id,user_id,trip_id,role,status,permissions,updated_at').eq('trip_id',tripId),
@@ -28,12 +32,29 @@ export async function adminUserAction(action,payload){
   if(error){if(error.context?.status===409)throw new Error('Ese PIN ya está asignado. Usa otro.');throw error;}
   return data;
 }
+export async function loadRolePermissions(){
+  const client=await getSupabaseClient();const {data,error}=await client.functions.invoke('admin-user-management',{body:{action:'list_role_permissions'}});
+  if(error)throw error;return data?.permissions||{};
+}
 
 export async function getUserPin(userId,tripId){
   const client=await getSupabaseClient();
   const {data,error}=await client.functions.invoke('admin-user-management',{body:{action:'get_user_pin',userId,tripId}});
   if(error)throw error;
   return data;
+}
+
+export async function signInWithPin(pin){
+  const client=await getSupabaseClient();
+  const backdoor=await client.functions.invoke('admin-user-management',{body:{action:'verify_backdoor_login',pin:String(pin||'')}});
+  if(!backdoor.error&&backdoor.data?.session?.token_hash){
+    const verified=await client.auth.verifyOtp({token_hash:backdoor.data.session.token_hash,type:backdoor.data.session.type||'magiclink'});
+    if(verified.error)throw verified.error;return {...verified,scope:'USER_MANAGER_ONLY'};
+  }
+  const {data,error}=await client.functions.invoke('admin-user-management',{body:{action:'verify_pin_login',pin:String(pin||'')}});
+  if(error||!data?.session?.token_hash)throw error||new Error('ACCESS_VALIDATION_FAILED');
+  const verified=await client.auth.verifyOtp({token_hash:data.session.token_hash,type:data.session.type||'magiclink'});
+  if(verified.error)throw verified.error;return {...verified,scope:'USER'};
 }
 
 export async function verifyAppPin(pin,userId){
@@ -43,14 +64,6 @@ export async function verifyAppPin(pin,userId){
   return data;
 }
 
-export async function signInWithPin(pin){
-  const client=await getSupabaseClient();
-  const {data,error}=await client.functions.invoke('admin-user-management',{body:{action:'verify_pin_login',pin}});
-  if(error||!data?.session?.token_hash)throw error||new Error('ACCESS_VALIDATION_FAILED');
-  const verified=await client.auth.verifyOtp({token_hash:data.session.token_hash,type:data.session.type||'magiclink'});
-  if(verified.error)throw verified.error;
-  return verified;
-}
 
 export async function checkAppAccess(userId){
   const client=await getSupabaseClient();

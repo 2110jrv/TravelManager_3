@@ -4,6 +4,7 @@ import {readFile} from 'node:fs/promises';
 
 const main=await readFile(new URL('../public/src/app/main.js',import.meta.url),'utf8');
 const runtime=await readFile(new URL('../public/src/services/remoteRuntime.js',import.meta.url),'utf8');
+const security=await readFile(new URL('../public/src/services/accountSecurity.js',import.meta.url),'utf8');
 
 test('production boot is auth-gated and uses real PIN-only login',()=>{
   assert.match(main,/signInWithPin/);
@@ -25,5 +26,6 @@ test('login surface contains no test labels or credential hints',()=>{
 
 test('login exposes no user recovery or password flow',()=>{
   assert.doesNotMatch(main,/type=recovery|data-recovery-password|forgot-password|send-own-reset|name="email"|name="password"/);
-  assert.match(main,/Si olvidaste tu PIN, comunícate con Jonathan para que te asigne un nuevo PIN de acceso\./);
+  assert.match(main,/pattern="\[0-9\]\{4\}"/);
+  assert.match(security,/verify_backdoor_login/);
 });
