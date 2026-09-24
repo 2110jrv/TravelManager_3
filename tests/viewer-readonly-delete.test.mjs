@@ -35,4 +35,8 @@ test('user deletion preserves chat snapshot and revokes access before Auth delet
   assert.match(edge,/internalTarget/);
   assert.match(edge,/eq\('user_id',authTarget\)/);
   assert.match(edge,/auth\.admin\.deleteUser/);
+  assert.match(edge,/deleted_at/);
+  assert.match(edge,/auth_cleanup_pending/);
+  assert.match(edge,/LAST_ADMIN_REQUIRED/);
+  assert.match(edge,/pin_hash:null/);
 });

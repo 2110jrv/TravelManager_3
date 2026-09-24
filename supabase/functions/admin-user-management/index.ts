@@ -81,7 +81,7 @@ Deno.serve(async req=>{
     if(action==='list_internal_users'){
       if(!manager)return json({error:'USER_MANAGER_REQUIRED'},403);
       const [{data:users,error:userError},{data:memberships,error:membershipError},{data:accessRows,error:accessError}]=await Promise.all([
-        serverAdmin!.from('av_users').select('id,auth_user_id,display_name,created_at').order('display_name'),
+        serverAdmin!.from('av_users').select('id,auth_user_id,display_name,created_at,deleted_at').is('deleted_at',null).order('display_name'),
         serverAdmin!.from('av_trip_memberships').select('id,user_id,trip_id,role,status,permissions,updated_at'),
         serverAdmin!.from('av_app_access').select('user_id,access_status,role,pin_encrypted,pin_iv')
       ]);
@@ -115,11 +115,28 @@ Deno.serve(async req=>{
         const byAuth=!byInternal.data?await serverAdmin!.from('av_users').select('id,display_name,auth_user_id').eq('auth_user_id',target).maybeSingle():{data:null,error:null};if(byAuth.error)throw byAuth.error;
         const userRow=byInternal.data||byAuth.data;if(!userRow)return json({error:'USER_NOT_FOUND'},404);
         const internalTarget=userRow.id,authTarget=userRow.auth_user_id||userRow.id,name=userRow.display_name||'Usuario eliminado';
+        const [{data:targetAccess,error:targetAccessError},{data:adminAccess,error:adminAccessError},{data:adminMemberships,error:adminMembershipError}]=await Promise.all([
+          serverAdmin!.from('av_app_access').select('role,access_status').eq('user_id',authTarget).maybeSingle(),
+          serverAdmin!.from('av_app_access').select('user_id').eq('role','ADMIN').eq('access_status','ACTIVE'),
+          serverAdmin!.from('av_trip_memberships').select('user_id').eq('role','ADMIN').eq('status','ACTIVE')
+        ]);if(targetAccessError||adminAccessError||adminMembershipError)throw targetAccessError||adminAccessError||adminMembershipError;
+        if(targetAccess?.role==='ADMIN'&&targetAccess.access_status==='ACTIVE'){
+          const membershipAdmins=new Set((adminMemberships||[]).map(row=>row.user_id));
+          const activeAdmins=(adminAccess||[]).filter(row=>membershipAdmins.has(row.user_id));
+          if(activeAdmins.length<=1)return json({error:'LAST_ADMIN_REQUIRED'},409);
+        }
         const snapshot=await serverAdmin!.from('av_messages').update({sender_name:name}).in('sender_user_id',[internalTarget,authTarget]).is('sender_name',null);if(snapshot.error)throw snapshot.error;
         for(const table of ['av_devices','av_restore_requests']){const cleared=await serverAdmin!.from(table).update({user_id:null}).eq('user_id',internalTarget);if(cleared.error&&cleared.error.code!=='42703')throw cleared.error;}
-        const revoked=await serverAdmin!.from('av_app_access').update({access_status:'REVOKED',updated_at:new Date().toISOString()}).eq('user_id',authTarget);if(revoked.error)throw revoked.error;
+        const revoked=await serverAdmin!.from('av_app_access').update({access_status:'REVOKED',pin_hash:null,pin_lookup_hmac:null,pin_encrypted:null,pin_iv:null,updated_at:new Date().toISOString()}).eq('user_id',authTarget);if(revoked.error)throw revoked.error;
         const memberships=await serverAdmin!.from('av_trip_memberships').update({status:'INACTIVE',updated_at:new Date().toISOString()}).eq('user_id',internalTarget);if(memberships.error)throw memberships.error;
-        const removed=await serverAdmin!.auth.admin.deleteUser(authTarget);if(removed.error)throw removed.error;return json({ok:true,userId:target});
+        const marked=await serverAdmin!.from('av_users').update({deleted_at:new Date().toISOString(),auth_cleanup_pending:false}).eq('id',internalTarget);if(marked.error)throw marked.error;
+        const removed=await serverAdmin!.auth.admin.deleteUser(authTarget);
+        if(removed.error){
+          await serverAdmin!.auth.admin.updateUserById(authTarget,{ban_duration:'876000h'});
+          await serverAdmin!.from('av_users').update({auth_cleanup_pending:true}).eq('id',internalTarget);
+          return json({ok:true,userId:target,auth_cleanup_pending:true});
+        }
+        return json({ok:true,userId:target,auth_cleanup_pending:false});
       }
       if(action==='create_internal_user'){
         const displayName=String(body.displayName||'').trim(),role=String(body.role||'VIEWER');if(!displayName||!validPin(String(body.pin||''))||!['ADMIN','TRAVELER','VIEWER'].includes(role))return json({error:'INVALID_INTERNAL_USER'},400);
