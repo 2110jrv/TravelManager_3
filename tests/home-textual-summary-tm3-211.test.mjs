@@ -22,6 +22,6 @@ test('home creates a chronological textual summary from the selected day',()=>{
 
 test('home marks a logical gap as pending without inventing a booking',()=>{
   const html=renderHome({trip:{name:'Italia 2026'},items:[{date:'2026-10-21',startTime:'09:00',endTime:'10:00',type:'TRANSPORT',title:'Llegada a Pisa',place:'Pisa'},{date:'2026-10-21',startTime:'12:00',type:'TRANSPORT',title:'Traslado a Lucca',place:'Pisa → Lucca'}]});
-  assert.match(html,/Falta definir el alojamiento o transporte de llegada/);
+  assert.match(html,/Falta definir transporte de llegada o alojamiento/);
   assert.match(html,/data-home-daily-summary/);
 });
