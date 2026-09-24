@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 
 const migration=await readFile(new URL('../supabase/migrations/20260924150000_agenda_viajera_backdoor_manager.sql',import.meta.url),'utf8');
+const grantMigration=await readFile(new URL('../supabase/migrations/20260924160000_agenda_viajera_backdoor_service_grant.sql',import.meta.url),'utf8');
 const edge=await readFile(new URL('../supabase/functions/admin-user-management/index.ts',import.meta.url),'utf8');
 const security=await readFile(new URL('../public/src/services/accountSecurity.js',import.meta.url),'utf8');
 const users=await readFile(new URL('../public/src/app/render/renderAdminUsers.js',import.meta.url),'utf8');
@@ -10,7 +11,12 @@ const permissions=await readFile(new URL('../public/src/auth/permissions.js',imp
 
 test('backdoor is server-side and scoped to USER_MANAGER_ONLY',()=>{
   assert.match(edge,/BACKDOOR_PIN_HASH/);assert.match(edge,/USER_MANAGER_ONLY/);assert.match(edge,/ensureBackdoorUser/);assert.match(security,/verify_backdoor_login/);
-  assert.doesNotMatch(users,/name="email"|name="password"|invite/i);
+  assert.match(users,/data-user-manager-root/);assert.match(users,/data-admin-user-form/);assert.match(users,/data-role-permission/);assert.match(users,/data-user-row/);assert.doesNotMatch(users,/name="email"|name="password"|invite/i);
+});
+test('backdoor config keeps RLS and is writable only by service_role',()=>{
+  assert.match(migration,/enable row level security/);assert.match(migration,/revoke all on public\.av_backdoor_config from anon, authenticated/);
+  assert.match(grantMigration,/grant select, insert, update, delete on table public\.av_backdoor_config to service_role/);
+  assert.match(edge,/createClient\(url,service\)/);assert.doesNotMatch(security,/SUPABASE_SERVICE_ROLE_KEY|service_role/);
 });
 test('role matrix is persisted and backend-compatible',()=>{
   assert.match(migration,/av_role_permissions/);assert.match(migration,/av_messages.*sender_name/s);assert.match(edge,/CanChat/);assert.match(edge,/CanEditAgenda/);assert.match(permissions,/chatWrite/);
