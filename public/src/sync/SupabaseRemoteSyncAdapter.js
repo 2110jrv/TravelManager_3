@@ -12,7 +12,7 @@ const fromMessageRow=m=>m&&({...m,messageId:m.message_id,tripId:m.trip_id,conver
 export class SupabaseRemoteSyncAdapter{
   constructor({client=null,userId=null,deviceId=null}={}){this.client=client;this.userId=userId;this.deviceId=deviceId}
   async db(){return this.client||=await getSupabaseClient()}
-  async registerDevice(device){const c=await this.db();return fromDeviceRow(first(await unwrap(c.from(tableNames.devices).upsert(toDeviceRow({...device,deviceId:device.deviceId||this.deviceId}),{onConflict:'device_id'}).select())))}
+  async registerDevice(device){const c=await this.db();const deviceId=device.deviceId||this.deviceId,userId=device.userId||this.userId;const data=await unwrap(c.rpc('av_register_device_for_session',{p_device_id:deviceId,p_user_id:userId,p_app_installation_id:device.appInstallationId||null,p_name:device.name||'Agenda Viajera device'}));return fromDeviceRow(first(data))}
   async getDevice(deviceId){const c=await this.db();return fromDeviceRow(first(await unwrap(c.from(tableNames.devices).select('*').eq('device_id',deviceId).maybeSingle())))}
   async listDevices(){const c=await this.db();return (await unwrap(c.from(tableNames.devices).select('*').order('created_at'))).map(fromDeviceRow)}
   async updateDevice(deviceId,changes){const c=await this.db();const row=toDeviceRow({...changes,deviceId});return fromDeviceRow(first(await unwrap(c.from(tableNames.devices).update(row).eq('device_id',deviceId).select())))}
