@@ -8,7 +8,8 @@ const unb64=(value:string)=>Uint8Array.from(atob(value),char=>char.charCodeAt(0)
 const genericError=()=>json({error:'ACCESS_VALIDATION_FAILED'},403);
 async function hashPin(pin:string){const salt=crypto.getRandomValues(new Uint8Array(16)),iterations=120000;const key=await crypto.subtle.importKey('raw',encoder.encode(pin),'PBKDF2',false,['deriveBits']);const bits=await crypto.subtle.deriveBits({name:'PBKDF2',salt,iterations,hash:'SHA-256'},key,256);return `pbkdf2$${iterations}$${b64(salt)}$${b64(new Uint8Array(bits))}`;}
 async function verifyPin(pin:string,encoded:string){try{const [scheme,rawIterations,saltText,hashText]=String(encoded||'').split('$');if(scheme!=='pbkdf2'||!rawIterations||!saltText||!hashText)return false;const iterations=Number(rawIterations);if(!Number.isSafeInteger(iterations)||iterations<1)return false;const key=await crypto.subtle.importKey('raw',encoder.encode(pin),'PBKDF2',false,['deriveBits']);const bits=new Uint8Array(await crypto.subtle.deriveBits({name:'PBKDF2',salt:unb64(saltText),iterations,hash:'SHA-256'},key,256));const expected=unb64(hashText);if(bits.length!==expected.length)return false;let diff=0;for(let i=0;i<bits.length;i++)diff|=bits[i]^expected[i];return diff===0;}catch{return false;}}
-const validPin=(pin:string)=>/^\d{6}$/.test(pin);
+const validPin=(pin:string)=>/^\d{4}$/.test(pin);
+const validLoginPin=(pin:string)=>/^\d{4}$/.test(pin)||/^\d{6}$/.test(pin);
 const b64encode=(bytes:Uint8Array)=>btoa(String.fromCharCode(...bytes));
 const b64decode=(value:string)=>Uint8Array.from(atob(value),char=>char.charCodeAt(0));
 async function pinLookup(pin:string){
@@ -35,7 +36,7 @@ Deno.serve(async req=>{
     const body=await req.json(),action=String(body.action||''),tripId=body.tripId;
     const url=Deno.env.get('SUPABASE_URL')!,anon=Deno.env.get('SUPABASE_ANON_KEY')!,service=Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
     if(action==='verify_pin_login'){
-      if(!service||!validPin(String(body.pin||'')))return genericError();
+      if(!service||!validLoginPin(String(body.pin||'')))return genericError();
       const admin=createClient(url,service);
       const lookup=await pinLookup(String(body.pin));
       const {data:activeRows,error}=await admin.from('av_app_access').select('user_id,pin_hash,pin_lookup_hmac,access_status,pin_locked_until').eq('access_status','ACTIVE');
@@ -76,11 +77,11 @@ Deno.serve(async req=>{
       const {data:access,error}=await callerClient.rpc('av_get_private_access',{p_user_id:caller.id});
       if(error||!access||access.access_status!=='ACTIVE'||!access.pin_hash)return genericError();
       if(access.pin_locked_until&&new Date(access.pin_locked_until)>new Date())return genericError();
-      const ok=validPin(String(body.pin||''))&&await verifyPin(String(body.pin),access.pin_hash);await callerClient.rpc('av_record_pin_attempt',{p_user_id:caller.id,p_success:ok});
+      const ok=validLoginPin(String(body.pin||''))&&await verifyPin(String(body.pin),access.pin_hash);await callerClient.rpc('av_record_pin_attempt',{p_user_id:caller.id,p_success:ok});
       if(!ok)return genericError();return json({ok:true});
     }
     if(action==='set_pin'||action==='reset_pin'){
-      if(!validPin(String(body.pin||'')))return json({error:'PIN_MUST_BE_SIX_DIGITS'},400);
+      if(!validPin(String(body.pin||'')))return json({error:'PIN_MUST_BE_FOUR_DIGITS'},400);
       const pinValue=String(body.pin),pinHash=await hashPin(pinValue),lookup=await pinLookup(pinValue),encrypted=await encryptPin(pinValue);const {data,error}=await callerClient.rpc('av_admin_private_access_action_v4',{p_trip_id:tripId,p_target_user_id:body.userId||caller.id,p_action:'set_pin',p_role:body.role||null,p_access_status:body.accessStatus||'ACTIVE',p_pin_hash:pinHash,p_pin_lookup_hmac:lookup,p_pin_encrypted:encrypted.ciphertext,p_pin_iv:encrypted.iv,p_pin_key_version:encrypted.version,p_permissions:body.permissions||null});
       if(error){if(String(error.message||'').includes('AV_PIN_ALREADY_ASSIGNED'))return json({error:'PIN_ALREADY_ASSIGNED'},409);throw error;}return json({ok:true,access:data});
     }
@@ -92,7 +93,7 @@ Deno.serve(async req=>{
       const response=json({ok:true,pin});response.headers.set('Cache-Control','no-store');return response;
     }
     if(['set_access_status','set_role','set_trip_access'].includes(action)){
-      const {data,error}=await callerClient.rpc('av_admin_private_access_action',{p_trip_id:tripId,p_target_user_id:body.userId,p_action:action,p_role:body.role||null,p_access_status:body.accessStatus||null,p_permissions:body.permissions||null});
+      const {data,error}=await callerClient.rpc('av_admin_private_access_action_v4',{p_trip_id:tripId,p_target_user_id:body.userId,p_action:action,p_role:body.role||null,p_access_status:body.accessStatus||null,p_permissions:body.permissions||null});
       if(error)throw error;return json({ok:true,access:data});
     }
     if(!service)return json({error:'SERVER_ADMIN_SECRET_UNAVAILABLE'},503);const admin=createClient(url,service);
@@ -103,15 +104,15 @@ Deno.serve(async req=>{
       const created=await admin.auth.admin.createUser({email:internalEmail,password,email_confirm:true,user_metadata:{display_name:displayName}});if(created.error||!created.data.user)throw created.error||Error('USER_CREATE_FAILED');
       const userId=created.data.user.id;const profile=await admin.from('av_users').upsert({id:userId,display_name:displayName,email:internalEmail});if(profile.error)throw profile.error;
       const membershipStatus=body.accessStatus==='ACTIVE'?'ACTIVE':'INACTIVE';const permissions=body.permissions||{CanChat:(body.role||'VIEWER')!=='VIEWER',CanEditAgenda:(body.role||'VIEWER')==='TRAVELER'||(body.role||'VIEWER')==='ADMIN'};const access=await callerClient.rpc('av_admin_private_access_action',{p_trip_id:tripId,p_target_user_id:userId,p_action:'set_trip_access',p_role:body.role||'VIEWER',p_access_status:membershipStatus,p_permissions:permissions});if(access.error)throw access.error;
-      const pinValue=String(body.pin),pinHash=await hashPin(pinValue),lookup=await pinLookup(pinValue),encrypted=await encryptPin(pinValue);const pinResult=await callerClient.rpc('av_admin_private_access_action_v4',{p_trip_id:tripId,p_target_user_id:userId,p_action:'set_pin',p_role:body.role||'VIEWER',p_access_status:body.accessStatus||'ACTIVE',p_pin_hash:pinHash,p_pin_lookup_hmac:lookup,p_pin_encrypted:encrypted.ciphertext,p_pin_iv:encrypted.iv,p_pin_key_version:encrypted.version,p_permissions:{}});if(pinResult.error)throw pinResult.error;
+      const pinValue=String(body.pin),pinHash=await hashPin(pinValue),lookup=await pinLookup(pinValue),encrypted=await encryptPin(pinValue);const pinResult=await callerClient.rpc('av_admin_private_access_action_v4',{p_trip_id:tripId,p_target_user_id:userId,p_action:'set_pin',p_role:body.role||'VIEWER',p_access_status:body.accessStatus||'ACTIVE',p_pin_hash:pinHash,p_pin_lookup_hmac:lookup,p_pin_encrypted:encrypted.ciphertext,p_pin_iv:encrypted.iv,p_pin_key_version:encrypted.version,p_permissions:{}});if(pinResult.error){if(String(pinResult.error.message||'').includes('AV_PIN_ALREADY_ASSIGNED'))return json({error:'PIN_ALREADY_ASSIGNED'},409);throw pinResult.error;}
       return json({ok:true,userId});
     }
     if(action==='update_internal_user'){
       const target=String(body.userId||'');if(!target)return json({error:'TARGET_REQUIRED'},400);const displayName=String(body.displayName||'').trim();
       if(displayName){const profile=await admin.from('av_users').update({display_name:displayName}).eq('id',target);if(profile.error)throw profile.error;}
-      if(body.tripAccess){const membershipStatus=body.accessStatus==='ACTIVE'?'ACTIVE':'INACTIVE';const permissions=body.permissions||{CanChat:(body.role||'VIEWER')!=='VIEWER',CanEditAgenda:(body.role||'VIEWER')==='TRAVELER'||(body.role||'VIEWER')==='ADMIN'};const access=await callerClient.rpc('av_admin_private_access_action',{p_trip_id:body.tripAccess,p_target_user_id:target,p_action:'set_trip_access',p_role:body.role||'VIEWER',p_access_status:membershipStatus,p_permissions:permissions});if(access.error)throw access.error;}
-      if(body.accessStatus){const state=await callerClient.rpc('av_admin_private_access_action',{p_trip_id:tripId,p_target_user_id:target,p_action:'set_access_status',p_role:body.role||'VIEWER',p_access_status:body.accessStatus,p_permissions:null});if(state.error)throw state.error;}
-      if(body.pin){if(!validPin(String(body.pin)))return json({error:'PIN_MUST_BE_SIX_DIGITS'},400);const pinValue=String(body.pin),pinHash=await hashPin(pinValue),lookup=await pinLookup(pinValue),encrypted=await encryptPin(pinValue);const pinResult=await callerClient.rpc('av_admin_private_access_action_v4',{p_trip_id:tripId,p_target_user_id:target,p_action:'set_pin',p_role:body.role||null,p_access_status:body.accessStatus||null,p_pin_hash:pinHash,p_pin_lookup_hmac:lookup,p_pin_encrypted:encrypted.ciphertext,p_pin_iv:encrypted.iv,p_pin_key_version:encrypted.version,p_permissions:body.permissions||null});if(pinResult.error)throw pinResult.error;}
+      if(body.tripAccess){const membershipStatus=body.accessStatus==='ACTIVE'?'ACTIVE':'INACTIVE';const permissions=body.permissions||{CanChat:(body.role||'VIEWER')!=='VIEWER',CanEditAgenda:(body.role||'VIEWER')==='TRAVELER'||(body.role||'VIEWER')==='ADMIN'};const access=await callerClient.rpc('av_admin_private_access_action_v4',{p_trip_id:body.tripAccess,p_target_user_id:target,p_action:'set_trip_access',p_role:body.role||'VIEWER',p_access_status:membershipStatus,p_permissions:permissions});if(access.error)throw access.error;}
+      if(body.accessStatus){const state=await callerClient.rpc('av_admin_private_access_action_v4',{p_trip_id:tripId,p_target_user_id:target,p_action:'set_access_status',p_role:body.role||'VIEWER',p_access_status:body.accessStatus,p_permissions:null});if(state.error)throw state.error;}
+      if(body.pin){if(!validPin(String(body.pin)))return json({error:'PIN_MUST_BE_FOUR_DIGITS'},400);const pinValue=String(body.pin),pinHash=await hashPin(pinValue),lookup=await pinLookup(pinValue),encrypted=await encryptPin(pinValue);const pinResult=await callerClient.rpc('av_admin_private_access_action_v4',{p_trip_id:tripId,p_target_user_id:target,p_action:'set_pin',p_role:body.role||null,p_access_status:body.accessStatus||null,p_pin_hash:pinHash,p_pin_lookup_hmac:lookup,p_pin_encrypted:encrypted.ciphertext,p_pin_iv:encrypted.iv,p_pin_key_version:encrypted.version,p_permissions:body.permissions||null});if(pinResult.error){if(String(pinResult.error.message||'').includes('AV_PIN_ALREADY_ASSIGNED'))return json({error:'PIN_ALREADY_ASSIGNED'},409);throw pinResult.error;}}
       return json({ok:true,userId:target});
     }
     if(action==='invite'){

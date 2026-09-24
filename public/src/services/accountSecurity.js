@@ -25,7 +25,7 @@ export async function loadAdminUsers(tripId){
 export async function adminUserAction(action,payload){
   const client=await getSupabaseClient();
   const {data,error}=await client.functions.invoke('admin-user-management',{body:{action,...payload}});
-  if(error)throw error;
+  if(error){if(error.context?.status===409)throw new Error('Ese PIN ya está asignado. Usa otro.');throw error;}
   return data;
 }
 
