@@ -1,0 +1,17 @@
+import {test,expect} from '@playwright/test';
+
+const production='https://2110jrv.github.io/TravelManager_3/?tm3=217';
+const fixture={trip:{name:'Italia 2026',start_date:'2026-10-20',end_date:'2026-11-05',timezone:'Europe/Rome'},items:[
+  {start_date:'2026-10-20',start_time:'20:55',end_time:'23:30',type:'FLIGHT',title:'UA 2024',from:'SJU',to:'IAD',payment:'CONFIRMED'},
+  {starts_at:'2026-10-21T13:38:00+02:00',ends_at:'2026-10-21T14:10:00+02:00',type:'TRANSPORT',title:'Leonardo Express',place:'FCO → Roma Termini',payment:'CONFIRMED'},
+  {startDateTime:'2026-10-21T14:35:00+02:00',endDateTime:'2026-10-21T18:34:00+02:00',type:'RAIL',title:'Frecciarossa 9428',from:'Roma Termini',to:'Venezia S. Lucia',payment:'CONFIRMED'},
+  {date:'2026-10-24',startTime:'09:00',type:'RAIL',title:'Italo 8974',from:'Venezia',to:'Milano',payment:'CONFIRMED'},
+  {date:'2026-10-25',startTime:'08:00',type:'TRANSPORT',title:'Saver Day Pass',place:'Tirano → Milano',payment:'CONFIRMED'},
+  {date:'2026-10-26',startTime:'09:10',type:'RAIL',title:'Intercity 659',from:'Milano Centrale',to:'Genova',payment:'CONFIRMED'},
+  {date:'2026-10-26',startTime:'14:10',type:'RAIL',title:'Intercity 511',from:'Genova',to:'Pisa',payment:'CONFIRMED'},
+  {date:'2026-11-04',startTime:'10:00',type:'TOUR',title:'In Footsteps of Paul',place:'Roma',payment:'CONFIRMED'},
+  {date:'2026-11-05',startTime:'10:00',type:'FLIGHT',title:'UA 885',from:'Roma',to:'IAD',payment:'CONFIRMED'},
+  {date:'2026-11-05',startTime:'18:00',type:'FLIGHT',title:'UA 2025',from:'IAD',to:'SJU',payment:'CONFIRMED'},
+  {date:'2026-10-19',type:'PURCHASE',title:'EPICKA adapter'}]};
+
+test('published home groups real-date variants into the correct trip days',async({browser})=>{const context=await browser.newContext({viewport:{width:390,height:844},serviceWorkers:'block'});const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));await page.goto(production,{waitUntil:'networkidle'});await page.evaluate(async({fixture})=>{const moduleUrl=new URL('./src/app/render/renderHome.js',location.href).href;const {renderHome}=await import(moduleUrl);document.querySelector('#app').innerHTML=renderHome(fixture)},{fixture});await expect(page.locator('[data-home-trip-outline]')).toBeVisible();expect(await page.locator('[data-home-day]').count()).toBe(17);for(const [date,name] of [['2026-10-21','Leonardo Express'],['2026-10-21','Frecciarossa 9428'],['2026-10-24','Italo 8974'],['2026-10-25','Saver Day Pass'],['2026-10-26','Intercity 659'],['2026-10-26','Intercity 511'],['2026-11-04','In Footsteps of Paul'],['2026-11-05','UA 885'],['2026-11-05','UA 2025']])await expect(page.locator(`[data-home-day="${date}"]`)).toContainText(name);await expect(page.locator('.home-corrections')).not.toContainText('Leonardo Express');await expect(page.locator('.home-corrections')).toContainText('EPICKA adapter');await expect(page.locator('[data-home-day="2026-10-21"]')).toContainText('1:38 p. m.–2:10 p. m.');expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBeTruthy();expect(errors).toEqual([]);await page.screenshot({path:'tmp/home-date-grouping-production-390.png',fullPage:true});await page.setViewportSize({width:1440,height:900});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBeTruthy();await page.screenshot({path:'tmp/home-date-grouping-production-desktop.png',fullPage:true});await context.close()});
