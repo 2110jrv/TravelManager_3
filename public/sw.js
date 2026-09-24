@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tm3-213-home-compact-outline';
+const CACHE_NAME = 'tm3-215-home-full-trip-outline';
 const TILE_CACHE_NAME = 'travelmanager3-tiles-v1';
 const APP_SCOPE = new URL('./', self.location.href).href;
 const SUPABASE_HOST = 'cslludzuejkhsydqiabx.supabase.co';

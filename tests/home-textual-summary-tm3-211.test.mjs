@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {renderHome} from '../public/src/app/render/renderHome.js';
 
-const base={trip:{name:'Italia 2026',nights:'16/16 noches cubiertas'},syncStatus:'SYNCED',items:[
+const base={trip:{name:'Italia 2026',start_date:'2026-10-21',end_date:'2026-10-21',nights:'16/16 noches cubiertas'},syncStatus:'SYNCED',items:[
   {id:'flight',date:'2026-10-21',startTime:'13:15',type:'FLIGHT',title:'Llegada FCO',place:'Roma · Fiumicino',from:'SJU',to:'Roma'},
   {id:'train',date:'2026-10-21',startTime:'15:38',endTime:'16:10',type:'TRANSPORT',title:'Leonardo Express',place:'FCO → Roma Termini'},
   {id:'rail',date:'2026-10-21',startTime:'16:35',endTime:'20:34',type:'RAIL',title:'Frecciarossa',trainNumber:'9428',from:'Roma Termini',to:'Venezia'},
@@ -21,7 +21,7 @@ test('home creates a chronological textual summary from the selected day',()=>{
 });
 
 test('home marks a logical gap as pending without inventing a booking',()=>{
-  const html=renderHome({trip:{name:'Italia 2026'},items:[{date:'2026-10-21',startTime:'09:00',endTime:'10:00',type:'TRANSPORT',title:'Llegada a Pisa',place:'Pisa'},{date:'2026-10-21',startTime:'12:00',type:'TRANSPORT',title:'Traslado a Lucca',place:'Pisa → Lucca'}]});
+  const html=renderHome({trip:{name:'Italia 2026',start_date:'2026-10-21',end_date:'2026-10-21'},items:[{date:'2026-10-21',startTime:'09:00',endTime:'10:00',type:'TRANSPORT',title:'Llegada a Pisa',place:'Pisa'},{date:'2026-10-21',startTime:'12:00',type:'TRANSPORT',title:'Traslado a Lucca',place:'Pisa → Lucca'}]});
   assert.match(html,/Falta definir transporte de llegada o alojamiento/);
-  assert.match(html,/data-home-daily-summary/);
+  assert.match(html,/data-home-trip-outline/);
 });
