@@ -102,7 +102,8 @@ Deno.serve(async req=>{
       if(action==='set_role_permissions'){
         const role=String(body.role||'');if(!['ADMIN','TRAVELER','VIEWER'].includes(role)||!body.permissions)return json({error:'INVALID_ROLE_PERMISSIONS'},400);
         const permissions=normalizeRolePermissions(body.permissions);const saved=await serverAdmin!.from('av_role_permissions').upsert({role,permissions,updated_at:new Date().toISOString()});if(saved.error)throw saved.error;
-        const updated=await serverAdmin!.from('av_trip_memberships').update({permissions,updated_at:new Date().toISOString()}).eq('role',role);if(updated.error)throw updated.error;return json({ok:true,role,permissions});
+        const updated=await serverAdmin!.from('av_trip_memberships').update({permissions,updated_at:new Date().toISOString()}).eq('role',role);if(updated.error)throw updated.error;
+        const persisted=await serverAdmin!.from('av_role_permissions').select('role,permissions').eq('role',role).maybeSingle();if(persisted.error||!persisted.data)throw persisted.error||Error('PERMISSIONS_NOT_PERSISTED');return json({ok:true,role:persisted.data.role,permissions:normalizeRolePermissions(persisted.data.permissions)});
       }
       if(action==='get_user_pin'){
         const row=await serverAdmin!.from('av_app_access').select('pin_encrypted,pin_iv').eq('user_id',String(body.userId||'')).maybeSingle();if(row.error)throw row.error;if(!row.data?.pin_encrypted||!row.data?.pin_iv)return json({error:'PIN_NOT_AVAILABLE'},404);const pin=await decryptPin(row.data.pin_encrypted,row.data.pin_iv);const response=json({ok:true,pin});response.headers.set('Cache-Control','no-store');return response;
@@ -114,7 +115,7 @@ Deno.serve(async req=>{
         const revoked=await serverAdmin!.from('av_app_access').update({access_status:'REVOKED',updated_at:new Date().toISOString()}).eq('user_id',target);if(revoked.error)throw revoked.error;
         const memberships=await serverAdmin!.from('av_trip_memberships').delete().eq('user_id',target);if(memberships.error)throw memberships.error;
         const deleted=await serverAdmin!.from('av_users').delete().eq('id',target);if(deleted.error)throw deleted.error;
-        await serverAdmin!.auth.admin.deleteUser(target);return json({ok:true,userId:target});
+        const removed=await serverAdmin!.auth.admin.deleteUser(target);if(removed.error)throw removed.error;return json({ok:true,userId:target});
       }
       if(action==='create_internal_user'){
         const displayName=String(body.displayName||'').trim(),role=String(body.role||'VIEWER');if(!displayName||!validPin(String(body.pin||''))||!['ADMIN','TRAVELER','VIEWER'].includes(role))return json({error:'INVALID_INTERNAL_USER'},400);
