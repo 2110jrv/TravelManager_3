@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {renderAgenda} from '../public/src/app/render/renderAgenda.js';
+import {renderAgendaEditor} from '../public/src/app/render/renderAgendaEditor.js';
+import {renderSettings} from '../public/src/app/render/renderSettings.js';
 
 const data={items:[{id:'a',date:'2026-10-20',startTime:'16:35',title:'Frecciarossa 9428',type:'RAIL',from:'Roma Termini',to:'Venezia',bookingReference:'A37WSN',passengers:[{name:'Jennifer',coach:'7',seat:'6A'}]},{id:'b',date:'2026-10-20',startTime:'20:34',title:'Venice lodging',type:'LODGING'}],ideas:[]};
 
@@ -13,3 +15,5 @@ test('changed-day data moves into a new day group without navigation state',()=>
 test('cancel and close use the same finally restoration path',()=>{const source=fs.readFileSync(new URL('../public/src/app/main.js',import.meta.url),'utf8');assert.match(source,/try\{return await agenda\.edit\(id\)\}finally\{restoreAgendaContext\(context\)\}/)});
 test('expanded item state is retained through edit restoration',()=>{const source=fs.readFileSync(new URL('../public/src/app/main.js',import.meta.url),'utf8');assert.match(source,/expandedAgendaId=context\.expandedId/);assert.match(source,/expandedId:expandedAgendaId/)});
 test('long press and right click still route to edit',()=>{const source=fs.readFileSync(new URL('../public/src/app/main.js',import.meta.url),'utf8');assert.match(source,/setTimeout\(\(\)=>router\.route\('edit'/);assert.match(source,/contextmenu/);assert.match(source,/router\.route\('edit',item\)/)});
+test('item editor sections start collapsed and expose validation fields',()=>{const html=renderAgendaEditor({id:'editor-1',title:'EPICKA'});assert.equal((html.match(/<details/g)||[]).length,9);assert.equal((html.match(/<details open/g)||[]).length,0);assert.match(html,/data-editor-section="general"/);assert.match(html,/data-editor-field="title"/);assert.match(html,/data-editor-section="history"/)});
+test('settings collapsibles start closed',()=>{const html=renderSettings({profile:{display_name:'QA'},access:{role:'ADMIN'},trip:{name:'Italy 2026'}});assert.equal((html.match(/<details open/g)||[]).length,0);assert.match(html,/class="settings-section"/)});
