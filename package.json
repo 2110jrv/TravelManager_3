@@ -5,8 +5,6 @@
   "scripts": {
     "build": "node scripts/bundle-supabase.mjs && node scripts/validate-build.mjs",
     "admin:set-pin": "node scripts/admin-set-pin.mjs",
-    "admin:set-backdoor": "node scripts/admin-set-backdoor.mjs",
-    "qa:backdoor": "node scripts/qa-backdoor.mjs",
     "start": "npx http-server ./public -c-1 -p 5003",
     "mock:server": "node tests/mock-server/server.mjs",
     "test:e2e": "playwright test --grep-invert \"authenticated Supabase sandbox\"",

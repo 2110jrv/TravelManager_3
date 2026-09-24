@@ -27,5 +27,6 @@ test('login surface contains no test labels or credential hints',()=>{
 test('login exposes no user recovery or password flow',()=>{
   assert.doesNotMatch(main,/type=recovery|data-recovery-password|forgot-password|send-own-reset|name="email"|name="password"/);
   assert.match(main,/pattern="\[0-9\]\{4\}"/);
-  assert.match(security,/verify_backdoor_login/);
+  assert.match(security,/verify_pin_login/);
+  assert.doesNotMatch(security,/verify_backdoor_login|USER_MANAGER_ONLY/);
 });

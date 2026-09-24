@@ -22,26 +22,15 @@ async function pinLookup(pin:string){
 async function pinCipherKey(){const secret=Deno.env.get('PIN_ENCRYPTION_KEY');if(!secret)throw Error('PIN_ENCRYPTION_KEY_UNAVAILABLE');const digest=await crypto.subtle.digest('SHA-256',encoder.encode(secret));return crypto.subtle.importKey('raw',digest,{name:'AES-GCM'},false,['encrypt','decrypt']);}
 async function encryptPin(pin:string){const iv=crypto.getRandomValues(new Uint8Array(12));const encrypted=await crypto.subtle.encrypt({name:'AES-GCM',iv},await pinCipherKey(),encoder.encode(pin));return {ciphertext:b64encode(new Uint8Array(encrypted)),iv:b64encode(iv),version:'v1'};}
 async function decryptPin(ciphertext:string,iv:string){const decoded=await crypto.subtle.decrypt({name:'AES-GCM',iv:b64decode(iv)},await pinCipherKey(),b64decode(ciphertext));return new TextDecoder().decode(decoded);}
-async function issueBackdoorSession(admin:any,bridgeUserId:string){
-  const {data:user,error:userError}=await admin.auth.admin.getUserById(bridgeUserId);if(userError||!user?.user?.email)throw Error('SESSION_BOOTSTRAP_FAILED');
-  const generated=await admin.auth.admin.generateLink({type:'magiclink',email:user.user.email});
-  const tokenHash=generated.data?.properties?.hashed_token||generated.data?.properties?.token_hash;
-  if(generated.error||!tokenHash)throw Error('SESSION_BOOTSTRAP_FAILED');
-  return {token_hash:tokenHash,type:'magiclink'};
-}
-async function isBackdoorUser(admin:any,userId:string){const {data}=await admin.from('av_backdoor_config').select('bridge_user_id,enabled').eq('id',true).maybeSingle();return Boolean(data?.enabled&&data.bridge_user_id===userId);}
-async function ensureBackdoorUser(admin:any){
-  const existing=await admin.from('av_backdoor_config').select('bridge_user_id,enabled').eq('id',true).maybeSingle();
-  if(existing.error)throw existing.error;if(existing.data?.bridge_user_id)return existing.data.bridge_user_id;
-  const email=`agenda-backdoor-${crypto.randomUUID()}@agenda-viajera.invalid`,password=crypto.randomUUID().replaceAll('-','')+crypto.randomUUID().replaceAll('-','');
-  const created=await admin.auth.admin.createUser({email,password,email_confirm:true,user_metadata:{agenda_scope:'USER_MANAGER_ONLY'}});
-  if(created.error||!created.data.user)throw created.error||Error('BACKDOOR_BRIDGE_CREATE_FAILED');
-  const saved=await admin.from('av_backdoor_config').upsert({id:true,bridge_user_id:created.data.user.id,enabled:true,updated_at:new Date().toISOString()});
-  if(saved.error)throw saved.error;return created.data.user.id;
-}
-async function backdoorPinConfigured(pin:string){const encoded=Deno.env.get('BACKDOOR_PIN_HASH');return Boolean(encoded&&/^\d{1,64}$/.test(pin)&&await verifyPin(pin,encoded));}
 const defaultRolePermissions=(role:string)=>{const permissions={viewHome:true,viewAgenda:true,editAgenda:role!=='VIEWER',deleteAgenda:role==='ADMIN',viewMap:true,viewPhotos:true,uploadPhotos:role!=='VIEWER',deletePhotos:role==='ADMIN',viewChat:true,writeChat:role!=='VIEWER',viewBudget:role!=='VIEWER',viewDocuments:true,manageDocuments:role==='ADMIN',editTrip:role!=='VIEWER'};return {...permissions,CanChat:permissions.viewChat&&permissions.writeChat,CanEditAgenda:permissions.editAgenda,CanViewDocuments:permissions.viewDocuments};};
 const normalizeRolePermissions=(permissions:any)=>({...permissions,CanChat:permissions.viewChat!==false&&permissions.writeChat!==false,CanEditAgenda:permissions.editAgenda!==false,CanViewDocuments:permissions.viewDocuments!==false});
+async function isInternalAdmin(admin:any,userId:string,tripId:string){
+  const [{data:access},{data:membership}]=await Promise.all([
+    admin.from('av_app_access').select('access_status,role').eq('user_id',userId).maybeSingle(),
+    admin.from('av_trip_memberships').select('role,status').eq('user_id',userId).eq('trip_id',tripId).maybeSingle()
+  ]);
+  return access?.access_status==='ACTIVE'&&access?.role==='ADMIN'&&membership?.status==='ACTIVE'&&membership?.role==='ADMIN';
+}
 async function issueSession(admin:any,userId:string){
   const {data:user,error:userError}=await admin.auth.admin.getUserById(userId);if(userError||!user?.user?.email)throw Error('SESSION_BOOTSTRAP_FAILED');
   const generated=await admin.auth.admin.generateLink({type:'magiclink',email:user.user.email});
@@ -55,11 +44,6 @@ Deno.serve(async req=>{
   try{
     const body=await req.json(),action=String(body.action||''),tripId=body.tripId;
     const url=Deno.env.get('SUPABASE_URL')!,anon=Deno.env.get('SUPABASE_ANON_KEY')!,service=Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-    if(action==='verify_backdoor_login'){
-      if(!service||!(await backdoorPinConfigured(String(body.pin||''))))return genericError();
-      const admin=createClient(url,service),bridgeUserId=await ensureBackdoorUser(admin),session=await issueBackdoorSession(admin,bridgeUserId);
-      return json({ok:true,scope:'USER_MANAGER_ONLY',session});
-    }
     if(action==='verify_pin_login'){
       if(!service||!validLoginPin(String(body.pin||'')))return genericError();
       const admin=createClient(url,service);
@@ -92,7 +76,7 @@ Deno.serve(async req=>{
     const callerClient=createClient(url,anon,{global:{headers:{Authorization:authHeader}}});
     const {data:{user:caller}}=await callerClient.auth.getUser();if(!caller)return json({error:'AUTH_REQUIRED'},401);
     const serverAdmin=service?createClient(url,service):null;
-    const manager=Boolean(serverAdmin&&await isBackdoorUser(serverAdmin,caller.id));
+    const manager=Boolean(serverAdmin&&await isInternalAdmin(serverAdmin,caller.id,tripId));
     if(action==='invite'||action==='reset_email')return json({error:'EMAIL_INVITES_DISABLED'},410);
     if(action==='list_internal_users'){
       if(!manager)return json({error:'USER_MANAGER_REQUIRED'},403);
@@ -129,8 +113,8 @@ Deno.serve(async req=>{
       if(action==='create_internal_user'){
         const displayName=String(body.displayName||'').trim(),role=String(body.role||'VIEWER');if(!displayName||!validPin(String(body.pin||''))||!['ADMIN','TRAVELER','VIEWER'].includes(role))return json({error:'INVALID_INTERNAL_USER'},400);
         const pinValue=String(body.pin),lookup=await pinLookup(pinValue);const duplicate=await serverAdmin!.from('av_app_access').select('user_id').eq('pin_lookup_hmac',lookup).eq('access_status','ACTIVE').maybeSingle();if(duplicate.data)return json({error:'PIN_ALREADY_ASSIGNED'},409);
-        const email=`internal-${crypto.randomUUID()}@agenda-viajera.invalid`,password=crypto.randomUUID().replaceAll('-','')+crypto.randomUUID().replaceAll('-','');const created=await serverAdmin!.auth.admin.createUser({email,password,email_confirm:true,user_metadata:{display_name:displayName}});if(created.error||!created.data.user)throw created.error||Error('USER_CREATE_FAILED');const userId=created.data.user.id;
-        const profile=await serverAdmin!.from('av_users').upsert({id:userId,display_name:displayName,email:null});if(profile.error)throw profile.error;const perms=normalizeRolePermissions((await serverAdmin!.from('av_role_permissions').select('permissions').eq('role',role).maybeSingle()).data?.permissions||defaultRolePermissions(role));const membership=await serverAdmin!.from('av_trip_memberships').upsert({trip_id:tripId,user_id:userId,role,permissions:perms,status:body.accessStatus==='ACTIVE'?'ACTIVE':'INACTIVE'});if(membership.error)throw membership.error;const pinHash=await hashPin(pinValue),encrypted=await encryptPin(pinValue);const access=await serverAdmin!.from('av_app_access').upsert({user_id:userId,access_status:body.accessStatus||'ACTIVE',role,pin_hash:pinHash,pin_lookup_hmac:lookup,pin_encrypted:encrypted.ciphertext,pin_iv:encrypted.iv,pin_key_version:encrypted.version});if(access.error)throw access.error;return json({ok:true,userId});
+        const email=`internal-${crypto.randomUUID()}@agenda-viajera.invalid`,password=b64encode(crypto.getRandomValues(new Uint8Array(48))).replaceAll('+','-').replaceAll('/','_').replaceAll('=','');const created=await serverAdmin!.auth.admin.createUser({email,password,email_confirm:true,user_metadata:{display_name:displayName}});if(created.error||!created.data.user)throw created.error||Error('USER_CREATE_FAILED');const userId=created.data.user.id;
+        const profile=await serverAdmin!.from('av_users').upsert({id:userId,auth_user_id:userId,display_name:displayName,email:null});if(profile.error)throw profile.error;const perms=normalizeRolePermissions((await serverAdmin!.from('av_role_permissions').select('permissions').eq('role',role).maybeSingle()).data?.permissions||defaultRolePermissions(role));const membership=await serverAdmin!.from('av_trip_memberships').upsert({trip_id:tripId,user_id:userId,role,permissions:perms,status:body.accessStatus==='ACTIVE'?'ACTIVE':'INACTIVE'});if(membership.error)throw membership.error;const pinHash=await hashPin(pinValue),encrypted=await encryptPin(pinValue);const access=await serverAdmin!.from('av_app_access').upsert({user_id:userId,access_status:body.accessStatus||'ACTIVE',role,pin_hash:pinHash,pin_lookup_hmac:lookup,pin_encrypted:encrypted.ciphertext,pin_iv:encrypted.iv,pin_key_version:encrypted.version});if(access.error)throw access.error;return json({ok:true,userId});
       }
       const target=String(body.userId||'');if(!target)return json({error:'TARGET_REQUIRED'},400);
       if(action==='update_internal_user'){const displayName=String(body.displayName||'').trim();if(displayName){const updated=await serverAdmin!.from('av_users').update({display_name:displayName}).eq('id',target);if(updated.error)throw updated.error;}}
@@ -189,10 +173,6 @@ Deno.serve(async req=>{
       if(body.pin){if(!validPin(String(body.pin)))return json({error:'PIN_MUST_BE_FOUR_DIGITS'},400);const pinValue=String(body.pin),pinHash=await hashPin(pinValue),lookup=await pinLookup(pinValue),encrypted=await encryptPin(pinValue);const pinResult=await callerClient.rpc('av_admin_private_access_action_v4',{p_trip_id:tripId,p_target_user_id:target,p_action:'set_pin',p_role:body.role||null,p_access_status:body.accessStatus||null,p_pin_hash:pinHash,p_pin_lookup_hmac:lookup,p_pin_encrypted:encrypted.ciphertext,p_pin_iv:encrypted.iv,p_pin_key_version:encrypted.version,p_permissions:body.permissions||null});if(pinResult.error){if(String(pinResult.error.message||'').includes('AV_PIN_ALREADY_ASSIGNED'))return json({error:'PIN_ALREADY_ASSIGNED'},409);throw pinResult.error;}}
       return json({ok:true,userId:target});
     }
-    if(action==='invite'){
-      const invited=await admin.auth.admin.inviteUserByEmail(body.email,{data:{display_name:body.displayName||''},redirectTo:body.redirectTo});if(invited.error)throw invited.error;const userId=invited.data.user.id;const profile=await admin.from('av_users').upsert({id:userId,display_name:body.displayName||body.email,email:body.email});if(profile.error)throw profile.error;const access=await callerClient.rpc('av_admin_private_access_action',{p_trip_id:tripId,p_target_user_id:userId,p_action:'set_trip_access',p_role:body.role||'VIEWER',p_access_status:'INVITED',p_permissions:body.permissions||{}});if(access.error)throw access.error;return json({ok:true,userId});
-    }
-    if(action==='reset_email'){const result=await admin.auth.admin.generateLink({type:'recovery',email:body.email,options:{redirectTo:body.redirectTo}});if(result.error)throw result.error;return json({ok:true});}
     return json({error:'UNKNOWN_ACTION'},400);
   }catch(error){return json({error:String(error?.message||error)},500)}
 });
