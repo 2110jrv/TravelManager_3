@@ -22,6 +22,14 @@ test('only active internal ADMIN users can manage users and permissions',()=>{
   assert.match(main,/access\.role==='ADMIN'/);
 });
 
+test('ADMIN user listing is normalized and does not expose credential material',()=>{
+  assert.match(edge,/internal_user_id/);
+  assert.match(edge,/access_status/);
+  assert.match(edge,/pin_available/);
+  assert.doesNotMatch(edge,/return \{[^}]*pin_hash/);
+  assert.doesNotMatch(edge,/return \{[^}]*pin_lookup_hmac/);
+});
+
 test('technical mapping is additive and preserves existing auth uid identity',()=>{
   assert.match(migration,/auth_user_id uuid references auth\.users/);
   assert.match(migration,/set auth_user_id=id/);

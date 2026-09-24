@@ -80,14 +80,20 @@ Deno.serve(async req=>{
     if(action==='invite'||action==='reset_email')return json({error:'EMAIL_INVITES_DISABLED'},410);
     if(action==='list_internal_users'){
       if(!manager)return json({error:'USER_MANAGER_REQUIRED'},403);
-      const [{data:users,error:userError},{data:memberships,error:membershipError},{data:devices,error:deviceError},{data:accessRows,error:accessError}]=await Promise.all([
-        serverAdmin!.from('av_users').select('id,display_name,created_at').order('display_name'),
-        serverAdmin!.from('av_trip_memberships').select('id,user_id,trip_id,role,status,permissions,updated_at').eq('trip_id',tripId),
-        serverAdmin!.from('av_devices').select('device_id,user_id,state,last_seen_at').not('user_id','is',null),
-        serverAdmin!.from('av_app_access').select('user_id,access_status,role')
-      ]);if(userError||membershipError||deviceError||accessError)throw userError||membershipError||deviceError||accessError;
-      const byUser=new Map((memberships||[]).map(x=>[x.user_id,x]));const byAccess=new Map((accessRows||[]).map(x=>[x.user_id,x]));
-      return json({ok:true,users:(users||[]).map(user=>({...user,membership:byUser.get(user.id)||null,access:byAccess.get(user.id)||null,devices:(devices||[]).filter(x=>x.user_id===user.id)}))});
+      const [{data:users,error:userError},{data:memberships,error:membershipError},{data:accessRows,error:accessError}]=await Promise.all([
+        serverAdmin!.from('av_users').select('id,auth_user_id,display_name,created_at').order('display_name'),
+        serverAdmin!.from('av_trip_memberships').select('id,user_id,trip_id,role,status,permissions,updated_at'),
+        serverAdmin!.from('av_app_access').select('user_id,access_status,role,pin_encrypted,pin_iv')
+      ]);
+      if(userError||membershipError||accessError)throw userError||membershipError||accessError;
+      const byInternal=new Map<string,any[]>(),byAuth=new Map((accessRows||[]).map(x=>[x.user_id,x]));
+      for(const membership of memberships||[]){const rows=byInternal.get(membership.user_id)||[];rows.push(membership);byInternal.set(membership.user_id,rows);}
+      const normalized=(users||[]).map(user=>{
+        const authUserId=user.auth_user_id||user.id,access=byAuth.get(authUserId)||byAuth.get(user.id),rows=byInternal.get(user.id)||[],tripRows=rows.filter(row=>row.status==='ACTIVE');
+        const membership=rows.find(row=>row.trip_id===tripId)||rows[0]||null;
+        return {id:user.id,internal_user_id:user.id,display_name:user.display_name||'Sin nombre',role:membership?.role||access?.role||'VIEWER',access_status:access?.access_status||membership?.status||'DISABLED',trips:tripRows.map(row=>row.trip_id),pin_available:Boolean(access?.pin_encrypted&&access?.pin_iv),membership,access:{user_id:authUserId,access_status:access?.access_status||'DISABLED',role:access?.role||membership?.role||'VIEWER'}};
+      });
+      return json({ok:true,users:normalized});
     }
     if(manager&&action==='list_role_permissions'){
       const {data,error}=await serverAdmin!.from('av_role_permissions').select('role,permissions').order('role');if(error)throw error;return json({ok:true,permissions:Object.fromEntries((data||[]).map(row=>[row.role,row.permissions]))});
