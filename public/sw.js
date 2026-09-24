@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tm3-152-4-digit-pin-login';
+const CACHE_NAME = 'tm3-154-multi-user-device-login';
 const TILE_CACHE_NAME = 'travelmanager3-tiles-v1';
 const APP_SCOPE = new URL('./', self.location.href).href;
 const SUPABASE_HOST = 'cslludzuejkhsydqiabx.supabase.co';
