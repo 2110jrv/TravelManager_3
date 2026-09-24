@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tm3-219-home-real-day-grouping';
+const CACHE_NAME = 'tm3-221-agenda-compact-density';
 const TILE_CACHE_NAME = 'travelmanager3-tiles-v1';
 const APP_SCOPE = new URL('./', self.location.href).href;
 const SUPABASE_HOST = 'cslludzuejkhsydqiabx.supabase.co';
