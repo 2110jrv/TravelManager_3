@@ -8,10 +8,14 @@ const edge=await readFile(new URL('../supabase/functions/admin-user-management/i
 const security=await readFile(new URL('../public/src/services/accountSecurity.js',import.meta.url),'utf8');
 const users=await readFile(new URL('../public/src/app/render/renderAdminUsers.js',import.meta.url),'utf8');
 const permissions=await readFile(new URL('../public/src/auth/permissions.js',import.meta.url),'utf8');
+const qa=await readFile(new URL('../scripts/qa-backdoor.mjs',import.meta.url),'utf8');
+const main=await readFile(new URL('../public/src/app/main.js',import.meta.url),'utf8');
 
 test('backdoor is server-side and scoped to USER_MANAGER_ONLY',()=>{
   assert.match(edge,/BACKDOOR_PIN_HASH/);assert.match(edge,/USER_MANAGER_ONLY/);assert.match(edge,/ensureBackdoorUser/);assert.match(security,/verify_backdoor_login/);
-  assert.match(users,/data-user-manager-root/);assert.match(users,/data-admin-user-form/);assert.match(users,/data-role-permission/);assert.match(users,/data-user-row/);assert.doesNotMatch(users,/name="email"|name="password"|invite/i);
+  assert.match(users,/data-user-manager-root/);assert.match(users,/data-admin-user-form/);assert.match(users,/data-role-permission/);assert.match(users,/data-user-row/);assert.match(users,/data-add-user/);assert.match(users,/data-user-name/);assert.match(users,/data-user-pin/);assert.match(users,/data-user-role/);assert.match(users,/data-user-status/);assert.match(users,/data-user-trips/);assert.match(users,/data-user-save/);assert.match(users,/data-user-delete/);assert.match(users,/data-role-permission-save/);assert.match(users,/data-user-pin-confirm/);assert.doesNotMatch(users,/name="email"|name="password"|invite/i);
+  for(const stage of ['manager_loaded','add_user_opened','user_created','user_login','permission_changed','admin_created','user_deleted'])assert.match(qa,new RegExp(`'${stage}'`));assert.match(qa,/requests_4xx_5xx/);assert.match(qa,/data-user-manager-root/);assert.doesNotMatch(qa,/getByRole|getByText|hasText/);
+  assert.match(main,/data-user-logout/);assert.match(main,/data-pin-input/);assert.match(main,/data-pin-submit/);
 });
 test('backdoor config keeps RLS and is writable only by service_role',()=>{
   assert.match(migration,/enable row level security/);assert.match(migration,/revoke all on public\.av_backdoor_config from anon, authenticated/);
