@@ -110,11 +110,15 @@ Deno.serve(async req=>{
         const row=await serverAdmin!.from('av_app_access').select('pin_encrypted,pin_iv').eq('user_id',String(body.userId||'')).maybeSingle();if(row.error)throw row.error;if(!row.data?.pin_encrypted||!row.data?.pin_iv)return json({error:'PIN_NOT_AVAILABLE'},404);const pin=await decryptPin(row.data.pin_encrypted,row.data.pin_iv);const response=json({ok:true,pin});response.headers.set('Cache-Control','no-store');return response;
       }
       if(action==='delete_internal_user'){
-        const target=String(body.userId||'');if(!target)return json({error:'TARGET_REQUIRED'},400);const userRow=await serverAdmin!.from('av_users').select('display_name,auth_user_id').eq('id',target).maybeSingle();if(userRow.error)throw userRow.error;const name=userRow.data?.display_name||'Usuario eliminado';const authTarget=userRow.data?.auth_user_id||target;
-        const snapshot=await serverAdmin!.from('av_messages').update({sender_name:name}).eq('sender_user_id',target).is('sender_name',null);if(snapshot.error)throw snapshot.error;
-        for(const table of ['av_devices','av_restore_requests']){const cleared=await serverAdmin!.from(table).update({user_id:null}).eq('user_id',target);if(cleared.error&&cleared.error.code!=='42703')throw cleared.error;}
+        const target=String(body.userId||'');if(!target)return json({error:'TARGET_REQUIRED'},400);
+        const byInternal=await serverAdmin!.from('av_users').select('id,display_name,auth_user_id').eq('id',target).maybeSingle();if(byInternal.error)throw byInternal.error;
+        const byAuth=!byInternal.data?await serverAdmin!.from('av_users').select('id,display_name,auth_user_id').eq('auth_user_id',target).maybeSingle():{data:null,error:null};if(byAuth.error)throw byAuth.error;
+        const userRow=byInternal.data||byAuth.data;if(!userRow)return json({error:'USER_NOT_FOUND'},404);
+        const internalTarget=userRow.id,authTarget=userRow.auth_user_id||userRow.id,name=userRow.display_name||'Usuario eliminado';
+        const snapshot=await serverAdmin!.from('av_messages').update({sender_name:name}).in('sender_user_id',[internalTarget,authTarget]).is('sender_name',null);if(snapshot.error)throw snapshot.error;
+        for(const table of ['av_devices','av_restore_requests']){const cleared=await serverAdmin!.from(table).update({user_id:null}).eq('user_id',internalTarget);if(cleared.error&&cleared.error.code!=='42703')throw cleared.error;}
         const revoked=await serverAdmin!.from('av_app_access').update({access_status:'REVOKED',updated_at:new Date().toISOString()}).eq('user_id',authTarget);if(revoked.error)throw revoked.error;
-        const memberships=await serverAdmin!.from('av_trip_memberships').update({status:'INACTIVE',updated_at:new Date().toISOString()}).eq('user_id',target);if(memberships.error)throw memberships.error;
+        const memberships=await serverAdmin!.from('av_trip_memberships').update({status:'INACTIVE',updated_at:new Date().toISOString()}).eq('user_id',internalTarget);if(memberships.error)throw memberships.error;
         const removed=await serverAdmin!.auth.admin.deleteUser(authTarget);if(removed.error)throw removed.error;return json({ok:true,userId:target});
       }
       if(action==='create_internal_user'){

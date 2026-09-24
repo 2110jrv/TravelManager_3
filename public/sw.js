@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tm3-201-viewer-readonly-delete-fix';
+const CACHE_NAME = 'tm3-205-user-delete-live';
 const TILE_CACHE_NAME = 'travelmanager3-tiles-v1';
 const APP_SCOPE = new URL('./', self.location.href).href;
 const SUPABASE_HOST = 'cslludzuejkhsydqiabx.supabase.co';

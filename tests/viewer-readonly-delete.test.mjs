@@ -24,10 +24,15 @@ test('VIEWER writes are denied server-side regardless of custom permission JSON'
 test('user deletion preserves chat snapshot and revokes access before Auth deletion',()=>{
   assert.match(main,/admin-delete-user/);
   assert.match(main,/confirm\(/);
+  assert.match(main,/stopImmediatePropagation\(\)/);
+  assert.match(main,/adminUserAction\('delete_internal_user'.*userId:button\.dataset\.userId/);
   assert.match(edge,/sender_name:name/);
   assert.match(edge,/access_status:'REVOKED'/);
   assert.match(edge,/status:'INACTIVE'/);
   assert.match(edge,/auth_user_id/);
+  assert.match(edge,/byInternal/);
+  assert.match(edge,/byAuth/);
+  assert.match(edge,/internalTarget/);
   assert.match(edge,/eq\('user_id',authTarget\)/);
   assert.match(edge,/auth\.admin\.deleteUser/);
 });
