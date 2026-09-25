@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tm3-223-editor-compact-collapsed';
+const CACHE_NAME = 'tm3-227-dropbox-photo-storage';
 const TILE_CACHE_NAME = 'travelmanager3-tiles-v1';
 const APP_SCOPE = new URL('./', self.location.href).href;
 const SUPABASE_HOST = 'cslludzuejkhsydqiabx.supabase.co';

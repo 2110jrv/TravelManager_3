@@ -1,0 +1,13 @@
+import {getSupabaseClient} from '../supabaseClient.js';
+const TRIP_ID='1aafae82-4ff7-423b-ade2-25170e8b0dd4';
+const SHARED_URL='https://www.dropbox.com/scl/fo/ziwwcdq9zqqd2aq2y226v/AJPhpXL11_sNZ_2xKAPHzoU?rlkey=5oe9ttpcp3u70tj0v53nbkmgj&st=3mo33pkj&dl=0';
+async function invoke(action,body={}){const c=await getSupabaseClient();let payload={action,tripId:TRIP_ID,...body};if(action==='upload'&&body.file instanceof File){const form=new FormData();for(const [key,value] of Object.entries(payload)){if(key!=='file'&&value!=null)form.append(key,String(value));}form.append('file',body.file,body.file.name);payload=form;}else delete payload.file;const {data,error}=await c.functions.invoke('dropbox-photo-storage',{body:payload});if(error)throw error;return data;}
+function random(){const bytes=crypto.getRandomValues(new Uint8Array(32));return btoa(String.fromCharCode(...bytes)).replaceAll('+','-').replaceAll('/','_').replaceAll('=','');}
+async function challenge(verifier){const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(verifier));return btoa(String.fromCharCode(...new Uint8Array(digest))).replaceAll('+','-').replaceAll('/','_').replaceAll('=','');}
+export async function startDropboxOAuth(){const config=await invoke('oauth_config');const verifier=random(),state=random();sessionStorage.setItem('tm3.dropbox.verifier',verifier);sessionStorage.setItem('tm3.dropbox.state',state);const codeChallenge=await challenge(verifier);const params=new URLSearchParams({client_id:config.appKey,response_type:'code',redirect_uri:config.redirectUri,token_access_type:'offline',code_challenge:codeChallenge,code_challenge_method:'S256',state});location.assign(`https://www.dropbox.com/oauth2/authorize?${params}`);}
+export async function finishDropboxOAuth(){const params=new URLSearchParams(location.search);const code=params.get('code'),state=params.get('state');if(!code&&!params.get('error'))return null;if(!code||state!==sessionStorage.getItem('tm3.dropbox.state'))throw Error('DROPBOX_OAUTH_STATE');const verifier=sessionStorage.getItem('tm3.dropbox.verifier');if(!verifier)throw Error('DROPBOX_OAUTH_VERIFIER');const result=await invoke('oauth_exchange',{code,verifier});sessionStorage.removeItem('tm3.dropbox.state');sessionStorage.removeItem('tm3.dropbox.verifier');history.replaceState({},'',location.pathname);return result;}
+export const getDropboxStatus=()=>invoke('status');
+export const resolveDropboxFolder=()=>invoke('resolve_folder',{sharedUrl:SHARED_URL});
+export const disconnectDropbox=()=>invoke('disconnect');
+export const uploadDropboxPhoto=(file,fields={})=>invoke('upload',{file,...fields});
+export const listDropboxPhotos=()=>invoke('list');

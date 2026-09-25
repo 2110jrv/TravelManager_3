@@ -1,6 +1,7 @@
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-export function renderSettings({profile,authUser,access,remoteStatus='online',trip}={}){
+export function renderSettings({profile,authUser,access,remoteStatus='online',trip,dropboxStatus}={}){
   const role=access?.role||'VIEWER';
+  dropboxStatus=dropboxStatus||globalThis.__tm3DropboxStatus||{connected:false};
   return `<section class="section-head"><div><span class="eyebrow">CUENTA Y VIAJE</span><h2>Configuración</h2></div></section>
   <div class="settings-stack">
     <details class="settings-section"><summary>Viaje</summary><div class="settings-body"><strong data-trip-name="${esc(trip?.name||'Italy October/November 2026')}">${esc(trip?.name||'Italy October/November 2026')}</strong><span>20 oct – 5 nov 2026 · Jonathan & Jennifer</span></div></details>
@@ -8,6 +9,7 @@ export function renderSettings({profile,authUser,access,remoteStatus='online',tr
     <details class="settings-section"><summary>Apariencia</summary><div class="settings-body"><label class="setting-select">Tamaño de texto<select data-text-scale><option value="default">Predeterminado</option><option value="small">Pequeño</option><option value="large">Grande</option></select></label><label class="setting-toggle"><input type="checkbox" data-high-contrast> Alto contraste</label></div></details>
     <details class="settings-section"><summary>Sincronización y dispositivo</summary><div class="settings-body"><span>Dispositivo: ${esc(access?.deviceState||'TRUSTED')}</span><span>Estado: ${esc(remoteStatus||'offline')}</span></div></details>
     <details class="settings-section"><summary>Recuperación WhatsApp</summary><div class="settings-body"><span class="status-pill">No configurado</span><p>Requiere un proveedor de WhatsApp Business compatible.</p></div></details>
+    <details class="settings-section" data-dropbox-storage><summary>Fotos · Almacenamiento</summary><div class="settings-body"><strong>Dropbox — ${esc(trip?.name||'Italy 2026')}</strong><p data-dropbox-status>${dropboxStatus?.connected?'Conectado':'Desconectado'}</p>${dropboxStatus?.connected?`<p class="settings-muted">${esc(dropboxStatus.connection?.display_name||'Cuenta Dropbox conectada')}</p><p class="settings-muted">Carpeta: ${esc(dropboxStatus.connection?.default_folder_path||'Pendiente de resolver')}</p><div class="settings-actions"><button class="secondary" data-dropbox-resolve>Resolver carpeta Italy 2026</button><button class="secondary" data-dropbox-disconnect>Desconectar</button></div>`:'<button class="primary" data-dropbox-connect>Conectar Dropbox</button>'}<p class="settings-muted">Las credenciales y tokens se gestionan únicamente en el servidor.</p></div></details>
     ${role==='ADMIN'?'<details class="settings-section"><summary>Administración</summary><div class="settings-body"><button class="secondary" data-view="admin">Dispositivos y auditoría</button><button class="secondary" data-view="admin-users">Usuarios y permisos</button></div></details>':''}
   </div>`;
 }
