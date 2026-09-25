@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tm3-233-settings-collapsible-state';
+const CACHE_NAME = 'tm3-235-dropbox-folder-resolver';
 const TILE_CACHE_NAME = 'travelmanager3-tiles-v1';
 const APP_SCOPE = new URL('./', self.location.href).href;
 const SUPABASE_HOST = 'cslludzuejkhsydqiabx.supabase.co';
