@@ -12,3 +12,5 @@ export const disconnectDropbox=()=>invoke('disconnect');
 export const uploadDropboxPhoto=(file,fields={})=>invoke('upload',{file,...fields});
 export const listDropboxPhotos=()=>invoke('list');
 export const openDropboxPhotoOriginal=path=>invoke('original',{path});
+export const getDropboxPhotoThumbnail=photoId=>invoke('thumbnail',{photoId});
+export const downloadDropboxPhoto=photoId=>invoke('download',{photoId});
