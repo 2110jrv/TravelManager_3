@@ -41,4 +41,5 @@ body{background:linear-gradient(180deg,#f7f9fd 0%,#f1f5fb 100%);letter-spacing:-
 .editor-actions{gap:6px;padding:7px 2px 1px}
 .editor-actions button{min-height:38px;padding:7px 11px;border-radius:9px;font-size:.8rem}
 .settings-section summary{position:relative;padding-right:30px}
+.photo-toast{position:fixed;z-index:40;left:50%;bottom:86px;transform:translateX(-50%);max-width:min(92vw,520px);padding:12px 16px;border:1px solid #b8d9bd;border-radius:12px;background:#effaf0;color:#206733;box-shadow:0 8px 24px #17223824;font-weight:800;text-align:center}
 @media(max-width:640px){.editor-backdrop{padding:0}.agenda-editor{max-height:96vh;border-radius:16px 16px 0 0}.editor-header{padding:9px 12px}.agenda-editor form{padding:7px}.editor-grid{grid-template-columns:1fr;gap:6px;padding:0 8px 8px}.editor-actions{padding-bottom:calc(4px + env(safe-area-inset-bottom,0px))}.editor-actions button{min-height:42px}.agenda-editor summary{padding:9px 10px;padding-right:30px}}
