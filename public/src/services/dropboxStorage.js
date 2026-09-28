@@ -11,3 +11,4 @@ export const resolveDropboxFolder=()=>invoke('resolve_folder',{sharedUrl:SHARED_
 export const disconnectDropbox=()=>invoke('disconnect');
 export const uploadDropboxPhoto=(file,fields={})=>invoke('upload',{file,...fields});
 export const listDropboxPhotos=()=>invoke('list');
+export const openDropboxPhotoOriginal=path=>invoke('original',{path});
