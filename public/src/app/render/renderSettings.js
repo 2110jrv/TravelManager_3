@@ -1,10 +1,11 @@
+import {PHOTOS_ENABLED} from '../../config/features.js';
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const settingsOpen=key=>globalThis.__tm3SettingsOpen?.[key]===true?' open':'';
 export function renderSettings({profile,authUser,access,remoteStatus='online',trip,dropboxStatus}={}){
   const role=access?.role||'VIEWER';
   dropboxStatus=dropboxStatus||globalThis.__tm3DropboxStatus||{connected:false};
   const dropboxResolve=globalThis.__tm3DropboxResolve||{loading:false,error:''};
-  return `<section class="section-head"><div><span class="eyebrow">CUENTA Y VIAJE</span><h2>Configuración</h2></div></section>
+  const html=`<section class="section-head"><div><span class="eyebrow">CUENTA Y VIAJE</span><h2>Configuración</h2></div></section>
   <div class="settings-stack">
     <details class="settings-section" data-settings-section="trip"${settingsOpen('trip')}><summary>Viaje</summary><div class="settings-body"><strong data-trip-name="${esc(trip?.name||'Italy October/November 2026')}">${esc(trip?.name||'Italy October/November 2026')}</strong><span>20 oct – 5 nov 2026 · Jonathan & Jennifer</span></div></details>
     <details class="settings-section" data-settings-section="account"${settingsOpen('account')}><summary>Cuenta</summary><div class="settings-body"><dl class="settings-list"><div><dt>Nombre</dt><dd>${esc(profile?.display_name||'')}</dd></div><div><dt>Rol</dt><dd><span class="role-pill">${esc(role)}</span></dd></div></dl><p class="admin-security-note">El PIN de acceso solo puede asignarlo o restablecerlo un administrador.</p></div></details>
@@ -14,4 +15,5 @@ export function renderSettings({profile,authUser,access,remoteStatus='online',tr
     <details class="settings-section" data-settings-section="photo-storage"${settingsOpen('photo-storage')}><summary>Fotos · Almacenamiento</summary><div class="settings-body"><strong>Dropbox — ${esc(trip?.name||'Italy 2026')}</strong><p data-dropbox-status>${dropboxStatus?.connected?'Conectado':'Desconectado'}</p>${dropboxStatus?.connected?`<p class="settings-muted">${esc(dropboxStatus.connection?.display_name||'Cuenta Dropbox conectada')}</p><p class="settings-muted">Carpeta: ${esc(dropboxStatus.connection?.default_folder_path||'Pendiente de resolver')}</p><div class="settings-actions"><button class="secondary" data-dropbox-resolve ${dropboxResolve.loading?'disabled':''}>${dropboxResolve.loading?'Resolviendo…':'Resolver carpeta Italy 2026'}</button>${dropboxResolve.error?'<button class="secondary" data-dropbox-reconnect>Reconectar Dropbox</button>':''}<button class="secondary" data-dropbox-disconnect>Desconectar</button></div>${dropboxResolve.error?`<p class="settings-message error" data-dropbox-resolve-error role="alert">${esc(dropboxResolve.error)}</p>`:''}`:'<button class="primary" data-dropbox-connect>Conectar Dropbox</button>'}<p class="settings-muted">Las credenciales y tokens se gestionan únicamente en el servidor.</p></div></details>
     ${role==='ADMIN'?`<details class="settings-section" data-settings-section="admin"${settingsOpen('admin')}><summary>Administración</summary><div class="settings-body"><button class="secondary" data-view="admin">Dispositivos y auditoría</button><button class="secondary" data-view="admin-users">Usuarios y permisos</button></div></details>`:''}
   </div>`;
+  return PHOTOS_ENABLED?html:html.replace(/\s*<details class="settings-section" data-settings-section="photo-storage">[\s\S]*?<\/details>/,'');
 }
