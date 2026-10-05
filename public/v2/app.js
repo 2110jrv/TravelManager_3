@@ -3,12 +3,16 @@ import { TRIP } from './config.js';
 import { dateKey, occursOn, days, finance, normalizeEvent } from './domain.js';
 import { LocalStore } from './store.js';
 import { GoogleSource } from './google.js';
+import { GoogleAuthorization } from './google-auth.js';
 import { SupabaseRemote, SyncEngine } from './sync.js';
 import {Devices} from './devices.js';
 import {expenseSnapshots} from './fx.js';
 import qrcode from '../vendor/qrcode-generator.mjs';
 
+let googleAuthorization=null;const pendingGoogleAuth=[];
 const client = createClient('https://cslludzuejkhsydqiabx.supabase.co', 'sb_publishable_8k8xhMZtkay30ZB45aPjGw_4u69Dp0U', { auth: { storageKey: 'av2.auth', flowType:'pkce', persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
+// Subscribe before opening IndexedDB: PKCE can finish during database startup.
+client.auth.onAuthStateChange((event,session)=>{if(googleAuthorization)setTimeout(()=>googleAuthorization.capture(event,session).catch(error=>notice(error.message)),0);else pendingGoogleAuth.push({event,session});});
 const store = await new LocalStore().open();
 const inviteMatch=/^#invite\/([0-9a-f]{64})$/.exec(location.hash);
 if(inviteMatch){await store.put('meta',{id:'pending-invite',value:inviteMatch[1]});history.replaceState(null,'',`${location.pathname}#devices`);}
@@ -32,7 +36,10 @@ if (['127.0.0.1','localhost'].includes(location.hostname) && new URL(location.hr
 }
 const remote = new SupabaseRemote(client, store.device,store.deviceToken);
 const devices=new Devices(remote);
-const google = new GoogleSource(async () => (await client.auth.getSession()).data.session?.provider_token || (await store.get('meta','google-access'))?.value,fetch,()=>remote.check());
+googleAuthorization=new GoogleAuthorization(store);
+await googleAuthorization.capture('INITIAL_SESSION',(await client.auth.getSession()).data.session);
+for(const {event,session}of pendingGoogleAuth)await googleAuthorization.capture(event,session);
+const google = new GoogleSource(()=>googleAuthorization.token(),fetch,()=>remote.check(),()=>googleAuthorization.invalidate());
 const sync = new SyncEngine(store, remote, google);
 const app = document.querySelector('#app');
 let rootClaim=null;
@@ -49,7 +56,7 @@ const eventTime = event => event.allDay ? 'Todo el día' : event.timezone?new In
 const button = (action, text, id = '', style = 'secondary') => `<button class="${style}" data-action="${action}" data-id="${escape(id)}">${text}</button>`;
 function notice(message) { const friendly={AV2_DEVICE_ENROLLMENT_REQUIRED:'Esta instalación requiere una invitación o activar PC Casa.',AV2_DEVICE_REVOKED:'Este dispositivo fue revocado. Se invalidaron los datos locales.',AV2_ADMIN_PROOF_INVALID:'La clave administrativa no es válida.',AV2_INVITE_ALREADY_USED:'La invitación ya fue utilizada.',AV2_INVITE_INVALID_OR_EXPIRED:'La invitación venció o no es válida.',AV2_ADMIN_KEY_NOT_CONFIGURED:'Configura la clave administrativa desde PC Casa.',AV2_ADMIN_RATE_LIMIT:'Demasiados intentos. Espera diez minutos antes de intentar otra vez.'};const node = document.querySelector('#notice'); node.textContent = Object.entries(friendly).find(([code])=>String(message).includes(code))?.[1]||message; node.hidden = false; clearTimeout(notice.timer); notice.timer = setTimeout(() => { node.hidden = true; }, 6500); }
 function summary() {return finance(events.filter(x=>days().some(day=>occursOn(x,day))),active('expenses'),active('budgets')[0]?.data.amount??null,Object.fromEntries(active('exchange_rates').map(x=>[x.data.currency,x.data])));}
-function stats() { const f = summary(); return `<div class="grid"><div class="card stat"><span>Pagado real</span><strong>${money(f.paid)}</strong></div><div class="card stat"><span>Estimado pendiente</span><strong>${money(f.estimated)}</strong></div><div class="card stat highlight"><span>Costo proyectado</span><strong>${money(f.projected)}</strong></div></div>${f.missing.length ? `<p class="warning">${f.missing.length} importe(s) requieren una tasa de cambio. La proyección es parcial.</p>` : ''}`; }
+function stats() { const f = summary(); return `<div class="grid"><div class="card stat"><span>Pagado real</span><strong>${money(f.paid)}</strong></div><div class="card stat"><span>Estimado pendiente</span><strong>${money(f.estimated)}</strong></div><div class="card stat highlight"><span>Costo proyectado</span><strong>${money(f.projected)}</strong></div></div>${Object.entries(f.by_currency).map(([currency,t])=>`<p class="muted">${escape(currency)} · Pagado ${escape(t.paid.toFixed(2))} · Estimado ${escape(t.estimated.toFixed(2))} · Proyectado ${escape(t.projected.toFixed(2))}</p>`).join(' ')}${f.missing.length ? `<p class="warning">${f.missing.length} importe(s) requieren una tasa de cambio. La proyección es parcial.</p>` : ''}`; }
 function eventCard(event) {
   const past = event.end && new Date(event.allDay ? `${event.end}T00:00:00` : event.end) < now;
   return `<a class="event ${past ? 'past' : ''}" href="#event/${encodeURIComponent(event.id)}"><span class="event-time">${escape(eventTime(event))}</span><div class="event-body"><h3>${escape(event.title)}</h3><p>${escape(event.location || 'Ubicación por confirmar')}</p>${event.label ? `<span class="badge">${escape(event.label.name || `Label ${event.label.id}`)}</span>` : ''}${event.cost_status ? `<span class="badge ${event.cost_status === 'PAID' ? 'paid' : 'pending'}">${event.cost_status === 'PAID' ? 'Pagado' : 'Estimado'} · ${escape(event.currency || 'Moneda pendiente')} ${escape(event.cost ?? '—')}</span>` : ''}${event.allDay && event.end > event.start ? '<span class="badge">Disponible durante su vigencia</span>' : ''}</div><span aria-hidden="true">›</span></a>`;
@@ -137,7 +144,7 @@ app.addEventListener('click', async event => {
   const { action, id } = target.dataset;
   try {
     if (action === 'day') selectedDay = id;
-    else if (action === 'google') { const { error } = await client.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: `${location.origin}${location.pathname}`, scopes: 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/drive' } }); if (error) throw error; }
+    else if (action === 'google') { const { error } = await client.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: `${location.origin}${location.pathname}`, scopes: 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.calendars.readonly https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly' } }); if (error) throw error; }
     else if(action==='claim-root'){await devices.claimRoot(rootClaim?.token);rootClaim=null;await store.put('meta',{id:'authorized',value:true});await syncAll();}
     else if(action==='enroll'){const name=await requestValue('Nombre del teléfono','text','Jonathan S26 Ultra');if(name){await devices.enroll((await store.get('meta','pending-invite'))?.value,name);await store.transaction(['meta'],tx=>tx.objectStore('meta').delete('pending-invite'));await store.put('meta',{id:'authorized',value:true});location.hash='#home';await syncAll();notice('Dispositivo autorizado. Puedes instalar la PWA y preparar offline.');}}
     else if(action==='rename-device'){const name=await requestValue('Nombre de esta instalación');if(name)await devices.rename(name);}
@@ -192,7 +199,6 @@ addEventListener('offline', () => refreshBackground());
 addEventListener('beforeinstallprompt', event => { event.preventDefault(); installPrompt = event; });
 async function refreshBackground(){if(location.hash.startsWith('#expense/')){document.querySelector('#connection').textContent=navigator.onLine?'En línea':'Sin conexión';return;}await render();}
 function scheduleSync(){clearTimeout(scheduleSync.timer);scheduleSync.timer=setTimeout(async()=>{if(navigator.onLine&&(await store.get('meta','authorized'))?.value){try{await sync.run();await refreshBackground();}catch(error){notice(error.message);if(error.message.includes('AV2_DEVICE_REVOKED'))await render();else await refreshBackground();}}},1000);}
-client.auth.onAuthStateChange((event,session)=>{if(session?.provider_token)setTimeout(()=>store.put('meta',{id:'google-access',value:session.provider_token}).catch(error=>notice(error.message)),0);});
 if ('serviceWorker' in navigator) {
   const hadController = !!navigator.serviceWorker.controller;
   const registration = await navigator.serviceWorker.register('./sw.js', { scope: './' });

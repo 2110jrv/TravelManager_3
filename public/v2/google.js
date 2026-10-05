@@ -1,17 +1,19 @@
 import { TRIP } from './config.js';
 import { normalizeEvent } from './domain.js';
 export class GoogleSource {
-  constructor(getToken, request = fetch, guard = async()=>{}) { this.getToken = getToken; this.request = request; this.guard=guard; }
+  constructor(getToken, request = fetch, guard = async()=>{}, unauthorized=async()=>{}) { this.getToken = getToken; this.request = (...args)=>request(...args); this.guard=guard; this.unauthorized=unauthorized; }
   async api(path, options = {}) {
     await this.guard();
     const token = await this.getToken();
     if (!token) throw Error('Autoriza Google para leer Calendar y Drive.');
     const response = await this.request(`https://www.googleapis.com/${path}`, { ...options, headers: { ...options.headers, Authorization: `Bearer ${token}` } });
-    if (!response.ok) { const error = Error(response.status === 401 ? 'La autorización Google expiró. Conecta nuevamente.' : `Google: error ${response.status}`); error.status = response.status; throw error; }
+    if (!response.ok) { if(response.status===401)await this.unauthorized();const error = Error(response.status === 401 ? 'La autorización Google expiró. Conecta nuevamente.' : `Google: error ${response.status}`); error.status = response.status; throw error; }
     return response;
   }
   async syncCalendar(store) {
-    const colors = await (await this.api('calendar/v3/colors')).json();
+    let colors={event:{}};
+    try{colors=await(await this.api('calendar/v3/colors')).json();}
+    catch(error){if(error.status!==403)throw error;}
     const calendar=await (await this.api(`calendar/v3/calendars/${encodeURIComponent(TRIP.calendarId)}?eventLabelVersion=1`)).json();
     const labels=Object.fromEntries((calendar.labelProperties?.eventLabels||[]).map(label=>[label.id,label]));
     const saved = await store.get('meta', 'calendar-sync');
@@ -72,7 +74,7 @@ export class GoogleSource {
     const body = new Blob([`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadata}\r\n--${boundary}\r\nContent-Type: ${blob.type || 'application/octet-stream'}\r\n\r\n`, blob, `\r\n--${boundary}--`]);
     await this.guard();const token = await this.getToken(); if (!token) throw Error('Conecta Google para subir recibos.');
     const response = await this.request('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': `multipart/related; boundary=${boundary}` }, body });
-    if (!response.ok) throw Error(`Drive upload: ${response.status}`);
+    if (!response.ok) {if(response.status===401)await this.unauthorized();throw Error(response.status===401?'La autorización Google expiró. Conecta nuevamente.':`Drive upload: ${response.status}`);}
     return (await response.json()).id;
   }
   async verifyInTrip(id,seen=new Set()){

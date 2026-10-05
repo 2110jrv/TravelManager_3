@@ -10,6 +10,7 @@ test('multiday event appears on every included day and counts once financially',
   for (const day of ['2026-10-21','2026-10-22','2026-10-23']) assert.equal(occursOn(e,day),true);
   assert.equal(occursOn(e,'2026-10-24'),false);
   assert.equal(finance([e,e,e],[]).paid,100);
+  assert.deepEqual(finance([e,e,e],[]).by_currency.USD,{paid:100,estimated:0,projected:100});
 });
 test('structured costs, prefixes and official labels remain independent', () => {
   const e = normalizeEvent({...raw(),event_label_id:'transport',description:'[AGENDA_VIAJERA]\nCOST=12.50\nCURRENCY=EUR\nCOST_STATUS=ESTIMATED\n[/AGENDA_VIAJERA]'}, {}, {transport:{name:'Transportation',background_color:'#123456'}});
@@ -27,6 +28,7 @@ test('multicurrency projection stays explicitly partial without rate', () => {
   const e = normalizeEvent({...raw(),description:'[AGENDA_VIAJERA] COST=20 CURRENCY=EUR COST_STATUS=PAID [/AGENDA_VIAJERA]'});
   const f = finance([e],[{id:'e',data:{amount:10,currency:'CHF',exchange_rate:1.2,cost_status:'ESTIMATED'}}],100);
   assert.equal(f.paid,0); assert.equal(f.estimated,12); assert.equal(f.projected,12); assert.equal(f.missing.length,1); assert.equal(f.budget,100);
+  assert.deepEqual(f.by_currency.EUR,{paid:20,estimated:0,projected:20});
 });
 test('different fields merge, same field preserves alternatives, tombstone blocks stale edit', () => {
   const current = {id:'a',version:2,data:{description:'New',amount:10}};
@@ -62,6 +64,27 @@ test('failed Calendar page never acknowledges sync token or applies a partial im
   const google = new GoogleSource(async () => 'token',async url => url.endsWith('/colors') ? Response.json({event:{}}) : new Response('',{status:403}));
   await assert.rejects(google.syncCalendar({get:async()=>null,transaction:async()=>transactions++}),/403/);
   assert.equal(transactions,0);
+});
+test('Google expiration persists across reopen and Supabase refresh without losing offline work', async () => {
+  const {GoogleAuthorization}=await import('../public/v2/google-auth.js');
+  const rows=new Map([['expense',{id:'expense',value:'offline work'}]]);
+  const store={get:async(_,id)=>rows.get(id),transaction:async(_,fn)=>fn({objectStore:()=>({put:row=>rows.set(row.id,row),delete:id=>rows.delete(id)})})};
+  const auth=new GoogleAuthorization(store);
+  await auth.capture('SIGNED_IN',{provider_token:'initial'});
+  const source=new GoogleSource(()=>auth.token(),async()=>new Response('',{status:401}),async()=>{},()=>auth.invalidate());
+  await assert.rejects(source.api('calendar/v3/colors'),/expiró/);
+  const reopened=new GoogleAuthorization(store);
+  await reopened.capture('INITIAL_SESSION',{provider_token:'initial'});
+  await reopened.capture('TOKEN_REFRESHED',{provider_token:'initial'});
+  await reopened.capture('SIGNED_IN',{provider_token:'initial'});
+  await assert.rejects(reopened.token(),/expiró/);
+  assert.equal(rows.get('expense').value,'offline work');
+  await reopened.capture('SIGNED_IN',{provider_token:'renewed'});
+  assert.equal(await reopened.token(),'renewed');
+});
+test('Google request uses fetch without binding it to the source instance',async()=>{
+  const google=new GoogleSource(async()=> 'token',function(){assert.equal(this,undefined);return Response.json({ok:true});});
+  assert.equal((await(await google.api('calendar/v3/colors')).json()).ok,true);
 });
 test('receipt retry finds existing Drive upload rather than duplicating it', async () => {
   let uploads = 0;

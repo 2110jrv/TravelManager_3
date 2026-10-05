@@ -42,17 +42,21 @@ export function days() {
   return result;
 }
 export function finance(events, expenses, budget = null, referenceRates = {}) {
-  let paid = 0, estimated = 0; const missing = [];
+  let paid = 0, estimated = 0; const missing = [], by_currency={};
   const unique = [...new Map(events.filter(x => !x.deleted_at).map(x => [x.id, x])).values()];
   for (const item of [...unique.map(x => ({ ...x, amount: x.cost })), ...expenses.filter(x => !x.deleted_at).map(x => ({ id: x.id, ...x.data }))]) {
     if (item.amount == null || !item.cost_status) continue;
     const original=item.amount_original ?? item.amount,currency=item.currency_original ?? item.currency;
+    const originalTotals=by_currency[currency]??={paid:0,estimated:0,projected:0};
+    if(item.cost_status==='PAID')originalTotals.paid+=Number(original);
+    else if(item.cost_status==='ESTIMATED')originalTotals.estimated+=Number(original);
+    originalTotals.projected=originalTotals.paid+originalTotals.estimated;
     const saved=item.actual_base_amount ?? item.amount_base ?? item.base_amount ?? ((item.fx_rate_to_base ?? item.exchange_rate)!=null?original*(item.fx_rate_to_base ?? item.exchange_rate):null);
     const equivalent=currency===TRIP.currency?original:item.cost_status==='ESTIMATED'&&referenceRates[currency]?.rate?original*referenceRates[currency].rate:saved;
     if (equivalent == null) { missing.push(item); continue; }
     if (item.cost_status === 'PAID') paid += Number(equivalent); else if (item.cost_status === 'ESTIMATED') estimated += Number(equivalent);
   }
-  return { paid, estimated, projected: paid + estimated, budget, difference: budget == null ? null : budget - paid - estimated, missing };
+  return { paid, estimated, projected: paid + estimated, budget, difference: budget == null ? null : budget - paid - estimated, missing,by_currency };
 }
 export function mergeFields(current, operation) {
   if (current?.deleted_at) return { record: current, conflicts: operation.deleted_at ? [] : [{ field: 'deleted_at', current: current.deleted_at, incoming: operation.changes }] };

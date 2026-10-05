@@ -20,8 +20,8 @@ La configuración OAuth no se repite por dispositivo. Cada dispositivo autentica
 
 ## Scopes
 
-- `https://www.googleapis.com/auth/calendar.readonly`: lectura de Calendar, Labels y colores. No permite editar/eliminar eventos.
-- `https://www.googleapis.com/auth/drive`: lectura de los documentos privados existentes y creación de recibos en el árbol ya existente, además de la acción explícita de enviar un documento a la papelera. No se exige acceso público. `drive.file` por sí solo no proporciona acceso a todos los archivos preexistentes del viaje; adoptar ese scope requeriría un flujo Google Picker adicional para otorgar acceso archivo por archivo.
+- `https://www.googleapis.com/auth/calendar.events` y `https://www.googleapis.com/auth/calendar.calendars.readonly`: scopes configurados por Jonathan; la aplicación solo lee Calendar y sus Labels.
+- `https://www.googleapis.com/auth/drive.file` y `https://www.googleapis.com/auth/drive.readonly`: lectura del árbol existente y creación de recibos de la aplicación. La papelera de documentos existentes puede devolver 403 si no fueron autorizados para esta aplicación; no se amplían scopes.
 
 El código limita listado, descarga y papelera al árbol Italia 2026 y sube recibos exclusivamente a Recibos. El acceso administrativo a Google Drive sigue siendo el de la cuenta Google; la revocación de un dispositivo Agenda bloquea las operaciones de la aplicación, pero no revoca la cuenta Google personal.
 
