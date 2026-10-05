@@ -4,12 +4,16 @@ import { dateKey, occursOn, days, finance, normalizeEvent } from './domain.js';
 import { LocalStore } from './store.js';
 import { GoogleSource } from './google.js';
 import { SupabaseRemote, SyncEngine } from './sync.js';
+import {Devices} from './devices.js';
+import {expenseSnapshots} from './fx.js';
+import qrcode from '../vendor/qrcode-generator.mjs';
 
-const client = createClient('https://cslludzuejkhsydqiabx.supabase.co', 'sb_publishable_8k8xhMZtkay30ZB45aPjGw_4u69Dp0U', { auth: { storageKey: 'av2.auth', persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
+const client = createClient('https://cslludzuejkhsydqiabx.supabase.co', 'sb_publishable_8k8xhMZtkay30ZB45aPjGw_4u69Dp0U', { auth: { storageKey: 'av2.auth', flowType:'pkce', persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
 const store = await new LocalStore().open();
-// Development-only, real Calendar export read through the connected Google account.
-// The production static host has no endpoint or embedded itinerary data.
-if (['127.0.0.1','localhost'].includes(location.hostname) && navigator.onLine) {
+const inviteMatch=/^#invite\/([0-9a-f]{64})$/.exec(location.hash);
+if(inviteMatch){await store.put('meta',{id:'pending-invite',value:inviteMatch[1]});history.replaceState(null,'',`${location.pathname}#devices`);}
+// Snapshot loading requires both an explicit fixture URL and a test-only server flag.
+if (['127.0.0.1','localhost'].includes(location.hostname) && new URL(location.href).searchParams.get('fixture')==='1' && navigator.onLine) {
   try {
     const response = await fetch('./local-calendar', { cache: 'no-store' });
     if (response.ok) {
@@ -26,10 +30,13 @@ if (['127.0.0.1','localhost'].includes(location.hostname) && navigator.onLine) {
     }
   } catch { /* Existing Calendar cache remains usable offline. */ }
 }
-const remote = new SupabaseRemote(client, store.device);
-const google = new GoogleSource(async () => (await client.auth.getSession()).data.session?.provider_token);
+const remote = new SupabaseRemote(client, store.device,store.deviceToken);
+const devices=new Devices(remote);
+const google = new GoogleSource(async () => (await client.auth.getSession()).data.session?.provider_token || (await store.get('meta','google-access'))?.value,fetch,()=>remote.check());
 const sync = new SyncEngine(store, remote, google);
 const app = document.querySelector('#app');
+let rootClaim=null;
+if(['127.0.0.1','localhost'].includes(location.hostname)&&navigator.onLine){try{const response=await fetch('./root-claim',{cache:'no-store'});if(response.ok)rootClaim=await response.json();}catch{/* Claims are available only on PC Casa's local preview. */}}
 let selectedDay = days().includes(dateKey()) ? dateKey() : TRIP.start;
 let documents = (await store.get('meta', 'drive-files'))?.value || [];
 let events = [], records = [], pending = [], conflicts = [], now = new Date();
@@ -38,10 +45,10 @@ const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&a
 const money = value => new Intl.NumberFormat('es', { style: 'currency', currency: TRIP.currency }).format(value || 0);
 const formatDay = day => new Intl.DateTimeFormat('es', { dateStyle: 'full', timeZone: 'UTC' }).format(new Date(`${day}T12:00:00Z`));
 const active = kind => records.filter(x => x.kind === kind && !x.deleted_at);
-const eventTime = event => event.allDay ? 'Todo el día' : new Intl.DateTimeFormat('es', { hour: '2-digit', minute: '2-digit', timeZone: event.timezone }).format(new Date(event.start));
+const eventTime = event => event.allDay ? 'Todo el día' : event.timezone?new Intl.DateTimeFormat('es', { hour: '2-digit', minute: '2-digit', timeZone: event.timezone }).format(new Date(event.start)):event.start?.slice(11,16)||'—';
 const button = (action, text, id = '', style = 'secondary') => `<button class="${style}" data-action="${action}" data-id="${escape(id)}">${text}</button>`;
-function notice(message) { const node = document.querySelector('#notice'); node.textContent = message; node.hidden = false; clearTimeout(notice.timer); notice.timer = setTimeout(() => { node.hidden = true; }, 6500); }
-function summary() { return finance(events.filter(x => days().some(day => occursOn(x, day))), active('expenses'), active('budgets')[0]?.data.amount ?? null); }
+function notice(message) { const friendly={AV2_DEVICE_ENROLLMENT_REQUIRED:'Esta instalación requiere una invitación o activar PC Casa.',AV2_DEVICE_REVOKED:'Este dispositivo fue revocado. Se invalidaron los datos locales.',AV2_ADMIN_PROOF_INVALID:'La clave administrativa no es válida.',AV2_INVITE_ALREADY_USED:'La invitación ya fue utilizada.',AV2_INVITE_INVALID_OR_EXPIRED:'La invitación venció o no es válida.',AV2_ADMIN_KEY_NOT_CONFIGURED:'Configura la clave administrativa desde PC Casa.',AV2_ADMIN_RATE_LIMIT:'Demasiados intentos. Espera diez minutos antes de intentar otra vez.'};const node = document.querySelector('#notice'); node.textContent = Object.entries(friendly).find(([code])=>String(message).includes(code))?.[1]||message; node.hidden = false; clearTimeout(notice.timer); notice.timer = setTimeout(() => { node.hidden = true; }, 6500); }
+function summary() {return finance(events.filter(x=>days().some(day=>occursOn(x,day))),active('expenses'),active('budgets')[0]?.data.amount??null,Object.fromEntries(active('exchange_rates').map(x=>[x.data.currency,x.data])));}
 function stats() { const f = summary(); return `<div class="grid"><div class="card stat"><span>Pagado real</span><strong>${money(f.paid)}</strong></div><div class="card stat"><span>Estimado pendiente</span><strong>${money(f.estimated)}</strong></div><div class="card stat highlight"><span>Costo proyectado</span><strong>${money(f.projected)}</strong></div></div>${f.missing.length ? `<p class="warning">${f.missing.length} importe(s) requieren una tasa de cambio. La proyección es parcial.</p>` : ''}`; }
 function eventCard(event) {
   const past = event.end && new Date(event.allDay ? `${event.end}T00:00:00` : event.end) < now;
@@ -76,16 +83,26 @@ function budget() {
 function expenseList() { return active('expenses').map(x => `<div class="card list-row row"><div><h3>${escape(x.data.description)}</h3><small>${escape(x.data.date)} · ${escape(x.data.category)} · ${escape(x.data.cost_status)}</small></div><a href="#expense/${x.id}">${escape(x.data.amount)} ${escape(x.data.currency)} ›</a></div>`).join('') || '<div class="empty">Aún no hay gastos manuales. Registra uno y tu presupuesto se actualiza inmediatamente.</div>'; }
 function expenseForm(id) {
   const record = active('expenses').find(x => x.id === id), d = record?.data || {};
+  expenseForm.base=record?structuredClone(record):null;
   return `<a class="back" href="#budget">‹ Presupuesto</a><h1>${record ? 'Editar gasto' : 'Nuevo gasto'}</h1><p class="subtitle">Se guarda en este dispositivo, incluso sin conexión.</p><form id="expense-form" class="card detail" data-id="${escape(record?.id || '')}"><label>Descripción<input name="description" required maxlength="200" value="${escape(d.description)}"></label><div class="form-grid"><label>Importe original<input name="amount" type="number" min="0" step="0.01" required value="${escape(d.amount)}"></label><label>Moneda ISO<input name="currency" required pattern="[A-Z]{3}" maxlength="3" value="${escape(d.currency || 'USD')}" list="currencies"><datalist id="currencies"><option>USD</option><option>EUR</option><option>CHF</option></datalist></label><label>Estado<select name="cost_status"><option value="PAID" ${d.cost_status === 'PAID' ? 'selected' : ''}>Pagado real</option><option value="ESTIMATED" ${d.cost_status === 'ESTIMATED' ? 'selected' : ''}>Estimado pendiente</option></select></label><label>Fecha<input name="date" type="date" required value="${escape(d.date || dateKey())}"></label><label>Categoría<input name="category" value="${escape(d.category || 'Otros')}" required></label><label>Persona<select name="person"><option value="">Sin especificar</option>${TRIP.travelers.map(person => `<option ${d.person === person ? 'selected' : ''}>${person}</option>`).join('')}</select></label><label>Tasa a USD por unidad (opcional)<input name="exchange_rate" type="number" min="0.000001" step="any" value="${escape(d.exchange_rate)}"></label><label>Ubicación (opcional)<input name="location" value="${escape(d.location)}"></label></div><label>Notas<textarea name="notes">${escape(d.notes)}</textarea></label><label>Foto o archivo de recibo<input name="receipt" type="file" accept="image/*,application/pdf" capture="environment"></label>${d.receipt_local_id ? `<p class="muted">Recibo guardado ${d.receipt_drive_id ? 'en Drive' : 'localmente; pendiente de subir'}. ${button('remove-receipt', 'Quitar recibo del gasto', record.id)}</p>` : ''}<div class="actions"><button type="submit" class="primary">Guardar gasto</button>${record ? button('delete-expense', 'Eliminar gasto', record.id, 'danger') : ''}</div></form>`;
 }
 function settings() {
-  return `<span class="eyebrow">Tu viaje, conectado</span><h1>Más y ajustes</h1><section class="card"><h3>Google Calendar + Drive</h3><p class="muted">Autoriza tu cuenta con acceso a Italy Vacation y a la carpeta privada del viaje.</p><div class="actions">${button('google', 'Conectar Google', '', 'primary')}${button('sync', 'Sincronizar ahora')}${button('install', 'Instalar aplicación')}</div><p class="muted">${pending.length} cambios pendientes · ${conflicts.length} conflictos locales</p></section><section class="card section">${[['documents','Documentos y boletos'],['offline','Preparar offline'],['sync','Sincronización'],['conflicts','Resolver conflictos']].map(([route, text]) => `<a class="list-row row" href="#${route}">${text}<span>›</span></a>`).join('')}</section><section class="card"><h3>Este dispositivo</h3><p class="muted">Identidad independiente: ${escape(store.device)}</p><p class="muted">Italia 2026 · Jonathan + Jenny · USD</p></section>`;
+  return `<span class="eyebrow">Tu viaje, conectado</span><h1>Más y ajustes</h1><section class="card"><h3>Google Calendar + Drive</h3><p class="muted">Autoriza tu cuenta con acceso a Italy Vacation y a la carpeta privada del viaje.</p><div class="actions">${button('google', 'Conectar Google', '', 'primary')}${button('sync', 'Sincronizar ahora')}${button('install', 'Instalar aplicación')}</div><p class="muted">${pending.length} cambios pendientes · ${conflicts.length} conflictos locales</p></section><section class="card section">${[['devices','Dispositivos'],['documents','Documentos y boletos'],['offline','Preparar offline'],['sync','Sincronización'],['conflicts','Resolver conflictos']].map(([route, text]) => `<a class="list-row row" href="#${route}">${text}<span>›</span></a>`).join('')}</section><section class="card"><h3>Este dispositivo</h3><p class="muted">Identidad independiente: ${escape(store.device)}</p><p class="muted">Italia 2026 · Jonathan + Jenny · USD</p></section>`;
+}
+function requestValue(label,type='text',value=''){
+ return new Promise(resolve=>{const dialog=document.createElement('dialog');dialog.innerHTML=`<form method="dialog"><h2>${escape(label)}</h2><label>${escape(label)}<input type="${type}" value="${escape(value)}" autocomplete="${type==='password'?'off':'on'}" required maxlength="100" ${type==='password'?'minlength="8"':''}></label><div class="actions"><button value="cancel" formnovalidate class="secondary">Cancelar</button><button value="ok" class="primary">Continuar</button></div></form>`;document.body.append(dialog);dialog.showModal();dialog.querySelector('input').focus();dialog.addEventListener('close',()=>{const result=dialog.returnValue==='ok'?dialog.querySelector('input').value:null;dialog.querySelector('input').value='';dialog.remove();resolve(result);},{once:true});});
+}
+async function deviceScreen(){
+ const session=(await client.auth.getSession()).data.session,invite=await store.get('meta','pending-invite');
+ let list=[];if(session)try{list=await devices.list();await store.put('meta',{id:'device-list',value:list});}catch{list=(await store.get('meta','device-list'))?.value||[];}
+ const own=list.find(x=>x.id===store.device&&!x.deleted_at);deviceScreen.root=own?.role==='ROOT_DEVICE';
+ return `<span class="eyebrow">Cada instalación, independiente</span><h1>Dispositivos</h1><p class="subtitle">4 celulares + PC Casa · Italia 2026</p>${!session?`<section class="card"><p>Conecta tu cuenta Google para autorizar esta instalación.</p>${button('google','Conectar Google','','primary')}</section>`:''}${!own&&session?`<section class="card"><h3>Autorizar este dispositivo</h3><p class="muted">Usa el enlace/QR temporal generado por PC Casa.</p>${invite?button('enroll','Registrar este teléfono','','primary'):''}${rootClaim&&new Date(rootClaim.expires_at)>new Date()?button('claim-root','Activar PC Casa','','primary'):''}</section>`:''}${own?`<div class="actions">${button('invite','Agregar dispositivo','','primary')}${button('rename-device','Nombrar esta instalación')}${deviceScreen.root?button('admin-password','Configurar clave administrativa'):button('remove-self','Quitar este dispositivo','', 'danger')}</div>`:''}<section class="section">${list.map(d=>`<div class="card list-row row"><div><h3>${escape(d.name)}</h3><small>${d.role==='ROOT_DEVICE'?'PC protegida':d.deleted_at?'Revocado':d.id===store.device?'Esta instalación':'Autorizado'}</small></div>${!d.deleted_at&&d.role!=='ROOT_DEVICE'&&d.id!==store.device?button('revoke-device','Revocar',d.id,'danger'):''}</div>`).join('')}</section>`;
 }
 async function offline() {
   const calendar = await store.get('meta', 'calendar-sync'), last = await store.get('meta', 'last-sync');
   const selected = documents.filter(x => x.offline);
   const cached = await Promise.all(selected.map(x => store.get('blobs', `drive:${x.id}`)));
-  const checks = [['Itinerario de Calendar', !!calendar], ['Presupuesto y gastos sincronizados', !!last], ['Presupuesto configurado', active('budgets').length > 0], ['Documentos y boletos seleccionados', selected.length > 0 && cached.every(Boolean)], ['Shell offline', !!navigator.serviceWorker?.controller]];
+  const checks = [['Itinerario real de Calendar', calendar?.source==='google-api'], ['Presupuesto y gastos sincronizados', !!last&&pending.length===0&&conflicts.length===0], ['Presupuesto configurado', active('budgets').length > 0], ['Documentos y boletos seleccionados', selected.length > 0 && cached.every(Boolean)], ['Shell offline', !!navigator.serviceWorker?.controller]];
   const ready = checks.every(x => x[1]);
   return `<h1>Preparar offline</h1><p class="subtitle">Lleva lo esencial contigo.</p><section class="card">${checks.map(([name, ok]) => `<div class="offline-check"><span>${name}</span><strong>${ok ? '✓' : 'Pendiente'}</strong></div>`).join('')}<div class="actions">${button('prepare-offline', 'Verificar y descargar', '', 'primary')}<a class="secondary" href="#documents">Seleccionar documentos</a></div><p class="${ready ? 'badge paid' : 'warning'}">${ready ? 'Italia 2026 listo para usar offline' : 'Preparación incompleta. Sincroniza y descarga tus documentos seleccionados.'}</p></section>`;
 }
@@ -93,6 +110,7 @@ function documentList() { return `<div class="row"><h1>Documentos</h1>${button('
 async function render() {
   now = new Date(); [events, records, pending, conflicts] = await Promise.all(['events','records','outbox','conflicts'].map(name => store.all(name)));
   const [route, rawId] = (location.hash.slice(1) || 'home').split('/'), id = decodeURIComponent(rawId || '');
+  if(route==='devices'){app.innerHTML=await deviceScreen();return;}
   document.querySelectorAll('nav a').forEach(a => a.classList.toggle('active', a.hash === `#${route}`));
   document.querySelector('#connection').textContent = navigator.onLine ? pending.length ? `${pending.length} pendientes` : 'En línea' : 'Sin conexión';
   if (route === 'home') app.innerHTML = home(); else if (route === 'itinerary') app.innerHTML = itinerary(); else if (route === 'event') app.innerHTML = detail(id); else if (route === 'budget') app.innerHTML = budget(); else if (route === 'expense') app.innerHTML = expenseForm(id); else if (route === 'expenses') app.innerHTML = `<div class="row"><h1>Gastos</h1><a class="primary" href="#expense/new">+ Gasto</a></div>${expenseList()}`; else if (route === 'documents') app.innerHTML = documentList(); else if (route === 'offline') app.innerHTML = await offline(); else if (route === 'sync') app.innerHTML = `<h1>Sincronización</h1><section class="card"><p>${pending.length} cambios pendientes · ${conflicts.length} conflictos</p><p class="muted">Última sincronización: ${escape((await store.get('meta','last-sync'))?.value || 'Todavía no realizada')}</p>${button('sync','Sincronizar ahora','','primary')}</section>`; else if (route === 'conflicts') app.innerHTML = `<h1>Resolver conflictos</h1>${conflicts.map(c => `<section class="card section"><h3>${escape(c.field)}</h3><p>Servidor: ${escape(JSON.stringify(c.current))}</p><p>Este dispositivo: ${escape(JSON.stringify(c.incoming))}</p>${button('resolve-current','Conservar servidor',c.id)} ${c.field !== 'deleted_at' ? button('resolve-incoming','Usar valor local',c.id) : '<p class="warning">El registro eliminado no puede resucitarse. Ambos valores se conservan para revisión.</p>'}</section>`).join('') || '<div class="empty">No hay conflictos pendientes.</div>'}`; else if (route === 'document') {
@@ -101,10 +119,12 @@ async function render() {
     render.objectUrl = cached ? URL.createObjectURL(cached.blob) : null;
     app.innerHTML = `<a class="back" href="#documents">‹ Documentos</a><h1>${escape(file?.name || 'Documento')}</h1>${cached ? `<a class="primary" href="${render.objectUrl}" download="${escape(file?.name || 'documento')}">Abrir archivo offline</a>${['application/pdf','image/png','image/jpeg','image/webp'].includes(cached.blob.type) ? `<iframe title="Documento offline" sandbox src="${render.objectUrl}"></iframe>` : ''}` : '<p class="muted">Sin copia offline en este dispositivo.</p>'}${file ? `<div class="actions">${button('download-document','Descargar copia offline',file.id)}<a class="secondary" target="_blank" rel="noopener" href="https://drive.google.com/file/d/${encodeURIComponent(file.id)}/view">Abrir en Google Drive ↗</a></div>` : ''}`;
   } else app.innerHTML = settings();
+  if(route==='event'){const warnings=events.find(x=>x.id===id)?.warnings||[];if(warnings.length)app.insertAdjacentHTML('beforeend',`<p class="warning">${warnings.map(escape).join('<br>')}</p>`);}
+  if(route==='document'&&documents.some(x=>x.id===id))app.insertAdjacentHTML('beforeend',`<div class="actions">${button('trash-document','Enviar archivo a la papelera de Google Drive',id,'danger')}</div>`);
 }
 async function syncAll() {
   if (!navigator.onLine) throw Error('Sin conexión. Tus cambios siguen guardados localmente.');
-  await remote.register(); await sync.run(); await remote.check(); await google.syncCalendar(store); await render();
+  try{await sync.run(); await remote.check(); await google.syncCalendar(store);await loadDocuments();}catch(error){if(error.message.includes('AV2_DEVICE_REVOKED')){await store.purge();await client.auth.signOut();documents=[];await render();}throw error;}finally{await refreshBackground();}
 }
 async function loadDocuments() {
   await remote.check(); const files = await google.listDocuments();
@@ -117,7 +137,18 @@ app.addEventListener('click', async event => {
   const { action, id } = target.dataset;
   try {
     if (action === 'day') selectedDay = id;
-    else if (action === 'google') { const { error } = await client.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: `${location.origin}${location.pathname}`, scopes: 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/drive', queryParams: { prompt: 'consent' } } }); if (error) throw error; }
+    else if (action === 'google') { const { error } = await client.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: `${location.origin}${location.pathname}`, scopes: 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/drive' } }); if (error) throw error; }
+    else if(action==='claim-root'){await devices.claimRoot(rootClaim?.token);rootClaim=null;await store.put('meta',{id:'authorized',value:true});await syncAll();}
+    else if(action==='enroll'){const name=await requestValue('Nombre del teléfono','text','Jonathan S26 Ultra');if(name){await devices.enroll((await store.get('meta','pending-invite'))?.value,name);await store.transaction(['meta'],tx=>tx.objectStore('meta').delete('pending-invite'));await store.put('meta',{id:'authorized',value:true});location.hash='#home';await syncAll();notice('Dispositivo autorizado. Puedes instalar la PWA y preparar offline.');}}
+    else if(action==='rename-device'){const name=await requestValue('Nombre de esta instalación');if(name)await devices.rename(name);}
+    else if(action==='admin-password'){const password=await requestValue('Nueva clave administrativa','password');if(password)await devices.setAdmin(password);}
+    else if(action==='invite'){
+      const password=deviceScreen.root?null:await requestValue('Clave administrativa','password');if(!deviceScreen.root&&!password)return;
+      const invite=await devices.invite(password),url=`${location.origin}${location.pathname}#invite/${invite.token}`;
+      const qr=qrcode(0,'M');qr.addData(url);qr.make();const dialog=document.createElement('dialog');dialog.innerHTML=`<form method="dialog"><h2>Agregar dispositivo</h2><p>Un solo uso · válido hasta ${escape(new Date(invite.expires_at).toLocaleTimeString())}</p>${qr.createSvgTag(4,4)}<label>Enlace temporal<input readonly value="${escape(url)}"></label><button class="primary">Cerrar</button></form>`;document.body.append(dialog);dialog.showModal();dialog.addEventListener('close',()=>dialog.remove(),{once:true});
+    }
+    else if(action==='revoke-device'){if(confirm('¿Revocar este teléfono? Al reconectarse perderá acceso y se invalidarán sus datos locales.')){const password=deviceScreen.root?null:await requestValue('Clave administrativa','password');if(deviceScreen.root||password)await devices.revoke(id,password);}}
+    else if(action==='remove-self'){if(confirm('¿Quitar esta instalación y eliminar sus datos locales?')){await devices.revoke(store.device,null,true);await store.purge();await client.auth.signOut();location.reload();}}
     else if (action === 'sync') { await syncAll(); notice('Sincronización completada.'); }
     else if (action === 'budget') {
       const value = prompt('Presupuesto del viaje en USD', active('budgets')[0]?.data.amount ?? '');
@@ -125,6 +156,7 @@ app.addEventListener('click', async event => {
     } else if (action === 'delete-expense') { if (confirm('¿Eliminar este gasto? Se sincronizará una eliminación.')) { await store.mutate('expenses', id, {}, true); location.hash = '#expenses'; } }
     else if (action === 'remove-receipt') { await store.mutate('expenses', id, { receipt_local_id: null, receipt_drive_id: null, receipt_name: null }); }
     else if (action === 'load-documents') await loadDocuments();
+    else if(action==='trash-document'){if(confirm('Esta operación enviará el archivo REAL a la papelera de Google Drive. Desvincular un documento no lo elimina. ¿Continuar?')){await google.trashDocument(id);documents=documents.filter(x=>x.id!==id);await store.put('meta',{id:'drive-files',value:documents});location.hash='#documents';}}
     else if (action === 'link-document') {
       if (!documents.length) await loadDocuments();
       const dialog = document.createElement('dialog'); dialog.innerHTML = `<form method="dialog"><h2>Vincular archivo de Drive</h2><label>Documento<select name="file">${documents.map(file => `<option value="${escape(file.id)}">${escape(file.name)}</option>`).join('')}</select></label><div class="actions"><button value="cancel" class="secondary">Cancelar</button><button value="link" class="primary">Vincular</button></div></form>`;
@@ -137,7 +169,7 @@ app.addEventListener('click', async event => {
       const c = conflicts.find(x => x.id === id); if (c.resolving) throw Error('La resolución está pendiente de sincronizar.');
       await store.resolve(c, action === 'resolve-incoming' ? 'incoming' : 'current'); notice('Resolución guardada; pendiente de sincronizar.');
     } else if (action === 'install') { if (installPrompt) { await installPrompt.prompt(); installPrompt = null; } else notice('Usa el menú del navegador: Instalar aplicación o Añadir a pantalla de inicio.'); }
-    await render();
+    await render();scheduleSync();
   } catch (error) { notice(error.message); await render(); }
   finally { target.disabled = false; }
 });
@@ -145,19 +177,22 @@ app.addEventListener('submit', async event => {
   if (event.target.id !== 'expense-form') return; event.preventDefault();
   const form = event.target, submit = form.querySelector('[type=submit]'); submit.disabled = true;
   try {
-    const values = new FormData(form), data = Object.fromEntries([...values].filter(([key]) => key !== 'receipt'));
+    const values = new FormData(form);let data = Object.fromEntries([...values].filter(([key]) => key !== 'receipt'));
     data.amount = Number(data.amount); data.exchange_rate = data.exchange_rate ? Number(data.exchange_rate) : null;
-    data.base_amount = data.currency === 'USD' ? data.amount : data.exchange_rate ? data.amount * data.exchange_rate : null;
+    data=expenseSnapshots(data,expenseForm.base?.data||{});
     const receipt = values.get('receipt'); let blob = null;
     if (receipt?.size) { data.receipt_local_id = crypto.randomUUID(); data.receipt_name = receipt.name; data.receipt_drive_id = null; blob = { id: data.receipt_local_id, value: receipt }; }
-    await store.mutate('expenses', form.dataset.id || crypto.randomUUID(), data, false, blob);
-    location.hash = '#expenses'; notice('Gasto guardado en este dispositivo.');
+    await store.mutate('expenses', form.dataset.id || crypto.randomUUID(), data, false, blob,expenseForm.base);
+    location.hash = '#expenses'; notice('Gasto guardado en este dispositivo.');scheduleSync();
   } catch (error) { notice(error.message); } finally { submit.disabled = false; }
 });
 addEventListener('hashchange', () => render().catch(error => notice(error.message)));
 addEventListener('online', () => syncAll().catch(error => notice(error.message)));
-addEventListener('offline', () => render());
+addEventListener('offline', () => refreshBackground());
 addEventListener('beforeinstallprompt', event => { event.preventDefault(); installPrompt = event; });
+async function refreshBackground(){if(location.hash.startsWith('#expense/')){document.querySelector('#connection').textContent=navigator.onLine?'En línea':'Sin conexión';return;}await render();}
+function scheduleSync(){clearTimeout(scheduleSync.timer);scheduleSync.timer=setTimeout(async()=>{if(navigator.onLine&&(await store.get('meta','authorized'))?.value){try{await sync.run();await refreshBackground();}catch(error){notice(error.message);if(error.message.includes('AV2_DEVICE_REVOKED'))await render();else await refreshBackground();}}},1000);}
+client.auth.onAuthStateChange((event,session)=>{if(session?.provider_token)setTimeout(()=>store.put('meta',{id:'google-access',value:session.provider_token}).catch(error=>notice(error.message)),0);});
 if ('serviceWorker' in navigator) {
   const hadController = !!navigator.serviceWorker.controller;
   const registration = await navigator.serviceWorker.register('./sw.js', { scope: './' });
@@ -168,4 +203,5 @@ if ('serviceWorker' in navigator) {
 }
 await render();
 setInterval(() => { if ((location.hash || '#home') === '#home') render().catch(error => notice(error.message)); }, 60000);
-if (navigator.onLine && (await client.auth.getSession()).data.session) syncAll().catch(error => notice(error.message));
+if (navigator.onLine && (await client.auth.getSession()).data.session) {if(!(await store.get('meta','authorized'))?.value){location.hash='#devices';await render();}else syncAll().catch(error => notice(error.message));}
+setInterval(scheduleSync,30000);

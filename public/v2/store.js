@@ -4,14 +4,16 @@ export class LocalStore {
   constructor(name = 'agenda-viajera-v2') { this.name = name; }
   async open() {
     this.db = await new Promise((resolve, reject) => {
-      const request = indexedDB.open(this.name, 1);
-      request.onupgradeneeded = () => { for (const name of STORES) request.result.createObjectStore(name, { keyPath: 'id' }); };
+      const request = indexedDB.open(this.name, 2);
+      request.onupgradeneeded = () => { for (const name of STORES) if (!request.result.objectStoreNames.contains(name)) request.result.createObjectStore(name, { keyPath: 'id' }); };
       request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
     });
     this.db.onversionchange = () => this.db.close();
-    const identity = await this.get('meta', 'device');
-    this.device = identity?.value || crypto.randomUUID();
-    if (!identity) await this.put('meta', { id: 'device', value: this.device });
+    await this.transaction(['meta'], tx => {
+      const meta=tx.objectStore('meta'),identity=meta.get('device'),secret=meta.get('device-token');
+      identity.onsuccess=()=>{this.device=identity.result?.value || crypto.randomUUID();if(!identity.result) meta.put({id:'device',value:this.device});};
+      secret.onsuccess=()=>{this.deviceToken=secret.result?.value || Array.from(crypto.getRandomValues(new Uint8Array(32)),x=>x.toString(16).padStart(2,'0')).join('');if(!secret.result) meta.put({id:'device-token',value:this.deviceToken});};
+    });
     return this;
   }
   async transaction(names, action) {
@@ -25,7 +27,7 @@ export class LocalStore {
   all(store) { return this.read(store, objectStore => objectStore.getAll()); }
   read(store, query) { return new Promise((resolve, reject) => { const request = query(this.db.transaction(store).objectStore(store)); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); }); }
   put(store, value) { return this.transaction([store], tx => tx.objectStore(store).put(value)); }
-  async mutate(kind, id, changes, deleted = false, blob = null) {
+  async mutate(kind, id, changes, deleted = false, blob = null, editBase = null) {
     if (!KINDS.includes(kind)) throw Error('Tipo no permitido');
     const now = new Date().toISOString(), operationId = crypto.randomUUID();
     await this.transaction(['records', 'outbox', 'blobs', 'meta'], tx => {
@@ -33,8 +35,11 @@ export class LocalStore {
       request.onsuccess = () => {
         const old = request.result;
         if (old?.deleted_at) { tx.abort(); return; }
-        const record = { id, trip_id: TRIP.id, kind, version: old?.version || 0, created_at: old?.created_at || now, updated_at: now, updated_by_device: this.device, deleted_at: deleted ? now : null, data: { ...old?.data, ...changes } };
-        const operation = { id: operationId, record_id: id, kind, base_version: old?.version || 0, base: old?.data || {}, changes, deleted_at: record.deleted_at, device_id: this.device, created_at: now };
+        const base=editBase||old;
+        const delta=Object.fromEntries(Object.entries(changes).filter(([field,value])=>JSON.stringify(base?.data?.[field]??null)!==JSON.stringify(value??null)));
+        const record = { id, trip_id: TRIP.id, kind, version: old?.version || 0, created_at: old?.created_at || now, updated_at: now, updated_by_device: this.device, deleted_at: deleted ? now : null, data: { ...old?.data, ...delta } };
+        if(old&&!deleted&&!Object.keys(delta).length)return;
+        const operation = { id: operationId, record_id: id, kind, base_version: base?.version || 0, base: base?.data || {}, changes:delta, deleted_at: record.deleted_at, device_id: this.device, created_at: now };
         tx.objectStore('records').put(record);
         const counter = tx.objectStore('meta').get('queue-sequence');
         counter.onsuccess = () => { operation.sequence = (counter.result?.value || 0) + 1; tx.objectStore('meta').put({id:'queue-sequence',value:operation.sequence}); tx.objectStore('outbox').put(operation); };

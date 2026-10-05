@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { existsSync, readFileSync } from 'node:fs';
 test('mobile shell, real Calendar snapshot, expense receipt, persistence and offline reload', async ({page,context}) => {
   await page.setViewportSize({width:390,height:844});
-  await page.goto('/v2/'); await expect(page.getByRole('heading',{name:'Italia 2026',exact:true})).toBeVisible();
+  await page.goto('/v2/?fixture=1'); await expect(page.getByRole('heading',{name:'Italia 2026',exact:true})).toBeVisible();
   await page.evaluate(async () => { await navigator.serviceWorker.ready; });
   await expect.poll(() => page.evaluate(() => !!navigator.serviceWorker.controller)).toBe(true);
   const baseline=Number((await page.locator('.stat strong').first().innerText()).replace(/[^\d,.-]/g,'').replace(',','.'));
@@ -95,4 +95,27 @@ test('desktop layout and PWA scope do not overwrite legacy storage or caches', a
   const scope=await page.evaluate(async()=> (await navigator.serviceWorker.getRegistration()).scope);expect(scope).toContain('/v2/');
   expect(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth)).toBe(false);
   await page.screenshot({path:'test-results/av2-desktop.png',fullPage:true});
+});
+test('normal runtime never loads the private Calendar fixture',async({page})=>{
+ const reads=[];page.on('request',request=>{if(request.url().includes('local-calendar'))reads.push(request.url());});
+ await page.goto('/v2/');await expect(page.getByRole('heading',{name:'Italia 2026',exact:true})).toBeVisible();
+ const count=await page.evaluate(async()=>{const{LocalStore}=await import('/v2/store.js');const s=await new LocalStore().open();return(await s.all('events')).length;});expect(count).toBe(0);expect(reads).toEqual([]);
+});
+test('IndexedDB v1 upgrade retains records, outbox, blobs and installation identity',async({page})=>{
+ await page.goto('/v2/');
+ const result=await page.evaluate(async()=>{
+  const identity=crypto.randomUUID();await new Promise((resolve,reject)=>{const request=indexedDB.open('av2-upgrade-fixture',1);request.onupgradeneeded=()=>{for(const name of ['records','events','outbox','conflicts','meta','blobs'])request.result.createObjectStore(name,{keyPath:'id'});};request.onerror=()=>reject(request.error);request.onsuccess=()=>{const db=request.result,tx=db.transaction(['records','outbox','blobs','meta'],'readwrite');tx.objectStore('meta').put({id:'device',value:identity});tx.objectStore('records').put({id:'note',kind:'notes',version:7,data:{text:'keep me'}});tx.objectStore('outbox').put({id:'operation',record_id:'note'});tx.objectStore('blobs').put({id:'ticket',blob:new Blob(['ticket'])});tx.oncomplete=()=>{db.close();resolve();};};});
+  const{LocalStore}=await import('/v2/store.js');const s=await new LocalStore('av2-upgrade-fixture').open();return{identity:s.device===identity,version:s.db.version,secret:s.deviceToken.length,record:await s.get('records','note'),pending:(await s.all('outbox')).length,blobs:(await s.all('blobs')).length};
+ });expect(result).toMatchObject({identity:true,version:2,secret:64,record:{version:7,data:{text:'keep me'}},pending:1,blobs:1});
+});
+test('explicit service worker update preserves IndexedDB and legacy caches',async({page})=>{
+ await page.goto('/v2/');await expect.poll(()=>page.evaluate(()=>!!navigator.serviceWorker.controller)).toBe(true);
+ const identity=await page.evaluate(async()=>{const{LocalStore}=await import('/v2/store.js');const s=await new LocalStore().open();await s.mutate('notes',crypto.randomUUID(),{text:'update-survivor'});await(await caches.open('legacy-cache-sentinel')).put('/sentinel',new Response('legacy'));return s.device;});
+ await page.evaluate(async()=>{await navigator.serviceWorker.register('./sw.js?test-update=2',{scope:'./'});});
+ await expect.poll(()=>page.evaluate(async()=>!!(await navigator.serviceWorker.getRegistration()).waiting)).toBe(true);
+ await expect(page.locator('#update')).toBeVisible();await page.locator('#update').click();
+ await expect(page.getByRole('heading',{name:'Italia 2026',exact:true})).toBeVisible();
+ await expect.poll(()=>page.evaluate(async()=>navigator.serviceWorker.controller?.scriptURL.includes('test-update=2'))).toBe(true);
+ const state=await page.evaluate(async()=>{const{LocalStore}=await import('/v2/store.js');const s=await new LocalStore().open();return{device:s.device,notes:(await s.all('records')).filter(x=>x.data?.text==='update-survivor').length,legacy:(await caches.keys()).includes('legacy-cache-sentinel')};});
+ expect(state).toEqual({device:identity,notes:1,legacy:true});
 });

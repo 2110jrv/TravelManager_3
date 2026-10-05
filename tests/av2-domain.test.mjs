@@ -37,11 +37,12 @@ test('different fields merge, same field preserves alternatives, tombstone block
   assert.equal(mergeFields({...current,deleted_at:'2026-10-05'},op).record.deleted_at,'2026-10-05');
 });
 test('Calendar pagination, 410 resync, and stable ID update are non-destructive', async () => {
-  const values = new Map([['meta:calendar-sync',{id:'calendar-sync',value:'expired'}],['events:event',normalizeEvent(raw())],['events:missing',normalizeEvent(raw('missing'))]]);
+  const values = new Map([['meta:calendar-sync',{id:'calendar-sync',value:'expired',query_version:2}],['events:event',normalizeEvent(raw())],['events:missing',normalizeEvent(raw('missing'))]]);
   const requests = []; let step = 0;
   const google = new GoogleSource(async () => 'token', async url => {
     requests.push(url);
     if (url.endsWith('/colors')) return Response.json({event:{}});
+    if(url.includes('eventLabelVersion=1')&&!url.includes('/events?'))return Response.json({timeZone:'Europe/Rome',labelProperties:{eventLabels:[]}});
     step++; if (step===1) return new Response('',{status:410});
     if (step===2) return Response.json({items:[{...raw(),summary:'Updated'}],nextPageToken:'page2'});
     return Response.json({items:[raw('second')],nextSyncToken:'fresh'});
@@ -65,7 +66,7 @@ test('failed Calendar page never acknowledges sync token or applies a partial im
 test('receipt retry finds existing Drive upload rather than duplicating it', async () => {
   let uploads = 0;
   const google = new GoogleSource(async () => 'token',async (url,options) => { if (options.method==='POST') uploads++; return Response.json({files:[{id:'existing-file'}]}); });
-  assert.equal(await google.uploadReceipt(new Blob(['receipt']),'Receipt','local-id'),'existing-file'); assert.equal(uploads,0);
+  assert.equal(await google.uploadReceipt(new Blob(['receipt']),'Receipt','abcdef12'),'existing-file'); assert.equal(uploads,0);
 });
 test('both legacy service workers preserve v2 caches and ignore its private preview endpoint',async()=>{
   for(const name of ['sw.js','service-worker.js']) {
