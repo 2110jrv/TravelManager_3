@@ -1,0 +1,171 @@
+import { createClient } from '../vendor/supabase-client.mjs';
+import { TRIP } from './config.js';
+import { dateKey, occursOn, days, finance, normalizeEvent } from './domain.js';
+import { LocalStore } from './store.js';
+import { GoogleSource } from './google.js';
+import { SupabaseRemote, SyncEngine } from './sync.js';
+
+const client = createClient('https://cslludzuejkhsydqiabx.supabase.co', 'sb_publishable_8k8xhMZtkay30ZB45aPjGw_4u69Dp0U', { auth: { storageKey: 'av2.auth', persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
+const store = await new LocalStore().open();
+// Development-only, real Calendar export read through the connected Google account.
+// The production static host has no endpoint or embedded itinerary data.
+if (['127.0.0.1','localhost'].includes(location.hostname) && navigator.onLine) {
+  try {
+    const response = await fetch('./local-calendar', { cache: 'no-store' });
+    if (response.ok) {
+      const snapshot = await response.json(), saved = await store.get('meta','connector-snapshot');
+      if (snapshot.calendar_id === TRIP.calendarId && saved?.value !== snapshot.captured_at && !(await store.get('meta','calendar-sync'))?.value) {
+        const labels = Object.fromEntries(snapshot.labels.map(label => [label.id, label]));
+        await store.transaction(['events','meta'], tx => {
+          for (const event of snapshot.events) tx.objectStore('events').put(normalizeEvent(event, {}, labels));
+          tx.objectStore('meta').put({ id:'connector-snapshot',value:snapshot.captured_at });
+          tx.objectStore('meta').put({ id:'calendar-labels',value:labels });
+          tx.objectStore('meta').put({ id:'calendar-sync',value:null,synced_at:snapshot.captured_at,source:'connected-google-calendar' });
+        });
+      }
+    }
+  } catch { /* Existing Calendar cache remains usable offline. */ }
+}
+const remote = new SupabaseRemote(client, store.device);
+const google = new GoogleSource(async () => (await client.auth.getSession()).data.session?.provider_token);
+const sync = new SyncEngine(store, remote, google);
+const app = document.querySelector('#app');
+let selectedDay = days().includes(dateKey()) ? dateKey() : TRIP.start;
+let documents = (await store.get('meta', 'drive-files'))?.value || [];
+let events = [], records = [], pending = [], conflicts = [], now = new Date();
+let installPrompt;
+const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const money = value => new Intl.NumberFormat('es', { style: 'currency', currency: TRIP.currency }).format(value || 0);
+const formatDay = day => new Intl.DateTimeFormat('es', { dateStyle: 'full', timeZone: 'UTC' }).format(new Date(`${day}T12:00:00Z`));
+const active = kind => records.filter(x => x.kind === kind && !x.deleted_at);
+const eventTime = event => event.allDay ? 'Todo el día' : new Intl.DateTimeFormat('es', { hour: '2-digit', minute: '2-digit', timeZone: event.timezone }).format(new Date(event.start));
+const button = (action, text, id = '', style = 'secondary') => `<button class="${style}" data-action="${action}" data-id="${escape(id)}">${text}</button>`;
+function notice(message) { const node = document.querySelector('#notice'); node.textContent = message; node.hidden = false; clearTimeout(notice.timer); notice.timer = setTimeout(() => { node.hidden = true; }, 6500); }
+function summary() { return finance(events.filter(x => days().some(day => occursOn(x, day))), active('expenses'), active('budgets')[0]?.data.amount ?? null); }
+function stats() { const f = summary(); return `<div class="grid"><div class="card stat"><span>Pagado real</span><strong>${money(f.paid)}</strong></div><div class="card stat"><span>Estimado pendiente</span><strong>${money(f.estimated)}</strong></div><div class="card stat highlight"><span>Costo proyectado</span><strong>${money(f.projected)}</strong></div></div>${f.missing.length ? `<p class="warning">${f.missing.length} importe(s) requieren una tasa de cambio. La proyección es parcial.</p>` : ''}`; }
+function eventCard(event) {
+  const past = event.end && new Date(event.allDay ? `${event.end}T00:00:00` : event.end) < now;
+  return `<a class="event ${past ? 'past' : ''}" href="#event/${encodeURIComponent(event.id)}"><span class="event-time">${escape(eventTime(event))}</span><div class="event-body"><h3>${escape(event.title)}</h3><p>${escape(event.location || 'Ubicación por confirmar')}</p>${event.label ? `<span class="badge">${escape(event.label.name || `Label ${event.label.id}`)}</span>` : ''}${event.cost_status ? `<span class="badge ${event.cost_status === 'PAID' ? 'paid' : 'pending'}">${event.cost_status === 'PAID' ? 'Pagado' : 'Estimado'} · ${escape(event.currency || 'Moneda pendiente')} ${escape(event.cost ?? '—')}</span>` : ''}${event.allDay && event.end > event.start ? '<span class="badge">Disponible durante su vigencia</span>' : ''}</div><span aria-hidden="true">›</span></a>`;
+}
+function eventList(list) { return list.length ? `<div class="events">${list.sort((a, b) => a.start.localeCompare(b.start)).map(eventCard).join('')}</div>` : '<div class="empty">No hay eventos de Calendar para este día. Conecta Google y sincroniza tu itinerario real.</div>'; }
+function home() {
+  const today = dateKey(now), before = today < TRIP.start, after = today > TRIP.end, f = summary();
+  const countdown = Math.ceil((Date.parse(`${TRIP.start}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86400000);
+  const day = before ? TRIP.start : today;
+  const dayEvents = events.filter(x => occursOn(x, day));
+  const next = dayEvents.find(x => x.allDay || new Date(x.end) > now);
+  const expensesToday = active('expenses').filter(x => x.data.date === today);
+  const todayFinance = finance([], expensesToday);
+  return `<section class="hero"><span class="eyebrow">Jonathan + Jenny · 20 oct — 5 nov</span><h1>Italia 2026</h1><p>${before ? `La aventura todavía no comienza.<br>Faltan ${countdown} días para partir.` : after ? 'Viaje completado. Cada recuerdo, en un lugar.' : `HOY · ${escape(formatDay(today))}`}</p><span class="badge">${before ? 'Preparando el viaje' : after ? 'Viaje completado' : escape(next?.location || 'En viaje')}</span></section>
+    <div class="row"><h2>${after ? 'El viaje en números' : 'Tu viaje, en equilibrio'}</h2><a class="primary" href="#expense/new">+ Gasto</a></div>${stats()}
+    ${after ? `<section class="card section"><h3>Costo final registrado: ${money(f.paid)}</h3><p>Presupuesto inicial: ${f.budget == null ? 'Sin configurar' : money(f.budget)} · Diferencia: ${f.budget == null ? '—' : money(f.budget - f.paid)}</p><p>${active('expenses').length} gastos · ${events.filter(x => !x.deleted_at).length} eventos sincronizados</p>${f.estimated ? '<p class="warning">Quedan importes estimados por conciliar antes de cerrar el costo final.</p>' : ''}</section>` : `<section class="section"><div class="row"><h2>${before ? 'Tu primer día en Italia' : 'Tu agenda de hoy'}</h2><a href="#itinerary" class="muted">Ver itinerario ›</a></div><p class="subtitle">${escape(formatDay(day))}${before ? '' : ` · Gastos de hoy: ${money(todayFinance.paid)}`}</p>${eventList(dayEvents)}</section>`}
+    <section class="card section"><span class="eyebrow">Antes de salir</span><h3 style="margin-top:12px">Todo a mano, incluso sin conexión</h3><p class="muted">Prepara tu itinerario y documentos importantes para llevarlos contigo.</p><a class="secondary" href="#offline">Preparar offline ↗</a></section>
+    <section class="section"><h2>Pendientes importantes</h2>${eventList(events.filter(x => !x.deleted_at && (x.purchase_status === 'PENDING' || x.cost_status === 'ESTIMATED')).slice(0, 4))}</section>`;
+}
+function itinerary() {
+  return `<span class="eyebrow">Italia 2026</span><h1>Un día a la vez.</h1><p class="subtitle">Tu itinerario desde Italy Vacation · Google Calendar</p><div class="day-strip">${days().map(day => `<button data-action="day" data-id="${day}" class="${day === selectedDay ? 'active' : ''}">${new Intl.DateTimeFormat('es', { weekday: 'short', timeZone: 'UTC' }).format(new Date(`${day}T12:00:00Z`))}<strong>${day.slice(8)}</strong></button>`).join('')}</div><h2>${escape(formatDay(selectedDay))}</h2>${eventList(events.filter(x => occursOn(x, selectedDay)))}`;
+}
+function detail(id) {
+  const event = events.find(x => x.id === id && !x.deleted_at); if (!event) return '<div class="empty">Este evento no está disponible en la cache de Calendar.</div>';
+  const links = active('document_links').filter(x => x.data.calendar_event_id === id);
+  return `<div class="detail"><a class="back" href="#itinerary">‹ Volver al itinerario</a><span class="eyebrow">${escape(event.label?.name || 'Google Calendar')}</span><h1>${escape(event.title)}</h1><p class="subtitle">${escape(event.start)} — ${escape(event.end)} · ${escape(event.timezone)}</p><section class="card"><h3>${escape(event.location || 'Ubicación por confirmar')}</h3>${event.location ? `<a class="secondary" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(event.location)}">Navegar ↗</a>` : ''}<p>${event.cost_status ? `${event.cost_status === 'PAID' ? 'Precio real pagado' : 'Precio estimado pendiente'}: ${escape(event.cost)} ${escape(event.currency)}` : 'Estado financiero sin especificar en Calendar.'}</p><p class="description">${escape(event.description)}</p></section><section class="section"><h2>Documentos y boletos</h2>${links.map(link => `<div class="card list-row row"><a href="#document/${encodeURIComponent(link.data.drive_file_id)}">${escape(documents.find(x => x.id === link.data.drive_file_id)?.name || link.data.drive_file_id)}</a>${button('unlink', 'Desvincular', link.id)}</div>`).join('') || '<p class="muted">Sin documentos vinculados.</p>'}<div class="actions">${button('load-documents', 'Consultar archivos Drive')} ${button('link-document', 'Adjuntar / Vincular documento', id)}</div></section><p class="muted">Calendar es la fuente maestra. Los cambios locales no modifican Google Calendar.</p></div>`;
+}
+function budget() {
+  const f = summary(); return `<span class="eyebrow">USD · Moneda principal</span><div class="row"><h1>Presupuesto</h1><a class="primary" href="#expense/new">+ Gasto</a></div><p class="subtitle">Pagado real + estimado pendiente = costo proyectado</p>${stats()}<section class="card section"><div class="row"><div><span class="eyebrow">Tu presupuesto</span><h2 style="margin-top:10px">${f.budget == null ? 'Por definir' : money(f.budget)}</h2></div>${button('budget', 'Configurar presupuesto')}</div>${f.budget > 0 ? `<progress max="${f.budget}" value="${Math.min(f.projected, f.budget)}"></progress><p>${f.difference >= 0 ? 'Disponible' : 'Sobre el presupuesto'}: ${money(Math.abs(f.difference))}</p>` : '<p class="muted">Define un presupuesto independiente del costo proyectado.</p>'}</section><section class="section"><div class="row"><h2>Gastos manuales</h2><a href="#expenses" class="muted">Ver todos ›</a></div>${expenseList()}</section>`;
+}
+function expenseList() { return active('expenses').map(x => `<div class="card list-row row"><div><h3>${escape(x.data.description)}</h3><small>${escape(x.data.date)} · ${escape(x.data.category)} · ${escape(x.data.cost_status)}</small></div><a href="#expense/${x.id}">${escape(x.data.amount)} ${escape(x.data.currency)} ›</a></div>`).join('') || '<div class="empty">Aún no hay gastos manuales. Registra uno y tu presupuesto se actualiza inmediatamente.</div>'; }
+function expenseForm(id) {
+  const record = active('expenses').find(x => x.id === id), d = record?.data || {};
+  return `<a class="back" href="#budget">‹ Presupuesto</a><h1>${record ? 'Editar gasto' : 'Nuevo gasto'}</h1><p class="subtitle">Se guarda en este dispositivo, incluso sin conexión.</p><form id="expense-form" class="card detail" data-id="${escape(record?.id || '')}"><label>Descripción<input name="description" required maxlength="200" value="${escape(d.description)}"></label><div class="form-grid"><label>Importe original<input name="amount" type="number" min="0" step="0.01" required value="${escape(d.amount)}"></label><label>Moneda ISO<input name="currency" required pattern="[A-Z]{3}" maxlength="3" value="${escape(d.currency || 'USD')}" list="currencies"><datalist id="currencies"><option>USD</option><option>EUR</option><option>CHF</option></datalist></label><label>Estado<select name="cost_status"><option value="PAID" ${d.cost_status === 'PAID' ? 'selected' : ''}>Pagado real</option><option value="ESTIMATED" ${d.cost_status === 'ESTIMATED' ? 'selected' : ''}>Estimado pendiente</option></select></label><label>Fecha<input name="date" type="date" required value="${escape(d.date || dateKey())}"></label><label>Categoría<input name="category" value="${escape(d.category || 'Otros')}" required></label><label>Persona<select name="person"><option value="">Sin especificar</option>${TRIP.travelers.map(person => `<option ${d.person === person ? 'selected' : ''}>${person}</option>`).join('')}</select></label><label>Tasa a USD por unidad (opcional)<input name="exchange_rate" type="number" min="0.000001" step="any" value="${escape(d.exchange_rate)}"></label><label>Ubicación (opcional)<input name="location" value="${escape(d.location)}"></label></div><label>Notas<textarea name="notes">${escape(d.notes)}</textarea></label><label>Foto o archivo de recibo<input name="receipt" type="file" accept="image/*,application/pdf" capture="environment"></label>${d.receipt_local_id ? `<p class="muted">Recibo guardado ${d.receipt_drive_id ? 'en Drive' : 'localmente; pendiente de subir'}. ${button('remove-receipt', 'Quitar recibo del gasto', record.id)}</p>` : ''}<div class="actions"><button type="submit" class="primary">Guardar gasto</button>${record ? button('delete-expense', 'Eliminar gasto', record.id, 'danger') : ''}</div></form>`;
+}
+function settings() {
+  return `<span class="eyebrow">Tu viaje, conectado</span><h1>Más y ajustes</h1><section class="card"><h3>Google Calendar + Drive</h3><p class="muted">Autoriza tu cuenta con acceso a Italy Vacation y a la carpeta privada del viaje.</p><div class="actions">${button('google', 'Conectar Google', '', 'primary')}${button('sync', 'Sincronizar ahora')}${button('install', 'Instalar aplicación')}</div><p class="muted">${pending.length} cambios pendientes · ${conflicts.length} conflictos locales</p></section><section class="card section">${[['documents','Documentos y boletos'],['offline','Preparar offline'],['sync','Sincronización'],['conflicts','Resolver conflictos']].map(([route, text]) => `<a class="list-row row" href="#${route}">${text}<span>›</span></a>`).join('')}</section><section class="card"><h3>Este dispositivo</h3><p class="muted">Identidad independiente: ${escape(store.device)}</p><p class="muted">Italia 2026 · Jonathan + Jenny · USD</p></section>`;
+}
+async function offline() {
+  const calendar = await store.get('meta', 'calendar-sync'), last = await store.get('meta', 'last-sync');
+  const selected = documents.filter(x => x.offline);
+  const cached = await Promise.all(selected.map(x => store.get('blobs', `drive:${x.id}`)));
+  const checks = [['Itinerario de Calendar', !!calendar], ['Presupuesto y gastos sincronizados', !!last], ['Presupuesto configurado', active('budgets').length > 0], ['Documentos y boletos seleccionados', selected.length > 0 && cached.every(Boolean)], ['Shell offline', !!navigator.serviceWorker?.controller]];
+  const ready = checks.every(x => x[1]);
+  return `<h1>Preparar offline</h1><p class="subtitle">Lleva lo esencial contigo.</p><section class="card">${checks.map(([name, ok]) => `<div class="offline-check"><span>${name}</span><strong>${ok ? '✓' : 'Pendiente'}</strong></div>`).join('')}<div class="actions">${button('prepare-offline', 'Verificar y descargar', '', 'primary')}<a class="secondary" href="#documents">Seleccionar documentos</a></div><p class="${ready ? 'badge paid' : 'warning'}">${ready ? 'Italia 2026 listo para usar offline' : 'Preparación incompleta. Sincroniza y descarga tus documentos seleccionados.'}</p></section>`;
+}
+function documentList() { return `<div class="row"><h1>Documentos</h1>${button('load-documents', 'Actualizar Drive')}</div><p class="subtitle">Archivos privados del viaje · disponibles con autorización Google</p>${documents.map(file => `<div class="card list-row row"><a href="#document/${encodeURIComponent(file.id)}"><h3>${escape(file.name)}</h3><small>${file.offline ? 'Seleccionado para offline' : escape(file.mimeType)}</small></a>${button('offline-document', file.offline ? 'Quitar selección offline' : 'Disponible offline', file.id)}</div>`).join('') || '<div class="empty">Consulta Drive para seleccionar los documentos reales del viaje.</div>'}`; }
+async function render() {
+  now = new Date(); [events, records, pending, conflicts] = await Promise.all(['events','records','outbox','conflicts'].map(name => store.all(name)));
+  const [route, rawId] = (location.hash.slice(1) || 'home').split('/'), id = decodeURIComponent(rawId || '');
+  document.querySelectorAll('nav a').forEach(a => a.classList.toggle('active', a.hash === `#${route}`));
+  document.querySelector('#connection').textContent = navigator.onLine ? pending.length ? `${pending.length} pendientes` : 'En línea' : 'Sin conexión';
+  if (route === 'home') app.innerHTML = home(); else if (route === 'itinerary') app.innerHTML = itinerary(); else if (route === 'event') app.innerHTML = detail(id); else if (route === 'budget') app.innerHTML = budget(); else if (route === 'expense') app.innerHTML = expenseForm(id); else if (route === 'expenses') app.innerHTML = `<div class="row"><h1>Gastos</h1><a class="primary" href="#expense/new">+ Gasto</a></div>${expenseList()}`; else if (route === 'documents') app.innerHTML = documentList(); else if (route === 'offline') app.innerHTML = await offline(); else if (route === 'sync') app.innerHTML = `<h1>Sincronización</h1><section class="card"><p>${pending.length} cambios pendientes · ${conflicts.length} conflictos</p><p class="muted">Última sincronización: ${escape((await store.get('meta','last-sync'))?.value || 'Todavía no realizada')}</p>${button('sync','Sincronizar ahora','','primary')}</section>`; else if (route === 'conflicts') app.innerHTML = `<h1>Resolver conflictos</h1>${conflicts.map(c => `<section class="card section"><h3>${escape(c.field)}</h3><p>Servidor: ${escape(JSON.stringify(c.current))}</p><p>Este dispositivo: ${escape(JSON.stringify(c.incoming))}</p>${button('resolve-current','Conservar servidor',c.id)} ${c.field !== 'deleted_at' ? button('resolve-incoming','Usar valor local',c.id) : '<p class="warning">El registro eliminado no puede resucitarse. Ambos valores se conservan para revisión.</p>'}</section>`).join('') || '<div class="empty">No hay conflictos pendientes.</div>'}`; else if (route === 'document') {
+    const file = documents.find(x => x.id === id), cached = await store.get('blobs', `drive:${id}`);
+    if (render.objectUrl) URL.revokeObjectURL(render.objectUrl);
+    render.objectUrl = cached ? URL.createObjectURL(cached.blob) : null;
+    app.innerHTML = `<a class="back" href="#documents">‹ Documentos</a><h1>${escape(file?.name || 'Documento')}</h1>${cached ? `<a class="primary" href="${render.objectUrl}" download="${escape(file?.name || 'documento')}">Abrir archivo offline</a>${['application/pdf','image/png','image/jpeg','image/webp'].includes(cached.blob.type) ? `<iframe title="Documento offline" sandbox src="${render.objectUrl}"></iframe>` : ''}` : '<p class="muted">Sin copia offline en este dispositivo.</p>'}${file ? `<div class="actions">${button('download-document','Descargar copia offline',file.id)}<a class="secondary" target="_blank" rel="noopener" href="https://drive.google.com/file/d/${encodeURIComponent(file.id)}/view">Abrir en Google Drive ↗</a></div>` : ''}`;
+  } else app.innerHTML = settings();
+}
+async function syncAll() {
+  if (!navigator.onLine) throw Error('Sin conexión. Tus cambios siguen guardados localmente.');
+  await remote.register(); await sync.run(); await remote.check(); await google.syncCalendar(store); await render();
+}
+async function loadDocuments() {
+  await remote.check(); const files = await google.listDocuments();
+  documents = files.map(file => ({ ...file, offline: documents.find(x => x.id === file.id)?.offline || false }));
+  await store.put('meta', { id: 'drive-files', value: documents });
+}
+app.addEventListener('click', async event => {
+  const target = event.target.closest('[data-action]'); if (!target) return;
+  event.preventDefault(); target.disabled = true;
+  const { action, id } = target.dataset;
+  try {
+    if (action === 'day') selectedDay = id;
+    else if (action === 'google') { const { error } = await client.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: `${location.origin}${location.pathname}`, scopes: 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/drive', queryParams: { prompt: 'consent' } } }); if (error) throw error; }
+    else if (action === 'sync') { await syncAll(); notice('Sincronización completada.'); }
+    else if (action === 'budget') {
+      const value = prompt('Presupuesto del viaje en USD', active('budgets')[0]?.data.amount ?? '');
+      if (value !== null && value.trim() && Number.isFinite(Number(value)) && Number(value) >= 0) await store.mutate('budgets', active('budgets')[0]?.id || TRIP.id, { amount: Number(value), currency: 'USD' });
+    } else if (action === 'delete-expense') { if (confirm('¿Eliminar este gasto? Se sincronizará una eliminación.')) { await store.mutate('expenses', id, {}, true); location.hash = '#expenses'; } }
+    else if (action === 'remove-receipt') { await store.mutate('expenses', id, { receipt_local_id: null, receipt_drive_id: null, receipt_name: null }); }
+    else if (action === 'load-documents') await loadDocuments();
+    else if (action === 'link-document') {
+      if (!documents.length) await loadDocuments();
+      const dialog = document.createElement('dialog'); dialog.innerHTML = `<form method="dialog"><h2>Vincular archivo de Drive</h2><label>Documento<select name="file">${documents.map(file => `<option value="${escape(file.id)}">${escape(file.name)}</option>`).join('')}</select></label><div class="actions"><button value="cancel" class="secondary">Cancelar</button><button value="link" class="primary">Vincular</button></div></form>`;
+      document.body.append(dialog); dialog.showModal(); dialog.addEventListener('close', async () => { try { if (dialog.returnValue === 'link' && documents.length) { const fileId = dialog.querySelector('select').value; if (!active('document_links').some(x => x.data.calendar_event_id === id && x.data.drive_file_id === fileId)) await store.mutate('document_links', crypto.randomUUID(), { calendar_event_id: id, drive_file_id: fileId }); await render(); } } catch (error) { notice(error.message); } finally { dialog.remove(); } }, { once: true });
+    } else if (action === 'unlink') await store.mutate('document_links', id, {}, true);
+    else if (action === 'offline-document') { documents = documents.map(x => x.id === id ? { ...x, offline: !x.offline } : x); await store.put('meta', { id: 'drive-files', value: documents }); }
+    else if (action === 'download-document') { await remote.check(); const file = documents.find(x => x.id === id); await store.put('blobs', { id: `drive:${id}`, blob: await google.download(file) }); }
+    else if (action === 'prepare-offline') { await syncAll(); for (const file of documents.filter(x => x.offline)) { await remote.check(); await store.put('blobs', { id: `drive:${file.id}`, blob: await google.download(file) }); } }
+    else if (action.startsWith('resolve-')) {
+      const c = conflicts.find(x => x.id === id); if (c.resolving) throw Error('La resolución está pendiente de sincronizar.');
+      await store.resolve(c, action === 'resolve-incoming' ? 'incoming' : 'current'); notice('Resolución guardada; pendiente de sincronizar.');
+    } else if (action === 'install') { if (installPrompt) { await installPrompt.prompt(); installPrompt = null; } else notice('Usa el menú del navegador: Instalar aplicación o Añadir a pantalla de inicio.'); }
+    await render();
+  } catch (error) { notice(error.message); await render(); }
+  finally { target.disabled = false; }
+});
+app.addEventListener('submit', async event => {
+  if (event.target.id !== 'expense-form') return; event.preventDefault();
+  const form = event.target, submit = form.querySelector('[type=submit]'); submit.disabled = true;
+  try {
+    const values = new FormData(form), data = Object.fromEntries([...values].filter(([key]) => key !== 'receipt'));
+    data.amount = Number(data.amount); data.exchange_rate = data.exchange_rate ? Number(data.exchange_rate) : null;
+    data.base_amount = data.currency === 'USD' ? data.amount : data.exchange_rate ? data.amount * data.exchange_rate : null;
+    const receipt = values.get('receipt'); let blob = null;
+    if (receipt?.size) { data.receipt_local_id = crypto.randomUUID(); data.receipt_name = receipt.name; data.receipt_drive_id = null; blob = { id: data.receipt_local_id, value: receipt }; }
+    await store.mutate('expenses', form.dataset.id || crypto.randomUUID(), data, false, blob);
+    location.hash = '#expenses'; notice('Gasto guardado en este dispositivo.');
+  } catch (error) { notice(error.message); } finally { submit.disabled = false; }
+});
+addEventListener('hashchange', () => render().catch(error => notice(error.message)));
+addEventListener('online', () => syncAll().catch(error => notice(error.message)));
+addEventListener('offline', () => render());
+addEventListener('beforeinstallprompt', event => { event.preventDefault(); installPrompt = event; });
+if ('serviceWorker' in navigator) {
+  const hadController = !!navigator.serviceWorker.controller;
+  const registration = await navigator.serviceWorker.register('./sw.js', { scope: './' });
+  const showUpdate = () => { const update = document.querySelector('#update'); update.hidden = false; update.onclick = () => registration.waiting?.postMessage('ACTIVATE_UPDATE'); };
+  if (registration.waiting) showUpdate();
+  registration.addEventListener('updatefound', () => { registration.installing?.addEventListener('statechange', () => { if (registration.waiting && navigator.serviceWorker.controller) showUpdate(); }); });
+  let changing = false; navigator.serviceWorker.addEventListener('controllerchange', () => { if (!hadController || changing) return; changing = true; location.reload(); });
+}
+await render();
+setInterval(() => { if ((location.hash || '#home') === '#home') render().catch(error => notice(error.message)); }, 60000);
+if (navigator.onLine && (await client.auth.getSession()).data.session) syncAll().catch(error => notice(error.message));

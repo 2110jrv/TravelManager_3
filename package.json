@@ -3,6 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "start:v2": "node scripts/av2-preview.mjs",
+    "lint:v2": "node scripts/check-av2.mjs",
+    "build:v2": "node scripts/check-av2.mjs --build",
+    "test:v2": "node --test tests/av2-domain.test.mjs tests/av2-schema.test.mjs",
+    "test:v2:integration": "playwright test --config playwright.av2.config.mjs",
     "build": "node scripts/bundle-supabase.mjs && node scripts/validate-build.mjs",
     "admin:set-pin": "node scripts/admin-set-pin.mjs",
     "start": "npx http-server ./public -c-1 -p 5003",
@@ -15,6 +20,7 @@
     "test:smoke": "playwright test tests/agenda-viajera.spec.js --grep \"logged out|inicia|navega\""
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
     "@playwright/test": "^1.63.0",
     "@supabase/supabase-js": "^2.117.0",
     "esbuild": "^0.28.2"

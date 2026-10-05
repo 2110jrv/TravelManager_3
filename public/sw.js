@@ -49,7 +49,7 @@ self.addEventListener('install', event => {
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys().then(keys => Promise.all(
-      keys.filter(key => key !== CACHE_NAME && key !== TILE_CACHE_NAME).map(key => caches.delete(key))
+      keys.filter(key => key !== CACHE_NAME && key !== TILE_CACHE_NAME && !key.startsWith('av2-')).map(key => caches.delete(key))
     )).then(() => self.clients.claim())
   );
 });
@@ -59,6 +59,7 @@ self.addEventListener('fetch', event => {
   if (request.method !== 'GET') return;
 
   const url = new URL(request.url);
+  if (url.href.startsWith(new URL('v2/', APP_SCOPE).href)) return;
   if (NETWORK_ONLY_HOSTS.has(url.hostname) || url.hostname.endsWith('.supabase.co')) {
     event.respondWith(fetch(request));
     return;
