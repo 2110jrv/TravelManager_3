@@ -14,7 +14,7 @@ const rpc=async(name,args)=> (await db.query(`select ${name}(${args.map((_,i)=>`
 async function user(id){await db.exec('reset role');await db.query("select set_config('request.jwt.claim.sub',$1,false)",[id]);await db.exec('set role authenticated');}
 before(async()=>{
  await db.exec(`create role anon;create role authenticated;create schema auth;create table auth.users(id uuid primary key);create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;grant usage on schema public,auth to authenticated;grant execute on function auth.uid() to authenticated;`);
- for(const name of ['20261005090000_agenda_viajera_v2.sql','20261005100000_av2_device_authorization.sql','20261005110000_av2_sync_validation.sql'])await db.exec(readFileSync(new URL(`../supabase/migrations/${name}`,import.meta.url),'utf8'));
+ for(const name of ['20261005090000_agenda_viajera_v2.sql','20261005100000_av2_device_authorization.sql','20261005110000_av2_sync_validation.sql','20261005200000_av2_admin_key_rotation.sql'])await db.exec(readFileSync(new URL(`../supabase/migrations/${name}`,import.meta.url),'utf8'));
  await db.query('insert into auth.users values($1),($2)',[a,b]);await db.query("insert into av2_trip_users(trip_id,user_id,role) values($1,$2,'OWNER')",[TRIP.id,a]);
  await db.query("insert into av2_root_claims values($1,$2,$3,now()+interval '1 hour',null)",[TRIP.id,a,hash(claim)]);await user(a);
 });
@@ -71,4 +71,17 @@ test('revoked device cannot impersonate the active root using its UUID',async()=
  assert.equal(await rpc('av2_authenticate_device',[TRIP.id,phone,phoneToken]),false);assert.equal(await rpc('av2_authenticate_device',[TRIP.id,root,phoneToken]),false);
  await assert.rejects(rpc('av2_list_devices',[TRIP.id,phone,phoneToken]),/AV2_DEVICE_REVOKED/);
  await assert.rejects(rpc('av2_sync_apply',[TRIP.id,phone,phoneToken,JSON.stringify({device_id:phone})]),/AV2_DEVICE_REVOKED/);
+});
+test('existing administrative key cannot be replaced without its current single-use proof',async()=>{
+ await user(a);assert.equal(await rpc('av2_admin_key_status',[TRIP.id,root,rootToken]),true);
+ const nextSalt='34'.repeat(16),next=pbkdf2Sync('QA replacement key',Buffer.from(nextSalt,'hex'),600000,32,'sha256').toString('hex');
+ await assert.rejects(rpc('av2_set_admin_key',[TRIP.id,root,rootToken,nextSalt,600000,next]),/AV2_ADMIN_CURRENT_KEY_REQUIRED/);
+ assert.equal((await rpc('av2_change_admin_key',[TRIP.id,root,rootToken,nextSalt,600000,next,null,null])).error,'AV2_ADMIN_PROOF_INVALID');
+ const wrong=await rpc('av2_admin_challenge',[TRIP.id,root,rootToken,'change-key',null]);
+ assert.equal((await rpc('av2_change_admin_key',[TRIP.id,root,rootToken,nextSalt,600000,next,wrong.id,'0'.repeat(64)])).error,'AV2_ADMIN_PROOF_INVALID');
+ const challenge=await rpc('av2_admin_challenge',[TRIP.id,root,rootToken,'change-key',null]);const proof=createHmac('sha256',verifier).update(challenge.message).digest('hex');
+ assert.equal((await rpc('av2_change_admin_key',[TRIP.id,root,rootToken,nextSalt,600000,next,challenge.id,proof])).ok,true);
+ assert.equal((await rpc('av2_change_admin_key',[TRIP.id,root,rootToken,nextSalt,600000,next,challenge.id,proof])).error,'AV2_ADMIN_PROOF_INVALID');
+ await db.exec('reset role');const row=(await db.query('select salt,encode(verifier,\'hex\') verifier from av2_admin_security where trip_id=$1',[TRIP.id])).rows[0];assert.equal(row.salt,nextSalt);assert.equal(row.verifier,next);
+ await user(b);await assert.rejects(rpc('av2_set_admin_key',[TRIP.id,phone,phoneToken,nextSalt,600000,next]),/AV2_ROOT_REQUIRED/);
 });

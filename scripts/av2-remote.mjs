@@ -4,7 +4,7 @@ import { randomBytes,createHash } from 'node:crypto';
 import { query,quote,ROOT,PROJECT,privateJson,assertRoot } from './av2-management.mjs';
 import { TRIP } from '../public/v2/config.js';
 assertRoot();
-const migrations=['20261005090000_agenda_viajera_v2.sql','20261005100000_av2_device_authorization.sql','20261005110000_av2_sync_validation.sql'];
+const migrations=['20261005090000_agenda_viajera_v2.sql','20261005100000_av2_device_authorization.sql','20261005110000_av2_sync_validation.sql','20261005200000_av2_admin_key_rotation.sql'];
 const command=process.argv[2]||'inspect';
 const inventory=()=>query(readFileSync(join(ROOT,'scripts/av2-remote-precheck.sql'),'utf8'))[0].precheck;
 function pending(){const applied=new Set(query('select version from supabase_migrations.schema_migrations').map(x=>x.version));return migrations.filter(name=>!applied.has(name.split('_')[0]));}

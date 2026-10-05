@@ -1,4 +1,4 @@
-const CACHE = 'av2-shell-20261005-7';
+const CACHE = 'av2-shell-20261005-10';
 const SHELL = ['./', './index.html', './style.css', './app.js', './config.js', './domain.js', './store.js', './google.js', './google-auth.js', './sync.js','./devices.js','./fx.js', './manifest.webmanifest', '../vendor/supabase-client.mjs','../vendor/qrcode-generator.mjs', '../assets/tm3-icon-192.png', '../assets/tm3-icon-512.png'];
 self.addEventListener('install', event => event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL))));
 self.addEventListener('message', event => { if (event.data === 'ACTIVATE_UPDATE') self.skipWaiting(); });

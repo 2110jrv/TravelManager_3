@@ -51,8 +51,8 @@ export function finance(events, expenses, budget = null, referenceRates = {}) {
     if(item.cost_status==='PAID')originalTotals.paid+=Number(original);
     else if(item.cost_status==='ESTIMATED')originalTotals.estimated+=Number(original);
     originalTotals.projected=originalTotals.paid+originalTotals.estimated;
-    const saved=item.actual_base_amount ?? item.amount_base ?? item.base_amount ?? ((item.fx_rate_to_base ?? item.exchange_rate)!=null?original*(item.fx_rate_to_base ?? item.exchange_rate):null);
-    const equivalent=currency===TRIP.currency?original:item.cost_status==='ESTIMATED'&&referenceRates[currency]?.rate?original*referenceRates[currency].rate:saved;
+    const saved=(item.cost_status==='PAID'?item.actual_base_amount:null) ?? item.amount_base ?? item.base_amount ?? ((item.fx_rate_to_base ?? item.exchange_rate)!=null?original*(item.fx_rate_to_base ?? item.exchange_rate):null);
+    const equivalent=item.cost_status==='PAID'&&item.actual_base_amount!=null?Number(item.actual_base_amount):currency===TRIP.currency?original:item.cost_status==='ESTIMATED'&&referenceRates[currency]?.rate?original*referenceRates[currency].rate:saved;
     if (equivalent == null) { missing.push(item); continue; }
     if (item.cost_status === 'PAID') paid += Number(equivalent); else if (item.cost_status === 'ESTIMATED') estimated += Number(equivalent);
   }
