@@ -5,7 +5,6 @@ export function createActionRouter({agenda,navigation,access,render,admin,restor
       const id=element.dataset.entryId;
       switch(action) {
         case 'chat-open-general': return chat.openConversation(`trip:1aafae82-4ff7-423b-ade2-25170e8b0dd4`);
-        case 'chat-open-direct': return await chat.openDirect(element.dataset.userId||'b');
         case 'chat-send': return chat.sendMessage(new FormData(element).get('message'));
         case 'chat-retry': return chat.syncPendingMessages();
         case 'budget-jump': return navigation.navigateToEntry(element.dataset.entryId);
