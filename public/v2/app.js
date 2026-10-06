@@ -174,7 +174,7 @@ function syncAll(){
    // Every Calendar commit immediately replaces the inputs of all derived views.
    await refreshBackground();await refreshRates();await refreshBackground();await loadDocuments();if(remoteError)throw remoteError;
    calendarStatus='ready';
-  }catch(error){calendarStatus='error';calendarFailure=error.message;if(error.message.includes('AV2_DEVICE_REVOKED')){financialRemoteReady=false;await store.purge();await client.auth.signOut();documents=[];await render();}throw error;}
+  }catch(error){calendarStatus='error';calendarFailure=error.message;if(error.message.includes('AV2_DEVICE_REVOKED')){financialRemoteReady=false;await store.purge();await client.auth.signOut({scope:'local'});documents=[];await render();}throw error;}
   finally{await refreshBackground();updateConnection();}
  })().finally(()=>{syncAll.running=null;});return syncAll.running;
 }
@@ -221,9 +221,9 @@ app.addEventListener('click', async event => {
       let request=(await store.get('meta','root-transfer'))?.value;
       if(!request||request.state==='CANCELLED'||Date.parse(request.expires_at)<=Date.now())request={ticket:randomToken()};
       request={...request,...await devices.requestTransfer(store.installation,request.ticket)};
+      await store.put('meta',{id:'root-transfer',value:request});
       const cachedEvents=await store.all('events'),cachedRecords=await store.all('records'),user=(await client.auth.getUser()).data.user;
       await devices.call('av2_root_upgrade_preflight',{p_request:request.id,p_data:{events:cachedEvents.length,pins:mapPlaces(cachedEvents).length,documents:((await store.get('meta','drive-files'))?.value||[]).length,records:cachedRecords.length,google_connected:!!(await store.get('meta','google-access'))?.value,google_backend:!!(await store.get('meta','google-backend'))?.value,budget_ready:(await budget()).includes('paid-stat'),session_valid:!!user&&user.id===authSession.user.id}});
-      await store.put('meta',{id:'root-transfer',value:request});
       const confirmed=await new Promise(resolve=>{const dialog=document.createElement('dialog');dialog.id='root-upgrade-confirm';dialog.innerHTML='<form method="dialog"><h2>Convertir este navegador en PC Casa</h2><p>Esta instalación reemplazará a la PC Casa anterior como dispositivo ROOT. La instalación anterior perderá privilegios ROOT.</p><p class="upgrade-status">Esperando autorización de PC Casa…</p><div class="actions"><button class="secondary" value="cancel">Cancelar</button><button class="primary" value="upgrade" disabled>Convertir en PC Casa</button></div></form>';document.body.append(dialog);dialog.showModal();dialog.addEventListener('close',()=>{resolve(dialog.returnValue==='upgrade');dialog.remove();},{once:true});refreshRootTransfers();});
       if(!confirmed)return;
       request=(await store.get('meta','root-transfer'))?.value;
@@ -250,7 +250,7 @@ app.addEventListener('click', async event => {
       const qr=qrcode(0,'M');qr.addData(url);qr.make();const dialog=document.createElement('dialog');dialog.innerHTML=`<form method="dialog"><h2>Agregar dispositivo</h2><p>Un solo uso · válido hasta ${escape(formatDateTime(invite.expires_at))}</p>${qr.createSvgTag(4,4)}<label>Enlace temporal<input readonly value="${escape(url)}"></label><button class="primary">Cerrar</button></form>`;document.body.append(dialog);dialog.showModal();dialog.addEventListener('close',()=>dialog.remove(),{once:true});
     }
     else if(action==='revoke-device'){if(confirm('¿Revocar este teléfono? Al reconectarse perderá acceso y se invalidarán sus datos locales.')){const password=deviceScreen.root?null:await requestValue('Clave administrativa','password');if(deviceScreen.root||password){await devices.revoke(id,password);await refreshDeviceIdentity();}}}
-    else if(action==='remove-self'){if(confirm('¿Quitar esta instalación y eliminar sus datos locales?')){await devices.revoke(store.device,null,true);await store.purge();await client.auth.signOut();location.reload();}}
+    else if(action==='remove-self'){if(confirm('¿Quitar esta instalación y eliminar sus datos locales?')){await devices.revoke(store.device,null,true);await store.purge();await client.auth.signOut({scope:'local'});location.reload();}}
     else if (action === 'sync') { await syncAll(); notice('Sincronización completada.'); }
     else if (action === 'budget') {
       const value=await new Promise(resolve=>{const dialog=document.createElement('dialog');dialog.innerHTML=`<form method="dialog"><h2>Presupuesto del viaje</h2><label>Presupuesto en USD<div class="money-input"><span aria-hidden="true">${currencyPrefix('USD')}</span><input type="number" min="0" step="0.01" required value="${escape(active('budgets')[0]?.data.amount??'')}"></div></label><div class="actions"><button value="cancel" class="secondary" formnovalidate>Cancelar</button><button value="save" class="primary">Guardar presupuesto</button></div></form>`;document.body.append(dialog);dialog.showModal();dialog.addEventListener('close',()=>{resolve(dialog.returnValue==='save'?Number(dialog.querySelector('input').value):null);dialog.remove();},{once:true});});

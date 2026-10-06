@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {SyncEngine} from '../public/v2/sync.js';
 import {readFileSync} from 'node:fs';
 import {randomBytes,randomUUID,createHash,pbkdf2Sync,createHmac} from 'node:crypto';
 import {createClient} from '@supabase/supabase-js';
@@ -79,11 +80,13 @@ try{
  await rpc(owner.client,'av2_approve_root_transfer',{...rootCred,p_request:request.id});
  await assert.rejects(rpc(owner.client,'av2_consume_root_transfer',{...transferArgs,p_installation:randomUUID()}),/AV2_TRANSFER_INVALID/);
  const beforeTransfer=await rpc(owner.client,'av2_sync_pull',{...rootCred,p_after:null});
+ const destinationSession=await login('ADMIN');
  const moved=await rpc(owner.client,'av2_consume_root_transfer',transferArgs);assert.equal(moved.id,target);assert.equal(Number(query(`select count(*) n from public.av2_devices where trip_id=${quote(trip)}`)[0].n),deviceCountBeforeUpgrade);assert.equal(moved.role,'ROOT_DEVICE');assert.equal(moved.name,'PC Casa');
  assert.equal((await rpc(owner.client,'av2_consume_root_transfer',transferArgs)).id,target);
  await assert.rejects(rpc(owner.client,'av2_sync_pull',{...rootCred,p_after:null}),/AV2_DEVICE_REVOKED/);
  assert.deepEqual(await rpc(owner.client,'av2_sync_pull',{...credentials(target,targetToken),p_after:null}),beforeTransfer);
  assert.equal(Number(query(`select count(*) as n from public.av2_devices where trip_id=${quote(trip)} and role='ROOT_DEVICE'`)[0].n),1);
+ let sourcePurged=false;const revokedSource=new SyncEngine({purge:async()=>{sourcePurged=true;}},{client:owner.client,check:async()=>{await rpc(owner.client,'av2_sync_pull',{...rootCred,p_after:null});}});await assert.rejects(revokedSource.run(),/AV2_DEVICE_REVOKED/);assert.equal(sourcePurged,true);const destinationRefresh=await destinationSession.client.auth.refreshSession();if(destinationRefresh.error||!destinationRefresh.data.session)throw Error('QA_TARGET_SESSION_INVALIDATED');assert.deepEqual(await rpc(destinationSession.client,'av2_sync_pull',{...credentials(target,targetToken),p_after:null}),beforeTransfer);evidence.push({case:'revoked old ROOT signs out only its own session; same-account destination refresh and sync survive',status:'PASS'});
  evidence.push({case:'isolated real ROOT transfer: authorization, target binding, atomic move, idempotency, old proof revoked, backend records preserved',status:'PASS'});
  console.log(JSON.stringify({project:PROJECT,qa_trip:trip,tests:evidence.length,evidence},null,2));
 }catch(error){evidence.push({case:'remote suite',status:'FAIL',error:error.message});console.error(error.message);process.exitCode=1;}

@@ -55,7 +55,7 @@ export class SyncEngine {
       for(const operation of uploads) await this.store.acknowledge(operation,await this.remote.apply(operation));
       await this.store.put('meta', { id: 'last-sync', value: new Date().toISOString() });
     } catch (error) {
-      if (error.message.includes('AV2_DEVICE_REVOKED')) { await this.store.purge(); await this.remote.client?.auth.signOut(); }
+      if (error.message.includes('AV2_DEVICE_REVOKED')) { await this.store.purge(); await this.remote.client?.auth.signOut({scope:'local'}); }
       throw error;
     }
   }
