@@ -17,6 +17,10 @@ export class Devices {
   async enroll(invite,name){return this.remote.rpc('av2_enroll',{p_trip:this.remote.credentials().p_trip,p_device:this.remote.device,p_device_token:this.remote.token,p_invite:invite,p_name:name});}
   claimRoot(claim){return this.remote.rpc('av2_claim_root',{p_trip:this.remote.credentials().p_trip,p_device:this.remote.device,p_device_token:this.remote.token,p_claim:claim});}
   rename(name){return this.call('av2_rename_device',{p_name:name});}
+  requestTransfer(installation,ticket){return this.remote.rpc('av2_request_root_transfer',{p_trip:this.remote.credentials().p_trip,p_target:this.remote.device,p_installation:installation,p_target_token:this.remote.token,p_ticket:ticket});}
+  pendingTransfers(){return this.call('av2_pending_root_transfers');}
+  approveTransfer(id){return this.call('av2_approve_root_transfer',{p_request:id});}
+  consumeTransfer(installation,ticket){return this.remote.rpc('av2_consume_root_transfer',{p_trip:this.remote.credentials().p_trip,p_target:this.remote.device,p_installation:installation,p_target_token:this.remote.token,p_ticket:ticket});}
   adminConfigured(){return this.call('av2_admin_key_status');}
   async setAdmin(password,current=null){const salt=hex(crypto.getRandomValues(new Uint8Array(16))),key=await deriveAdminKey(password,salt);const verifier=hex(key);key.fill(0);const args={p_salt:salt,p_iterations:600000,p_verifier:verifier};if(current!==null){Object.assign(args,await this.proof('change-key',null,current));const result=await this.call('av2_change_admin_key',args);if(result.error)throw Error(result.error);return result;}return this.call('av2_set_admin_key',args);}
   async proof(action,target,password){const challenge=await this.call('av2_admin_challenge',{p_action:action,p_target:target});return{p_challenge:challenge.id,p_proof:await adminProof(password,challenge)};}

@@ -1,0 +1,30 @@
+import{test}from'node:test';import assert from'node:assert/strict';import{readFileSync}from'node:fs';import{createHash}from'node:crypto';import{PGlite}from'@electric-sql/pglite';import{TRIP}from'../public/v2/config.js';
+const migration='20261006120000_av2_root_transfer.sql';
+test('ROOT transfer is owner-bound, approved, target-bound, atomic, single-use and non-destructive',async()=>{
+ const db=new PGlite(),owner=crypto.randomUUID(),foreign=crypto.randomUUID(),root=crypto.randomUUID(),target=crypto.randomUUID(),install=crypto.randomUUID(),token='a'.repeat(64),targetToken='b'.repeat(64),ticket='c'.repeat(64),claim='d'.repeat(64);
+ const rpc=async(name,args)=>(await db.query(`select ${name}(${args.map((_,i)=>'$'+(i+1)).join(',')}) as result`,args)).rows[0].result;
+ const user=async id=>{await db.exec('reset role');await db.query("select set_config('request.jwt.claim.sub',$1,false)",[id]);await db.exec('set role authenticated');};
+ try{
+ await db.exec("create role anon;create role authenticated;create schema auth;create table auth.users(id uuid primary key);create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;grant usage on schema public,auth to authenticated;grant execute on function auth.uid() to authenticated;");
+ for(const f of ['20261005090000_agenda_viajera_v2.sql','20261005100000_av2_device_authorization.sql','20261005110000_av2_sync_validation.sql','20261006040000_av2_device_persistence.sql',migration])await db.exec(readFileSync(new URL('../supabase/migrations/'+f,import.meta.url),'utf8'));
+ await db.query('insert into auth.users values($1),($2)',[owner,foreign]);await db.query("insert into av2_trip_users(trip_id,user_id,role) values($1,$2,'OWNER')",[TRIP.id,owner]);await db.query("insert into av2_root_claims values($1,$2,$3,now()+interval '1 hour',null)",[TRIP.id,owner,createHash('sha256').update(claim).digest()]);await user(owner);await rpc('av2_claim_root',[TRIP.id,root,token,claim]);
+ await assert.rejects(db.query('select * from av2_root_transfers'),/permission denied/);
+ await user(foreign);await assert.rejects(rpc('av2_request_root_transfer',[TRIP.id,target,install,targetToken,ticket]),/AV2_ROOT_OWNER_REQUIRED/);await user(owner);
+ const req=await rpc('av2_request_root_transfer',[TRIP.id,target,install,targetToken,ticket]);assert.equal(req.approved,false);assert.equal((await rpc('av2_request_root_transfer',[TRIP.id,target,install,targetToken,ticket])).id,req.id);
+ await assert.rejects(rpc('av2_consume_root_transfer',[TRIP.id,target,install,targetToken,ticket]),/AV2_TRANSFER_NOT_APPROVED/);
+ await assert.rejects(rpc('av2_approve_root_transfer',[TRIP.id,target,targetToken,req.id]),/AV2_ROOT_REQUIRED/);
+ await rpc('av2_approve_root_transfer',[TRIP.id,root,token,req.id]);
+ for(const args of [[TRIP.id,target,crypto.randomUUID(),targetToken,ticket],[TRIP.id,target,install,token,ticket],[TRIP.id,target,install,targetToken,claim]])await assert.rejects(rpc('av2_consume_root_transfer',args),/AV2_TRANSFER_INVALID/);
+ await user(foreign);await assert.rejects(rpc('av2_consume_root_transfer',[TRIP.id,target,install,targetToken,ticket]),/AV2_TRANSFER_INVALID/);await user(owner);
+ // Failed insert must roll back revocation and ticket consumption.
+ await db.exec('reset role');await db.query("insert into av2_devices(id,trip_id,user_id,name,role) values($1,$2,$3,'collision','DEVICE')",[target,TRIP.id,owner]);await user(owner);await assert.rejects(rpc('av2_consume_root_transfer',[TRIP.id,target,install,targetToken,ticket]),/duplicate key/);assert.equal(await rpc('av2_authenticate_device',[TRIP.id,root,token]),true);
+ await db.exec('reset role');await db.query('update av2_devices set id=$2 where id=$1',[target,crypto.randomUUID()]);await db.query('update av2_root_transfers set expires_at=now()-interval \'1 second\' where id=$1',[req.id]);await user(owner);await assert.rejects(rpc('av2_consume_root_transfer',[TRIP.id,target,install,targetToken,ticket]),/AV2_TRANSFER_NOT_APPROVED_OR_EXPIRED/);
+ await db.exec('reset role');await db.query("update av2_root_transfers set expires_at=now()+interval '1 minute' where id=$1",[req.id]);const before=(await db.query('select count(*) as n from av2_records')).rows[0].n;await user(owner);
+ const competing=crypto.randomUUID(),otherTicket='e'.repeat(64);const second=await rpc('av2_request_root_transfer',[TRIP.id,competing,install,targetToken,otherTicket]);await rpc('av2_approve_root_transfer',[TRIP.id,root,token,second.id]);const moved=await rpc('av2_consume_root_transfer',[TRIP.id,target,install,targetToken,ticket]);assert.equal(moved.name,'PC Casa');assert.equal(moved.role,'ROOT_DEVICE');assert.equal(await rpc('av2_authenticate_device',[TRIP.id,root,token]),false);assert.equal(await rpc('av2_authenticate_device',[TRIP.id,target,targetToken]),true);assert.equal((await rpc('av2_consume_root_transfer',[TRIP.id,target,install,targetToken,ticket])).id,target);
+ await assert.rejects(rpc('av2_consume_root_transfer',[TRIP.id,competing,install,targetToken,otherTicket]),/AV2_TRANSFER_NOT_APPROVED_OR_EXPIRED/);await assert.rejects(rpc('av2_approve_root_transfer',[TRIP.id,root,token,req.id]),/AV2_ROOT_REQUIRED/);
+ await db.exec('reset role');assert.equal((await db.query("select count(*) as n from av2_devices where role='ROOT_DEVICE'")).rows[0].n,1);assert.equal((await db.query('select count(*) as n from av2_records')).rows[0].n,before);assert.equal((await db.query('select count(*) as n from av2_device_keys where device_id=$1',[root])).rows[0].n,0);
+ await assert.rejects(db.query('update av2_devices set deleted_at=now() where id=$1',[target]),/AV2_ROOT_DEVICE_PROTECTED/);
+ }finally{await db.close();}
+});
+
+

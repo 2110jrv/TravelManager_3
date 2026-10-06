@@ -66,6 +66,21 @@ try{
  await assert.rejects(rpc(owner.client,'av2_sync_pull',{...credentials(root,aToken),p_after:null}),/AV2_DEVICE_REVOKED/);evidence.push({case:'PIN proof required; revoked device cannot read/write or impersonate root',status:'PASS'});
  const inventory=query(`select tablename,rowsecurity from pg_tables where schemaname='public' and tablename like 'av2_%'`);assert.ok(inventory.every(x=>x.rowsecurity));
  const rootTriggers=query("select tgname from pg_trigger where tgrelid='public.av2_devices'::regclass and not tgisinternal");assert.ok(rootTriggers.some(x=>x.tgname==='av2_root_guard'));evidence.push({case:'remote av2 RLS and root trigger inventory',status:'PASS'});
+ // Transfer only the isolated QA trip. Never consume a transfer for Italia 2026.
+ const target=randomUUID(),installation=randomUUID(),targetToken=randomBytes(32).toString('hex'),ticket=randomBytes(32).toString('hex');
+ const transferArgs={p_trip:trip,p_target:target,p_installation:installation,p_target_token:targetToken,p_ticket:ticket};
+ const request=await rpc(owner.client,'av2_request_root_transfer',transferArgs);
+ await assert.rejects(rpc(owner.client,'av2_consume_root_transfer',transferArgs),/AV2_TRANSFER_NOT_APPROVED/);
+ await assert.rejects(rpc(traveler.client,'av2_approve_root_transfer',{...bc,p_request:request.id}),/AV2_ROOT_REQUIRED/);
+ await rpc(owner.client,'av2_approve_root_transfer',{...rootCred,p_request:request.id});
+ await assert.rejects(rpc(owner.client,'av2_consume_root_transfer',{...transferArgs,p_installation:randomUUID()}),/AV2_TRANSFER_INVALID/);
+ const beforeTransfer=await rpc(owner.client,'av2_sync_pull',{...rootCred,p_after:null});
+ const moved=await rpc(owner.client,'av2_consume_root_transfer',transferArgs);assert.equal(moved.role,'ROOT_DEVICE');assert.equal(moved.name,'PC Casa');
+ assert.equal((await rpc(owner.client,'av2_consume_root_transfer',transferArgs)).id,target);
+ await assert.rejects(rpc(owner.client,'av2_sync_pull',{...rootCred,p_after:null}),/AV2_DEVICE_REVOKED/);
+ assert.deepEqual(await rpc(owner.client,'av2_sync_pull',{...credentials(target,targetToken),p_after:null}),beforeTransfer);
+ assert.equal(Number(query(`select count(*) as n from public.av2_devices where trip_id=${quote(trip)} and role='ROOT_DEVICE'`)[0].n),1);
+ evidence.push({case:'isolated real ROOT transfer: authorization, target binding, atomic move, idempotency, old proof revoked, backend records preserved',status:'PASS'});
  console.log(JSON.stringify({project:PROJECT,qa_trip:trip,tests:evidence.length,evidence},null,2));
 }catch(error){evidence.push({case:'remote suite',status:'FAIL',error:error.message});console.error(error.message);process.exitCode=1;}
 finally{
