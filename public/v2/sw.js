@@ -1,5 +1,5 @@
-const CACHE = 'av2-shell-20261005-visual-150-complete';
-const SHELL = ['./', './index.html', './style.css', './app.js', './config.js', './domain.js', './store.js', './google.js', './google-auth.js', './sync.js','./devices.js','./fx.js','./format.js','./visual.js','./assets/italia.jpg','./assets/venezia.jpg','./assets/bernina.jpg','./assets/lucca.jpg','./assets/firenze.jpg','./assets/amalfi.jpg','./assets/roma.jpg','./assets/credits.json', './manifest.webmanifest', '../vendor/supabase-client.mjs','../vendor/qrcode-generator.mjs', '../assets/tm3-icon-192.png', '../assets/tm3-icon-512.png'];
+const CACHE = 'av2-shell-calendar-refresh-151c';
+const SHELL = ['./', './index.html', './style.css', './app.js', './config.js', './domain.js', './store.js', './google.js', './google-auth.js', './sync.js','./calendar-refresh.js','./devices.js','./fx.js','./format.js','./visual.js','./assets/italia.jpg','./assets/venezia.jpg','./assets/bernina.jpg','./assets/lucca.jpg','./assets/firenze.jpg','./assets/amalfi.jpg','./assets/roma.jpg','./assets/credits.json', './manifest.webmanifest', '../vendor/supabase-client.mjs','../vendor/qrcode-generator.mjs', '../assets/tm3-icon-192.png', '../assets/tm3-icon-512.png'];
 self.addEventListener('install', event => event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL))));
 self.addEventListener('message', event => { if (event.data === 'ACTIVATE_UPDATE') self.skipWaiting(); });
 self.addEventListener('activate', event => event.waitUntil((async () => {

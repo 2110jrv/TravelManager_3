@@ -105,3 +105,26 @@ test('both legacy service workers preserve v2 caches and ignore its private prev
     assert.equal(intercepted,false);
   }
 });
+
+import {CalendarRefresh} from '../public/v2/calendar-refresh.js';
+test('external Calendar description updates replace the same cached eventId and recalculate purchase groups',async()=>{
+ const old=normalizeEvent({...raw('flight-a'),description:'',summary:'✅ Flight'}),values=new Map([['events:flight-a',old],['meta:calendar-sync',{value:'old-token',query_version:2}],['records:expense',{id:'expense',data:{amount:9,currency:'USD',cost_status:'PAID'}}],['blobs:doc',{id:'doc',value:'offline document'}]]);
+ const before=finance([old],[]);assert.equal(before.missing_costs.length,1);let cost=765.35;
+ const store={get:async(k,id)=>values.get(`${k}:${id}`),all:async k=>[...values].filter(([key])=>key.startsWith(k+':')).map(([,value])=>value),transaction:async(_,fn)=>fn({objectStore:k=>({put:v=>values.set(`${k}:${v.id}`,v)})})};
+ const urls=[],source=new GoogleSource(async()=> 'token',async url=>{urls.push(url);if(url.endsWith('/colors'))return Response.json({event:{}});if(!url.includes('/events?'))return Response.json({timeZone:'Europe/Rome',labelProperties:{eventLabels:[{id:'flight',name:'Flights',backgroundColor:'#abcdef'}]}});return Response.json({items:Array.from({length:8},(_,i)=>({...raw(i?'flight-'+i:'flight-a'),summary:'✅ United',eventLabelId:'flight',description:`[AGENDA_VIAJERA] COST=${cost} CURRENCY=USD COST_STATUS=PAID PURCHASE_ID=UA_A4FM57 [/AGENDA_VIAJERA]`})),nextSyncToken:'next'});});
+ await source.syncCalendar(store);let f=finance(await store.all('events'),[]);assert.equal(f.paid,765.35);assert.equal(f.missing_costs.length,0);assert.equal(f.by_category.Flights.projected,765.35);assert.equal((await store.all('events')).length,8);assert.ok(urls.some(url=>url.includes('syncToken=old-token')));
+ cost=800;await source.syncCalendar(store);f=finance(await store.all('events'),[]);assert.equal(f.paid,800);assert.equal(f.by_currency.USD.paid,800);assert.equal((await store.all('events')).length,8);assert.equal((await store.get('events','flight-a')).cost,800);assert.equal((await store.get('meta','calendar-sync')).value,'next');assert.equal((await store.get('records','expense')).data.amount,9);assert.equal((await store.get('blobs','doc')).value,'offline document');
+});
+test('reconnect and stale foreground trigger Calendar refresh; fresh foreground, hidden and offline do not',async()=>{
+ let clock=100000,stamp=0,calls=0,online=true,visible=true,intervalCallback,intervals=0;const windowTarget=new EventTarget(),documentTarget=new EventTarget();
+ const refresh=new CalendarRefresh({now:()=>clock,lastSync:async()=>new Date(stamp).toISOString(),available:async()=>online,visible:()=>visible,refresh:async()=>{calls++;stamp=clock;},setTimer:fn=>{intervalCallback=fn;intervals++;return intervals;},clearTimer:()=>{}});refresh.start(windowTarget,documentTarget);
+ const settle=async()=>{await new Promise(r=>setImmediate(r));if(refresh.running)await refresh.running;};
+ documentTarget.dispatchEvent(new Event('visibilitychange'));await settle();assert.equal(calls,1);clock+=30000;documentTarget.dispatchEvent(new Event('visibilitychange'));await settle();assert.equal(calls,1);
+ clock+=31000;documentTarget.dispatchEvent(new Event('visibilitychange'));await settle();assert.equal(calls,2);windowTarget.dispatchEvent(new Event('online'));await settle();assert.equal(calls,3);
+ online=false;clock+=400000;intervalCallback();await settle();assert.equal(calls,3);online=true;visible=false;documentTarget.dispatchEvent(new Event('visibilitychange'));intervalCallback();await settle();assert.equal(calls,3);
+ visible=true;documentTarget.dispatchEvent(new Event('visibilitychange'));await settle();assert.equal(calls,4);clock+=300001;intervalCallback();await settle();assert.equal(calls,5);refresh.stop();
+});
+test('overlapping Calendar refresh triggers share one request and a failed refresh can retry',async()=>{
+ let release,calls=0;const policy=new CalendarRefresh({lastSync:async()=>null,available:async()=>true,refresh:async()=>{calls++;await new Promise(r=>release=r);}});const a=policy.request({force:true}),b=policy.request({force:true});assert.equal(a,b);await new Promise(r=>setImmediate(r));assert.equal(calls,1);release();await a;
+ policy.refresh=async()=>{throw Error('network failure');};await assert.rejects(policy.request({force:true}),/network failure/);policy.refresh=async()=>calls++;await policy.request({force:true});assert.equal(calls,2);
+});

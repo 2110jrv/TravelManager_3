@@ -2,6 +2,7 @@ import { createClient } from '../vendor/supabase-client.mjs';
 import { TRIP } from './config.js';
 import { dateKey, occursOn, days, finance, normalizeEvent, financialAudit, validCurrency } from './domain.js';
 import { LocalStore } from './store.js';
+import {CalendarRefresh} from './calendar-refresh.js';
 import { GoogleSource } from './google.js';
 import { GoogleAuthorization } from './google-auth.js';
 import { SupabaseRemote, SyncEngine } from './sync.js';
@@ -12,10 +13,10 @@ import {formatMoney,formatEventTime,formatTime,formatDateTime,currencyPrefix} fr
 import {icon,eventVisual,destination,destinations,multidayStage} from './visual.js';
 
 document.querySelectorAll('nav [data-icon]').forEach(link=>link.insertAdjacentHTML('afterbegin',icon(link.dataset.icon)));
-let googleAuthorization=null;const pendingGoogleAuth=[];
+let calendarRefresh=null;let googleAuthorization=null;const pendingGoogleAuth=[];
 const client = createClient('https://cslludzuejkhsydqiabx.supabase.co', 'sb_publishable_8k8xhMZtkay30ZB45aPjGw_4u69Dp0U', { auth: { storageKey: 'av2.auth', flowType:'pkce', persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
 // Subscribe before opening IndexedDB: PKCE can finish during database startup.
-client.auth.onAuthStateChange((event,session)=>{if(googleAuthorization)setTimeout(()=>googleAuthorization.capture(event,session).catch(error=>notice(error.message)),0);else pendingGoogleAuth.push({event,session});});
+client.auth.onAuthStateChange((event,session)=>{if(googleAuthorization)setTimeout(async()=>{try{await googleAuthorization.capture(event,session);if(event==='SIGNED_IN'&&session?.provider_token)await calendarRefresh?.request({force:true});}catch(error){notice(error.message);}},0);else pendingGoogleAuth.push({event,session});});
 const store = await new LocalStore().open();
 const rateService=new ReferenceRates(new FrankfurterProvider(),store);
 let referenceRates=(await store.get('meta','fx-view'))?.value||{},financeView=(await store.get('meta','finance-view'))?.value||'USD',financialRemoteReady=false;
@@ -53,6 +54,8 @@ let selectedDay = days().includes(dateKey()) ? dateKey() : TRIP.start;
 let documents = (await store.get('meta', 'drive-files'))?.value || [];
 let events = [], records = [], pending = [], conflicts = [], now = new Date();
 let installPrompt,fxDetailsOpen=false;
+let calendarStatus='saved',calendarUpdatedAt=(await store.get('meta','calendar-sync'))?.synced_at,calendarFailure='';
+function updateConnection(){const node=document.querySelector('#connection');node.textContent=calendarStatus==='updating'?'Actualizando…':!navigator.onLine||calendarStatus==='error'?'Sin conexión · mostrando datos guardados':calendarUpdatedAt?`Actualizado hace ${Math.max(0,Math.floor((Date.now()-Date.parse(calendarUpdatedAt))/60000))} min`:'Datos guardados';node.title=calendarFailure;}
 
 const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const money = formatMoney;
@@ -128,7 +131,7 @@ async function render() {
   if(route==='devices'){app.innerHTML=await deviceScreen();return;}
   if(route==='security'){try{app.innerHTML=await securityScreen();}catch{app.innerHTML='<a class="back" href="#devices">‹ Dispositivos</a><h1>Seguridad</h1><p class="warning">Conéctate para consultar o cambiar la configuración de seguridad.</p>';}return;}
 
-  document.querySelector('#connection').textContent = navigator.onLine ? pending.length ? `${pending.length} pendientes` : 'En línea' : 'Sin conexión';
+  updateConnection();
   if (route === 'home') app.innerHTML = home(); else if (route === 'itinerary') app.innerHTML = itinerary(); else if (route === 'event') app.innerHTML = detail(id); else if (route === 'budget') {app.innerHTML = budget();} else if (route === 'expense') app.innerHTML = expenseForm(id); else if (route === 'expenses') app.innerHTML = `<div class="row"><h1>Gastos</h1><a class="primary" href="#expense/new">+ Gasto</a></div>${expenseList()}`; else if (route === 'documents') app.innerHTML = documentList(); else if (route === 'offline') app.innerHTML = await offline(); else if (route === 'sync') {syncScreen.last=(await store.get('meta','last-sync'))?.value;app.innerHTML=syncScreen();} else if(route==='financial-review'||route==='financial-audit') app.innerHTML=reviewFinance(route==='financial-audit'); else if(route==='map') app.innerHTML=mapScreen(); else if(route==='pending') app.innerHTML='<h1>Pendientes</h1>'+eventList(events.filter(e=>!e.deleted_at&&(e.purchase_status==='PENDING'||e.cost_status==='ESTIMATED'))); else if(route==='trip-info') app.innerHTML='<h1>Información del viaje</h1><section class="card"><h2>Italia 2026 <span class="italy-flag" aria-hidden="true"></span></h2><p>20 oct. – 5 nov. 2026 · 17 días</p><p>Jonathan + Jenny</p><p>Moneda base: USD · Horarios locales de cada evento</p></section>'; else if(route==='preferences') app.innerHTML='<h1>Configuración</h1><section class="card"><p>Moneda base: USD · Importes originales conservados</p><p>Horarios locales: AM/PM + formato militar</p>'+button('install','Instalar aplicación','','primary')+'<p><a class="text-link" href="#devices">Seguridad y dispositivos ›</a></p></section>'; else if(route==='help'){const credits=await(await fetch('./assets/credits.json')).json();app.innerHTML='<h1>Ayuda</h1><section class="card"><h2>Tu viaje, también offline</h2><p>Sincroniza antes de salir y descarga tus documentos. Si Google expira, vuelve a conectar desde Sincronización: tus datos locales permanecen guardados.</p><a class="text-link" href="#offline">Preparar offline ›</a></section><section class="card section"><h2>Fotografías</h2>'+credits.map(c=>'<p><a href="'+escape(c.source)+'" target="_blank" rel="noopener">'+escape(c.key)+' · '+escape(c.author)+'</a> · <a href="'+escape(c.license_url)+'">'+escape(c.license)+'</a></p>').join('')+'</section>'; } else if (route === 'conflicts') app.innerHTML = `<h1>Resolver conflictos</h1>${conflicts.map(c => `<section class="card section"><h3>${escape(c.field)}</h3><p>Servidor: ${escape(conflictValue(c,c.current))}</p><p>Este dispositivo: ${escape(conflictValue(c,c.incoming))}</p>${button('resolve-current','Conservar servidor',c.id)} ${c.field !== 'deleted_at' ? button('resolve-incoming','Usar valor local',c.id) : '<p class="warning">El registro eliminado no puede resucitarse. Ambos valores se conservan para revisión.</p>'}</section>`).join('') || '<div class="empty">No hay conflictos pendientes.</div>'}`; else if (route === 'document') {
     const file = documents.find(x => x.id === id), cached = await store.get('blobs', `drive:${id}`);
     if (render.objectUrl) URL.revokeObjectURL(render.objectUrl);
@@ -138,9 +141,20 @@ async function render() {
   if(route==='event'){const warnings=events.find(x=>x.id===id)?.warnings||[];if(warnings.length)app.insertAdjacentHTML('beforeend',`<p class="warning">${warnings.map(escape).join('<br>')}</p>`);}
   if(route==='document'&&documents.some(x=>x.id===id))app.insertAdjacentHTML('beforeend',`<div class="actions">${button('trash-document','Enviar archivo a la papelera de Google Drive',id,'danger')}</div>`);
 }
-async function syncAll() {
-  if (!navigator.onLine) throw Error('Sin conexión. Tus cambios siguen guardados localmente.');
-  try{await sync.run();financialRemoteReady=true; await remote.check(); await google.syncCalendar(store);await loadDocuments();await refreshRates();}catch(error){if(error.message.includes('AV2_DEVICE_REVOKED')){financialRemoteReady=false;await store.purge();await client.auth.signOut();documents=[];await render();}throw error;}finally{await refreshBackground();}
+function syncAll(){
+ if(syncAll.running)return syncAll.running;
+ syncAll.running=(async()=>{
+  if(!navigator.onLine){calendarStatus='error';updateConnection();throw Error('Sin conexión. Tus cambios siguen guardados localmente.');}
+  calendarStatus='updating';calendarFailure='';updateConnection();
+  try{
+   let remoteError=null;try{await sync.run();financialRemoteReady=true;}catch(error){remoteError=error;}
+   await remote.check();await google.syncCalendar(store);calendarUpdatedAt=(await store.get('meta','calendar-sync'))?.synced_at;
+   // Every Calendar commit immediately replaces the inputs of all derived views.
+   await refreshBackground();await refreshRates();await refreshBackground();await loadDocuments();if(remoteError)throw remoteError;
+   calendarStatus='ready';
+  }catch(error){calendarStatus='error';calendarFailure=error.message;if(error.message.includes('AV2_DEVICE_REVOKED')){financialRemoteReady=false;await store.purge();await client.auth.signOut();documents=[];await render();}throw error;}
+  finally{await refreshBackground();updateConnection();}
+ })().finally(()=>{syncAll.running=null;});return syncAll.running;
 }
 async function refreshRates(force=false){
   const currentEvents=(await store.all('events')).filter(e=>!e.deleted_at),currentRecords=(await store.all('records')).filter(r=>!r.deleted_at);
@@ -232,10 +246,10 @@ app.addEventListener('submit', async event => {
   } catch (error) { notice(error.message); } finally { submit.disabled = false; }
 });
 addEventListener('hashchange', () => render().catch(error => notice(error.message)));
-addEventListener('online', () => syncAll().catch(error => notice(error.message)));
+
 addEventListener('offline', () => refreshRates().then(()=>refreshBackground()).catch(()=>refreshBackground()));
 addEventListener('beforeinstallprompt', event => { event.preventDefault(); installPrompt = event; });
-async function refreshBackground(){if(location.hash.startsWith('#expense/')||location.hash==='#security'){document.querySelector('#connection').textContent=navigator.onLine?'En línea':'Sin conexión';return;}await render();}
+async function refreshBackground(){if(location.hash.startsWith('#expense/')||location.hash==='#security'){updateConnection();return;}await render();}
 function scheduleSync(){clearTimeout(scheduleSync.timer);scheduleSync.timer=setTimeout(async()=>{if(navigator.onLine&&(await store.get('meta','authorized'))?.value){try{await sync.run();await refreshBackground();}catch(error){notice(error.message);if(error.message.includes('AV2_DEVICE_REVOKED'))await render();else await refreshBackground();}}},1000);}
 if ('serviceWorker' in navigator) {
   const hadController = !!navigator.serviceWorker.controller;
@@ -246,7 +260,9 @@ if ('serviceWorker' in navigator) {
   let changing = false; navigator.serviceWorker.addEventListener('controllerchange', () => { if (!hadController || changing) return; changing = true; location.reload(); });
 }
 await render();
-setInterval(() => { if ((location.hash || '#home') === '#home') render().catch(error => notice(error.message)); }, 60000);
-if (navigator.onLine && (await client.auth.getSession()).data.session) {if(!(await store.get('meta','authorized'))?.value){location.hash='#devices';await render();}else syncAll().catch(error => notice(error.message));}
+setInterval(()=>{if(document.visibilityState==='visible'){updateConnection();if((location.hash||'#home')==='#home')render().catch(error=>notice(error.message));}},60000);
+calendarRefresh=new CalendarRefresh({refresh:syncAll,lastSync:async()=>(await store.get('meta','calendar-sync'))?.synced_at,available:async()=>navigator.onLine&&!!(await client.auth.getSession()).data.session&&!!(await store.get('meta','authorized'))?.value});
+calendarRefresh.start();
+if (navigator.onLine && (await client.auth.getSession()).data.session) {if(!(await store.get('meta','authorized'))?.value){location.hash='#devices';await render();}else calendarRefresh.request({force:true}).catch(error=>notice(error.message));}
 setInterval(scheduleSync,30000);
 refreshRates().then(()=>refreshBackground()).catch(()=>{});
