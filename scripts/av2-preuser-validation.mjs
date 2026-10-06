@@ -3,13 +3,15 @@ import {readFileSync} from 'node:fs';
 import {assertRoot,privateJson} from './av2-management.mjs';
 assertRoot();const browser=await chromium.connectOverCDP('http://127.0.0.1:9224');
 try{
- const context=browser.contexts()[0],page=context.pages().find(p=>p.url().startsWith('http://127.0.0.1:5004/v2/'));
+ const context=browser.contexts()[0];let page=context.pages().find(p=>p.url().startsWith('http://127.0.0.1:5004/v2/'));
  if(!page)throw Error('PC_PREVIEW_NOT_OPEN');
  if(process.argv.includes('--fresh-login')){
   if(!JSON.parse(readFileSync('.av2-private/google-lifecycle-evidence.json','utf8')).natural_expiration_observed)throw Error('WAIT_FOR_NATURAL_EXPIRY_FIRST');
   const old=await page.evaluate(()=>JSON.parse(localStorage.getItem('av2.auth')||'null')?.provider_token);
+  await page.evaluate(async()=>{const{createClient}=await import('/vendor/supabase-client.mjs');const client=createClient('https://cslludzuejkhsydqiabx.supabase.co','sb_publishable_8k8xhMZtkay30ZB45aPjGw_4u69Dp0U',{auth:{storageKey:'av2.auth',flowType:'pkce',detectSessionInUrl:false}});const{error}=await client.auth.signOut({scope:'local'});if(error)throw error;if((await client.auth.getSession()).data.session)throw Error('SIGNOUT_FAILED');});
+  const closed=page;page=await context.newPage();await closed.close();await page.bringToFront();
   await page.goto('http://127.0.0.1:5004/v2/#settings');await page.locator('[data-action=google]').click();
-  try{await page.waitForFunction(old=>{if(location.origin!=='http://127.0.0.1:5004')return false;const s=JSON.parse(localStorage.getItem('av2.auth')||'null');return!!s?.provider_token&&s.provider_token!==old;},old,{timeout:60000});}catch{throw Error('GOOGLE_FRESH_LOGIN_REQUIRED');}
+  try{await page.waitForURL('http://127.0.0.1:5004/v2/**',{timeout:180000});await page.waitForFunction(old=>{if(location.origin!=='http://127.0.0.1:5004')return false;const s=JSON.parse(localStorage.getItem('av2.auth')||'null');return!!s?.provider_token&&s.provider_token!==old;},old,{timeout:180000});}catch{throw Error('GOOGLE_FRESH_LOGIN_REQUIRED');}
  }
  await page.evaluate(async()=>{await(await navigator.serviceWorker.getRegistration()).update();});
  await page.waitForTimeout(600);
@@ -35,5 +37,5 @@ try{
  const after=await page.evaluate(async()=>{const{LocalStore}=await import('/v2/store.js');const s=await new LocalStore().open();return{device:s.device,events:(await s.all('events')).length,records:(await s.all('records')).length,snapshots:(await s.all('records')).filter(r=>!r.deleted_at&&r.data.type==='calendar_fx').length,outbox:(await s.all('outbox')).length};});
  if(before.device!==after.device||before.events!==after.events||before.snapshots!==after.snapshots)throw Error('RECONNECT_CHANGED_IDENTITIES_OR_DUPLICATED_SNAPSHOTS');
  evidence.persistence={before,after};const cdp=await context.newCDPSession(page);evidence.installability=await cdp.send('Page.getInstallabilityErrors');
- privateJson('preuser-evidence.json',evidence);console.log(JSON.stringify(evidence));await page.goto('http://127.0.0.1:5004/v2/#home');
+ privateJson('preuser-evidence.json',evidence);if(evidence.fresh_login)privateJson('fresh-login-evidence.json',evidence);console.log(JSON.stringify(evidence));await page.goto('http://127.0.0.1:5004/v2/#home');
 }finally{await browser.close();}

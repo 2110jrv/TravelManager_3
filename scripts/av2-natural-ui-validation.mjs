@@ -22,7 +22,7 @@ try{
      const auth=new GoogleAuthorization(store),source=new GoogleSource(()=>auth.token()),errors=[];
      for(const path of ['calendar/v3/colors','drive/v3/files?pageSize=1'])try{await source.api(path);errors.push(false);}catch(error){errors.push(error.message.includes('expiró'));}
      await window.__av2NaturalEvidence({reauth:true,calendar_requires_reauth:errors[0],drive_requires_reauth:errors[1],events:(await store.all('events')).length,records:(await store.all('records')).length,device:store.device,ui_expired_notice_visible:document.querySelector('#notice')?.textContent.includes('expiró')});
-    }finally{completed=true;inspecting=false;button.click();}
+    }finally{completed=true;inspecting=false;document.querySelector('[data-action=google]')?.click();}
    })();
   },true);
  };
