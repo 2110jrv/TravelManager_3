@@ -40,7 +40,7 @@ export class GoogleAuthorization {
   async recover(token){if(!this.backend){await this.invalidate();return false;}await this.renew({force:true,rejected_token:token});return true;}
   async oauthQuery(){
     let configured=false;
-    if(this.backend){try{configured=(await this.backend.call('status')).configured;}catch(error){if(error.code!=='SESSION_REQUIRED'&&error.code!=='AV2_DEVICE_NOT_AUTHORIZED')throw error;}}
+    if(this.backend){try{configured=(await this.backend.call('status')).configured;}catch(error){if(error.code!=='SESSION_REQUIRED'&&error.code!=='AV2_DEVICE_NOT_AUTHORIZED')return{access_type:'offline'};}}
     return{access_type:'offline',...(configured?{}:{prompt:'consent'})};
   }
   async invalidate(){const token=(await this.store.get('meta','google-access'))?.value;const rejected_hash=token?await this.fingerprint(token):(await this.store.get('meta','google-reauth'))?.rejected_hash;await this.store.transaction(['meta'],tx=>{

@@ -37,6 +37,7 @@ test('refresh credential moves only through memory to backend; consent requested
  const session={provider_token:'old',provider_refresh_token:'secret-provider-refresh'};await auth.capture('SIGNED_IN',session);
  assert.equal(session.provider_refresh_token,undefined);assert.equal(JSON.stringify([...store.rows.values()]).includes('secret-provider-refresh'),false);assert.equal(calls.find(c=>c.action==='import').options.refresh_token,'secret-provider-refresh');
  assert.deepEqual(await auth.oauthQuery(),{access_type:'offline'});
+ const unavailable=new GoogleAuthorization(store,{call:async()=>{throw Error('GOOGLE_BACKEND_UNAVAILABLE');}});assert.deepEqual(await unavailable.oauthQuery(),{access_type:'offline'});
 });
 async function serverFixture(){
  const cipher=await credentialCipher(Buffer.alloc(32,7).toString('base64'));let row=null,lease=null,exchanges=0,revoked=false;
