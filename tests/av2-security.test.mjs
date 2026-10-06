@@ -14,7 +14,7 @@ const rpc=async(name,args)=> (await db.query(`select ${name}(${args.map((_,i)=>`
 async function user(id){await db.exec('reset role');await db.query("select set_config('request.jwt.claim.sub',$1,false)",[id]);await db.exec('set role authenticated');}
 before(async()=>{
  await db.exec(`create role anon;create role authenticated;create schema auth;create table auth.users(id uuid primary key);create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;grant usage on schema public,auth to authenticated;grant execute on function auth.uid() to authenticated;`);
- for(const name of ['20261005090000_agenda_viajera_v2.sql','20261005100000_av2_device_authorization.sql','20261005110000_av2_sync_validation.sql','20261005200000_av2_admin_key_rotation.sql','20261006040000_av2_device_persistence.sql'])await db.exec(readFileSync(new URL(`../supabase/migrations/${name}`,import.meta.url),'utf8'));
+ for(const name of ['20261005090000_agenda_viajera_v2.sql','20261005100000_av2_device_authorization.sql','20261005110000_av2_sync_validation.sql','20261005200000_av2_admin_key_rotation.sql','20261006040000_av2_device_persistence.sql','20261006050000_av2_staging_configuration.sql'])await db.exec(readFileSync(new URL(`../supabase/migrations/${name}`,import.meta.url),'utf8'));
  await db.query('insert into auth.users values($1),($2)',[a,b]);await db.query("insert into av2_trip_users(trip_id,user_id,role) values($1,$2,'OWNER')",[TRIP.id,a]);
  await db.query("insert into av2_root_claims values($1,$2,$3,now()+interval '1 hour',null)",[TRIP.id,a,hash(claim)]);await user(a);
 });
@@ -96,3 +96,5 @@ test('ROOT retry and recovery retain the existing device and reject account-only
  await db.exec('reset role');assert.equal((await db.query("select count(*)::int as n from av2_devices where role='ROOT_DEVICE'")).rows[0].n,1);
  await user(a);
 });
+
+test('staging trip configuration requires authenticated installation proof',async()=>{await user(a);const configuration=await rpc('av2_trip_configuration',[TRIP.id,root,rootToken]);assert.deepEqual(configuration,TRIP);await assert.rejects(rpc('av2_trip_configuration',[TRIP.id,root,phoneToken]),/AV2_DEVICE_NOT_AUTHORIZED/);await db.exec('reset role;set role anon');await assert.rejects(rpc('av2_trip_configuration',[TRIP.id,root,rootToken]),/permission denied/);await user(a);});
