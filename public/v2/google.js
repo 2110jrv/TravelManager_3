@@ -1,7 +1,7 @@
 import { TRIP } from './config.js';
 import { normalizeEvent } from './domain.js';
 export class GoogleSource {
-  constructor(getToken, request = fetch, guard = async()=>{}, unauthorized=async()=>{}) { this.getToken = getToken; this.request = (...args)=>request(...args); this.guard=guard; this.unauthorized=unauthorized; }
+  constructor(getToken, request = fetch, guard = async()=>{}, unauthorized=async()=>{},locations=async()=>{}) { this.getToken = getToken; this.request = (...args)=>request(...args); this.guard=guard; this.unauthorized=unauthorized;this.locations=locations; }
   async api(path, options = {}, retry = true) {
     await this.guard();
     const token = await this.getToken();
@@ -41,6 +41,7 @@ export class GoogleSource {
       tx.objectStore('meta').put({id:'calendar-labels',value:labels});
       tx.objectStore('meta').put({ id: 'calendar-sync', value: nextSync, query_version:2,source:'google-api',synced_at: new Date().toISOString() });
     });
+    try{await this.locations(store);}catch{/* Saved Calendar and offline records remain available when Maps cannot resolve. */}
     return changes.length;
   }
   async listDocuments() {

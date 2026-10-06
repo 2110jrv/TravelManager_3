@@ -2,7 +2,8 @@ import {occursOn,categoryFor} from './domain.js';
 export const chronological=(a,b)=>Date.parse(a.start)-Date.parse(b.start)||String(a.id).localeCompare(String(b.id));
 export function isContext(event){
  const title=event.title||'',multiday=Date.parse(event.end)-Date.parse(event.start)>=86400000;
- return !!event.allDay||/^\s*(?:ciudad|city|base)\s*:/i.test(title)||multiday&&(categoryFor(event)==='ABB'||/pase|pass/i.test(title));
+ const pass=/\b(?:pase|pass|abono)\b/i.test(title)&&categoryFor(event)==='Transportation';
+ return !!event.allDay||/^\s*(?:ciudad|city|base)\s*:/i.test(title)||pass||multiday&&categoryFor(event)==='ABB';
 }
 export function effectiveEnd(event){
  const start=Date.parse(event.start),end=Date.parse(event.end),title=event.title||'';

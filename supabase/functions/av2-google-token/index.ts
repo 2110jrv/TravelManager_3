@@ -1,5 +1,7 @@
 import {createClient} from 'npm:@supabase/supabase-js@2.45.4';
 import {ProviderLifecycle,ProviderError,credentialCipher} from './lifecycle.js';
+import {resolveLocations} from './locations.js';
+import {allowedMapsUrl} from './location-parser.js';
 const cors={'Access-Control-Allow-Origin':'*','Access-Control-Allow-Headers':'authorization, apikey, content-type, x-client-info','Access-Control-Allow-Methods':'POST, OPTIONS'};
 const json=(value:unknown,status=200)=>new Response(JSON.stringify(value),{status,headers:{...cors,'Content-Type':'application/json','Cache-Control':'no-store','Pragma':'no-cache'}});
 Deno.serve(async req=>{
@@ -12,6 +14,12 @@ Deno.serve(async req=>{
   const {data:{user},error}=await client.auth.getUser();if(error||!user)return json({error:'SESSION_REQUIRED'},401);
   const body=await req.json();const {data:status,error:deviceError}=await client.rpc('av2_device_status',{p_trip:body.p_trip,p_device:body.p_device,p_token:body.p_token});
   if(deviceError||status!=='ACTIVE')return json({error:'AV2_DEVICE_NOT_AUTHORIZED'},403);
+  if(body.action==='resolve_locations'){
+   if(!Array.isArray(body.inputs)||body.inputs.length>16||body.inputs.some((input:unknown)=>typeof input!=='string'||input.length>4096||!allowedMapsUrl(input)))return json({error:'INVALID_MAP_INPUT'},400);
+   const admin=createClient(url,service,{auth:{persistSession:false}}),cache=()=>admin.from('av2_map_locations');
+   const repository={get:async(input:string)=>{const{data,error}=await cache().select('latitude,longitude,display_name').eq('trip_id',body.p_trip).eq('source_url',input).maybeSingle();if(error)throw Error('MAP_CACHE_UNAVAILABLE');return data?{input,point:{lat:data.latitude,lng:data.longitude},name:data.display_name,source:'google-maps'}:null;},save:async(value:any)=>{const{error}=await cache().upsert({trip_id:body.p_trip,source_url:value.input,latitude:value.point.lat,longitude:value.point.lng,display_name:value.name});if(error)throw Error('MAP_CACHE_UNAVAILABLE');}};
+   try{return json({locations:await resolveLocations(body.inputs,repository)});}catch{return json({error:'MAP_LOCATIONS_UNAVAILABLE'},503);}
+  }
   const subject=user.identities?.find(identity=>identity.provider==='google')?.identity_data?.sub;
   if(!subject)return json({error:'GOOGLE_IDENTITY_REQUIRED'},403);
   const admin=createClient(url,service,{auth:{persistSession:false}}),table=()=>admin.from('av2_google_credentials');
