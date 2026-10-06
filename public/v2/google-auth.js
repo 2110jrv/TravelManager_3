@@ -24,7 +24,8 @@ export class GoogleAuthorization {
   async token(){
     if(this.pendingRefresh)return this.renew({action:'import',refresh_token:this.pendingRefresh});
     const access=await this.store.get('meta','google-access');
-    if(this.backend&&(!access?.value||Number.isFinite(access.expires_at)&&access.expires_at<=Date.now()+90000))return this.renew();
+    if(this.backend&&!access?.value)return this.renew();
+    if(this.backend&&Number.isFinite(access.expires_at)&&access.expires_at<=Date.now()+90000)return this.renew({force:true,rejected_token:access.value});
     if((await this.store.get('meta','google-reauth'))?.value)throw Error('La autorización Google expiró. Conecta nuevamente para continuar; tus datos offline están conservados.');
     return access?.value;
   }

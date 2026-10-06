@@ -1,4 +1,14 @@
 import { TRIP } from './config.js';
+export function categoryFor(item){
+ const named=item.label?.name?.trim();if(named)return named;
+ if(item.category?.trim())return item.category.trim();
+ const title=`${item.type||''} ${item.title||''}`.normalize('NFD').replace(/\p{Diacritic}/gu,'').toLowerCase();
+ if(/airbnb|alojamiento|hospedaje|lodging|hotel|\babb\b/.test(title))return 'ABB';
+ if(/\b(tren|train|bus|vuelo|flight|eav|actv|sita|atac|sbb|united)\b|transporte|transportation|costierasita|express|✈|\bua\s*\d/.test(title))return 'Transportation';
+ if(/alimentacion|comida|food|restaurante|desayuno|almuerzo|cena/.test(title))return 'Food';
+ if(/tour|visita|ticket|atraccion|arqueolog|experien|entrada|museo|coloss|forum|footsteps|paul|pompei|pompeya/.test(title))return 'Tour';
+ return 'Otros';
+}
 export function normalizeEvent(raw, colors = {}, labels = {}) {
   const block = /\[AGENDA_VIAJERA\]([\s\S]*?)\[\/AGENDA_VIAJERA\]/.exec(raw.description || '');
   const fields = Object.fromEntries([...(block?.[1] || '').matchAll(/\b(COST|CURRENCY|COST_STATUS|PURCHASE_ID)\s*=\s*([^\s]+)/g)].map(match => [match[1], match[2]]));
@@ -16,7 +26,7 @@ export function normalizeEvent(raw, colors = {}, labels = {}) {
   const timezone=raw.start?.timeZone || raw.end?.timeZone || raw.calendarTimezone || null;
   return { id: raw.id, title: raw.summary || 'Sin título', description: raw.description || '',
     start: raw.start?.dateTime || raw.start?.date, end: raw.end?.dateTime || raw.end?.date,
-    allDay: !!raw.start?.date, timezone, end_timezone:raw.end?.timeZone || timezone,location: raw.location || '',
+    allDay: !!raw.start?.date,gps:raw.gps||raw.coordinates||raw.extendedProperties?.private||null, timezone, end_timezone:raw.end?.timeZone || timezone,location: raw.location || '',
     label: labelId ? { id: labelId, name: labels[labelId]?.name || (typeof labels[labelId] === 'string' ? labels[labelId] : null), color: labels[labelId]?.backgroundColor || labels[labelId]?.background_color || null } : null,
     color_id: raw.colorId || raw.color_id || null, color: colors[raw.colorId || raw.color_id]?.background || null,
     cost:valid?cost:null, currency:valid?currency:null, cost_status:valid?status:null, purchase_status:purchase,purchase_id:fields.PURCHASE_ID||null,financial_fields:{cost,currency,status},financial_state:valid?'OK':cost===null&&purchase==='PAID'?'PAID_COST_MISSING':cost===null&&purchase==='PENDING'?'ESTIMATE_MISSING':block?'INVALID_FINANCIAL':'NON_FINANCIAL',warnings,
@@ -55,10 +65,13 @@ export function finance(events, expenses, budget = null, referenceRates = {}) {
     if(item.cost_status==='PAID')originalTotals.paid+=Number(original);
     else if(item.cost_status==='ESTIMATED')originalTotals.estimated+=Number(original);
     originalTotals.projected=originalTotals.paid+originalTotals.estimated;
+    const category=categoryFor(item),totals=by_category[category]??={paid:0,estimated:0,projected:0,by_currency:{}};
+    const categoryOriginal=totals.by_currency[currency]??={paid:0,estimated:0,projected:0};
+    if(item.cost_status==='PAID')categoryOriginal.paid+=Number(original);else categoryOriginal.estimated+=Number(original);
+    categoryOriginal.projected=categoryOriginal.paid+categoryOriginal.estimated;
     const saved=(item.cost_status==='PAID'?item.actual_base_amount:null) ?? item.amount_base ?? item.base_amount ?? ((item.fx_rate_to_base ?? item.exchange_rate)!=null?original*(item.fx_rate_to_base ?? item.exchange_rate):null);
     const equivalent=item.cost_status==='PAID'&&item.actual_base_amount!=null?Number(item.actual_base_amount):currency===TRIP.currency?original:item.cost_status==='ESTIMATED'&&referenceRates[currency]?.rate?original*referenceRates[currency].rate:saved;
     if (equivalent == null) { missing.push(item); continue; }
-    const category=item.label?.name||item.category||'Otros',totals=by_category[category]??={paid:0,estimated:0,projected:0};
     if (item.cost_status === 'PAID') {paid += Number(equivalent);totals.paid+=Number(equivalent);} else if (item.cost_status === 'ESTIMATED') {estimated += Number(equivalent);totals.estimated+=Number(equivalent);}
     totals.projected=totals.paid+totals.estimated;
   }

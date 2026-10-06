@@ -13,7 +13,7 @@ test('Supabase storage strips provider refresh token before writing and sanitize
 });
 test('expired provider automatically renews once across Calendar and Drive, reopens, and preserves offline records',async()=>{
  const store=local();store.rows.set('google-access',{value:'expired',expires_at:0});let refreshes=0;
- const backend={call:async action=>{assert.equal(action,'access');refreshes++;return{configured:true,access_token:'renewed',expires_at:Date.now()+3600000};}};
+ const backend={call:async(action,options)=>{assert.equal(action,'access');assert.equal(options.force,true);assert.equal(options.rejected_token,'expired');refreshes++;return{configured:true,access_token:'renewed',expires_at:Date.now()+3600000};}};
  const auth=new GoogleAuthorization(store,backend),headers=[];const google=new GoogleSource(()=>auth.token(),async(_,options)=>{headers.push(options.headers.Authorization);return Response.json({ok:true});},async()=>{},token=>auth.recover(token));
  await Promise.all([google.api('calendar/v3/colors'),google.api('drive/v3/files')]);assert.equal(refreshes,1);assert.deepEqual(headers,['Bearer renewed','Bearer renewed']);
  const reopened=new GoogleAuthorization(store,backend);await reopened.capture('INITIAL_SESSION',{provider_token:'expired'});assert.equal(await reopened.token(),'renewed');assert.equal(refreshes,1);assert.equal(store.rows.get('offline-expense').value,9);assert.equal(store.rows.get('offline-document').value,'PDF');
@@ -54,7 +54,9 @@ test('server encrypts refresh/access, refreshes expired provider, caches access 
 });
 test('server invalid_grant marks only provider revoked, whereas refresh outage keeps encrypted credential',async()=>{
  const f=await serverFixture();await f.service.run('owner','google-sub',{action:'import',refresh_token:'server-refresh-secret'});f.expire();
- const original=f.service.request;f.service.request=async()=>Response.json({error:'temporarily_unavailable'},{status:503});await assert.rejects(f.service.run('owner','google-sub',{action:'access'}),/GOOGLE_REFRESH_UNAVAILABLE/);assert.equal(f.row.revoked_at,null);
+ const original=f.service.request,encrypted=f.row.ciphertext;
+ for(const error of ['invalid_client','invalid_request','unauthorized_client']){f.service.request=async()=>Response.json({error},{status:400});await assert.rejects(f.service.run('owner','google-sub',{action:'access'}),/GOOGLE_CLIENT_CONFIGURATION_INVALID/);assert.equal(f.row.revoked_at,null);assert.deepEqual(f.row.ciphertext,encrypted);}
+ f.service.request=async()=>Response.json({error:'temporarily_unavailable'},{status:503});await assert.rejects(f.service.run('owner','google-sub',{action:'access'}),/GOOGLE_REFRESH_UNAVAILABLE/);assert.equal(f.row.revoked_at,null);
  f.service.request=original;f.revoke();await assert.rejects(f.service.run('owner','google-sub',{action:'access'}),/GOOGLE_REAUTH_REQUIRED/);assert.equal(f.row.revoked_at,'now');assert.deepEqual(await f.service.run('owner','google-sub',{action:'status'}),{configured:false});
 });
 test('credential migration denies browser roles, allows only server access and serializes refresh leases',async()=>{

@@ -20,7 +20,7 @@ export class ProviderLifecycle {
   if(!this.clientId||!this.clientSecret)throw new ProviderError('GOOGLE_BACKEND_NOT_CONFIGURED');
   let response;try{response=await this.request('https://oauth2.googleapis.com/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({client_id:this.clientId,client_secret:this.clientSecret,grant_type:'refresh_token',refresh_token:refreshToken}),signal:AbortSignal.timeout(15000)});}catch{throw new ProviderError('GOOGLE_REFRESH_UNAVAILABLE');}
   let data;try{data=await response.json();}catch{throw new ProviderError('GOOGLE_REFRESH_UNAVAILABLE');}
-  if(!response.ok){if(data.error==='invalid_grant')throw new ProviderError('GOOGLE_REAUTH_REQUIRED',409);throw new ProviderError('GOOGLE_REFRESH_UNAVAILABLE');}
+  if(!response.ok){if(data.error==='invalid_grant')throw new ProviderError('GOOGLE_REAUTH_REQUIRED',409);if(['invalid_client','invalid_request','unauthorized_client'].includes(data.error))throw new ProviderError('GOOGLE_CLIENT_CONFIGURATION_INVALID');throw new ProviderError('GOOGLE_REFRESH_UNAVAILABLE');}
   if(!data.access_token||!Number.isFinite(Number(data.expires_in))||Number(data.expires_in)<=0)throw new ProviderError('GOOGLE_REFRESH_UNAVAILABLE');
   const identity=await this.request('https://www.googleapis.com/oauth2/v3/userinfo',{headers:{Authorization:`Bearer ${data.access_token}`},signal:AbortSignal.timeout(15000)});
   if(!identity.ok)throw new ProviderError('GOOGLE_IDENTITY_UNAVAILABLE');
