@@ -1,5 +1,6 @@
-import{spawnSync}from'node:child_process';import{readFileSync,readdirSync,writeFileSync}from'node:fs';import{resolve,join,relative}from'node:path';
+import{spawnSync,execFileSync}from'node:child_process';import{readFileSync,readdirSync,writeFileSync}from'node:fs';import{resolve,join,relative}from'node:path';
 const root=resolve(import.meta.dirname,'..');if(process.cwd().toLowerCase()!==root.toLowerCase())throw Error('PROJECT_PATH_MISMATCH');
+execFileSync(process.execPath,['scripts/av2-staging-audit.mjs'],{cwd:root,stdio:'inherit'});
 const account='2110jrv',repository='agenda-viajera-v2-staging',base=`https://api.github.com/repos/${account}/${repository}`;
 const result=spawnSync('git',['credential','fill'],{input:'protocol=https\nhost=github.com\n\n',encoding:'utf8',env:{...process.env,GIT_TERMINAL_PROMPT:'0',GCM_INTERACTIVE:'never'},windowsHide:true});const token=(result.stdout||'').split('\n').find(x=>x.startsWith('password='))?.slice(9).trim();if(!token)throw Error('GITHUB_CREDENTIAL_UNAVAILABLE');
 async function request(url,method='GET',body=null,optional=false){const r=await fetch(url,{method,headers:{Authorization:`Bearer ${token}`,'User-Agent':'Agenda-Viajera-staging','Accept':'application/vnd.github+json','Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});if(optional&&r.status===404)return null;if(!r.ok)throw Error(`GITHUB_${method}_${r.status}`);return r.status===204?null:r.json();}
