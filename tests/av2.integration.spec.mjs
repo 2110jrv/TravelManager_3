@@ -5,7 +5,7 @@ test('mobile shell, real Calendar snapshot, expense receipt, persistence and off
   await page.goto('/v2/?fixture=1'); await expect(page.getByRole('heading',{name:'Italia 2026',exact:true})).toBeVisible();
   await page.evaluate(async () => { await navigator.serviceWorker.ready; });
   await expect.poll(() => page.evaluate(() => !!navigator.serviceWorker.controller)).toBe(true);
-  const baseline=Number((await page.locator('.stat strong').first().innerText()).replace(/[^\d,.-]/g,'').replace(',','.'));
+  const baseline=Number((await page.locator('.stat strong').first().innerText()).replace(/[^\d.-]/g,''));
   const snapshotPath = new URL('../.av2-private/calendar.json',import.meta.url);
   if (existsSync(snapshotPath)) {
     const snapshot = JSON.parse(readFileSync(snapshotPath,'utf8'));
@@ -18,8 +18,8 @@ test('mobile shell, real Calendar snapshot, expense receipt, persistence and off
   await page.getByLabel('Foto o archivo de recibo').setInputFiles({name:'receipt.png',mimeType:'image/png',buffer:Buffer.from('receipt')});
   await page.getByRole('button',{name:'Guardar gasto'}).click(); await expect(page.getByRole('heading',{name:'Cena offline'})).toBeVisible();
   await context.setOffline(true); await page.reload(); await expect(page.getByRole('heading',{name:'Cena offline'})).toBeVisible();
-  await page.locator('nav a[href="#budget"]').click();
-  await expect.poll(async()=>Number((await page.locator('.stat strong').first().innerText()).replace(/[^\d,.-]/g,'').replace(',','.'))).toBeCloseTo(baseline+25);
+  await page.locator('nav a[href="#settings"]').click();await page.getByRole('link',{name:'Presupuesto',exact:true}).click();
+  await expect.poll(async()=>Number((await page.locator('.stat strong').first().innerText()).replace(/[^\d.-]/g,''))).toBeCloseTo(baseline+25);
   const state = await page.evaluate(async()=>{const{LocalStore}=await import('/v2/store.js'); const s=await new LocalStore().open(); return {records:await s.all('records'),queue:await s.all('outbox'),blobs:await s.all('blobs')};});
   expect(state.queue.length).toBe(1); expect(state.blobs.length).toBe(1); expect(state.blobs[0].uploaded).toBe(false);
   await page.screenshot({path:'test-results/av2-mobile.png',fullPage:true});

@@ -30,7 +30,7 @@ try{
       try{await source.api('calendar/v3/colors');throw Error('TOKEN_HAS_NOT_EXPIRED');}catch(error){if(error.status!==401)throw error;}
     },original.token);
     naturalExpirationObserved=true;
-    await page.goto('http://127.0.0.1:5004/v2/#settings');await page.locator('[data-action=google]').click();
+    await page.goto('http://127.0.0.1:5004/v2/#sync');await page.locator('[data-action=google]').click();
     try{await page.waitForFunction(oldToken=>{if(location.origin!=='http://127.0.0.1:5004')return false;const session=JSON.parse(localStorage.getItem('av2.auth')||'null');return!!session?.access_token&&!!session.provider_token&&session.provider_token!==oldToken;},original.token,{timeout:60000});await page.waitForTimeout(1500);}
     catch{throw Error('NATURAL_EXPIRY_GOOGLE_REAUTH_REQUIRED');}
   }
@@ -44,7 +44,7 @@ try{
     });
     await page.reload();const after=await snapshot();if(!after.reauth||after.events!==before.events||after.device!==before.device)throw Error('REAUTH_OR_STORAGE_PRESERVATION_FAILED');
     privateJson('google-expiration-evidence.json',{at:new Date().toISOString(),method:'real Google HTTP 401 using deliberately invalid token, not natural expiration',before,after});
-    await page.goto('http://127.0.0.1:5004/v2/#settings');await page.locator('[data-action=google]').click();
+    await page.goto('http://127.0.0.1:5004/v2/#sync');await page.locator('[data-action=google]').click();
     console.log('Real Google 401 invalidated access; reload preserved installation and data. Re-auth flow started.');
   }else{
     const before=await snapshot();if(!before.session||before.reauth)throw Error('GOOGLE_REAUTH_REQUIRED');
@@ -52,7 +52,7 @@ try{
     const reopened=await snapshot();await context.setOffline(true);
     try{await page.reload();await page.getByRole('heading',{name:'Italia 2026',exact:true}).waitFor();const offline=await snapshot();if(offline.device!==before.device||offline.events!==before.events||!offline.session)throw Error('OFFLINE_PERSISTENCE_FAILED');}
     finally{await context.setOffline(false);}
-    await page.locator('[href="#settings"]').click();await page.locator('[data-action=sync]').click();
+    await page.goto('http://127.0.0.1:5004/v2/#sync');await page.locator('[data-action=sync]').click();
     await page.waitForTimeout(2000);const after=await snapshot();
     const googleOk=await page.evaluate(async()=>{const{GoogleSource}=await import('/v2/google.js');const{GoogleAuthorization}=await import('/v2/google-auth.js');const{LocalStore}=await import('/v2/store.js');const auth=new GoogleAuthorization(await new LocalStore().open());const google=new GoogleSource(()=>auth.token());return(await google.api('calendar/v3/calendars/'+encodeURIComponent('eee85f5d7c0e07fc9a8174d8a3bc640a9b0327901c9f09059d196c1058f5d346@group.calendar.google.com')+'?eventLabelVersion=1')).ok;});
     if(!googleOk||after.reauth)throw Error('GOOGLE_REAUTH_RECOVERY_FAILED');

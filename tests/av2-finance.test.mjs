@@ -52,3 +52,25 @@ test('real trip lodging and 72-hour pass span days and are financially counted o
  assert.ok(pass);for(const day of ['2026-11-02','2026-11-03','2026-11-04','2026-11-05'])assert.ok(occursOn(pass,day));assert.equal(pass.cost,44);assert.equal(pass.currency,'EUR');
  assert.equal(finance([pass,pass],[]).missing.length,1);
 });
+import {formatMoney,formatTime,formatEventTime} from '../public/v2/format.js';
+import {financialAudit} from '../public/v2/domain.js';
+test('one currency formatter places symbol/prefix first across currencies and signed values',()=>{
+ assert.equal(formatMoney(969.87),'$969.87');assert.equal(formatMoney(514.9,'EUR'),'€514.90');assert.equal(formatMoney(104,'CHF'),'CHF 104.00');assert.equal(formatMoney(1234.56),'$1,234.56');assert.equal(formatMoney(-10,'USD'),'-$10.00');assert.equal(formatMoney(null),'—');assert.equal(formatMoney(10,'EUR',{iso:true}),'€10.00 EUR');assert.match(formatMoney(10,'JPY'),/^¥10$/);
+});
+test('dual AM/PM and military formatter uses event-local zones, never the phone timezone',()=>{
+ assert.equal(formatTime('2026-10-20T16:55:00-04:00','America/Puerto_Rico'),'4:55 PM (16:55)');assert.equal(formatTime('2026-10-20T20:47:00-04:00','America/New_York'),'8:47 PM (20:47)');assert.equal(formatTime('2026-10-20T22:35:00-04:00','America/New_York'),'10:35 PM (22:35)');assert.equal(formatTime('2026-10-21T13:15:00+02:00','Europe/Rome'),'1:15 PM (13:15)');assert.equal(formatTime('2026-10-24T07:50:00+02:00','Europe/Zurich'),'7:50 AM (07:50)');assert.equal(formatTime('2026-10-20T00:05:00-04:00'),'12:05 AM (00:05)');assert.equal(formatTime('2026-10-20T12:00:00-04:00'),'12:00 PM (12:00)');assert.equal(formatEventTime({allDay:true,start:'2026-10-21'}),'Todo el día');
+});
+test('PURCHASE_ID counts a joint reservation once; old eventId behavior and originals remain intact',()=>{
+ const base={summary:'✅ Flight',start:{date:'2026-10-21'},end:{date:'2026-10-22'},description:'[AGENDA_VIAJERA] PURCHASE_ID=UA_A4FM57 COST=200 CURRENCY=USD COST_STATUS=PAID [/AGENDA_VIAJERA]'};
+ const a=normalizeEvent({...base,id:'departure'}),b=normalizeEvent({...base,id:'arrival'}),c=normalizeEvent({...base,id:'return',description:base.description.replace('UA_A4FM57','UA_RETURN')});assert.equal(a.purchase_id,'UA_A4FM57');const f=finance([a,b,c],[]);assert.equal(f.paid,400);assert.equal(f.by_currency.USD.paid,400);assert.equal(a.cost,200);assert.equal(financialAudit([a,b])[0].states.includes('DUPLICATE_PURCHASE'),true);
+ const old=base.description.replace('PURCHASE_ID=UA_A4FM57 ','');assert.equal(finance([normalizeEvent({...base,id:'a',description:old}),normalizeEvent({...base,id:'b',description:old})],[]).paid,400);
+ const pending={...base,summary:'☐ Train',description:'[AGENDA_VIAJERA] PURCHASE_ID=TRAIN COST=10 CURRENCY=EUR COST_STATUS=ESTIMATED [/AGENDA_VIAJERA]'};assert.equal(finance([normalizeEvent({...pending,id:'one'}),normalizeEvent({...pending,id:'two'})],[],null,{EUR:{rate:1.2}}).estimated,12);
+});
+test('financial integrity separates missing paid/pending costs from zero and nonfinancial events',()=>{
+ const raw={start:{date:'2026-10-21'},end:{date:'2026-10-22'}};const paid=normalizeEvent({...raw,id:'paid',summary:'✅ United',description:'Paid $900 outside structured block'}),pending=normalizeEvent({...raw,id:'pending',summary:'☐ Vaporetto'}),free=normalizeEvent({...raw,id:'free',summary:'Walk'}),zero=normalizeEvent({...raw,id:'zero',summary:'✅ Free',description:'[AGENDA_VIAJERA] COST=0 CURRENCY=USD COST_STATUS=PAID [/AGENDA_VIAJERA]'});
+ assert.equal(paid.financial_state,'PAID_COST_MISSING');assert.equal(pending.financial_state,'ESTIMATE_MISSING');assert.equal(free.financial_state,'NON_FINANCIAL');assert.equal(zero.financial_state,'OK');const f=finance([paid,pending,free,zero],[]);assert.equal(f.partial,true);assert.equal(f.missing_costs.length,2);assert.equal(f.paid,0);assert.equal(f.financial_issues.length,2);assert.equal(f.audit.find(r=>r.id==='free').state,'NON_FINANCIAL');
+ for(const[field,expected]of [['CURRENCY','MISSING_CURRENCY'],['COST_STATUS','MISSING_STATUS']]){const description='[AGENDA_VIAJERA] COST=20 CURRENCY=USD COST_STATUS=PAID [/AGENDA_VIAJERA]'.replace(new RegExp(field+'=[^ ]+'),'');assert.ok(financialAudit([normalizeEvent({...raw,id:'bad',summary:'✅ Paid',description})])[0].states.includes(expected));}
+ const mismatch=normalizeEvent({...raw,id:'m',summary:'☐ Pending',description:'[AGENDA_VIAJERA] COST=20 CURRENCY=USD COST_STATUS=PAID [/AGENDA_VIAJERA]'});assert.ok(financialAudit([mismatch])[0].states.includes('SYMBOL_STATUS_MISMATCH'));
+});
+test('all-day formatter never invents midnight or a military time',()=>{const e=normalizeEvent({id:'stay',summary:'Hotel',start:{date:'2026-10-21'},end:{date:'2026-10-24'}});assert.equal(formatEventTime(e),'Todo el día');assert.doesNotMatch(formatEventTime(e),/AM|PM|00:00/);});
+test('same instant uses each event zone and survives Europe daylight-saving transition',()=>{const instant='2026-10-25T06:50:00Z';assert.equal(formatEventTime({start:instant,timezone:'Europe/Zurich'}),'7:50 AM (07:50)');assert.equal(formatEventTime({start:instant,timezone:'America/Puerto_Rico'}),'2:50 AM (02:50)');});
