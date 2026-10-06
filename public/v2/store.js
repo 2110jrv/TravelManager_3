@@ -10,14 +10,14 @@ export class LocalStore {
     });
     this.db.onversionchange = () => this.db.close();
     await this.transaction(['meta'], tx => {
-      const meta=tx.objectStore('meta'),identity=meta.get('device'),secret=meta.get('device-token'),installation=meta.get('installation');
+      const meta=tx.objectStore('meta'),identity=meta.get('device'),known=meta.get('device-identity'),secret=meta.get('device-token'),installation=meta.get('installation');
       installation.onsuccess=()=>{
         this.device=identity.result?.value || installation.result?.value?.device_id || crypto.randomUUID();
         this.installation=installation.result?.value?.installation_id || this.device;
         meta.put({id:'device',value:this.device});
         meta.put({id:'installation',value:{installation_id:this.installation,device_id:this.device}});
       };
-      secret.onsuccess=()=>{this.deviceToken=secret.result?.value || Array.from(crypto.getRandomValues(new Uint8Array(32)),x=>x.toString(16).padStart(2,'0')).join('');if(!secret.result) meta.put({id:'device-token',value:this.deviceToken});};
+      secret.onsuccess=()=>{if(!secret.result&&known.result?.value){this.deviceToken=null;return;}this.deviceToken=secret.result?.value || Array.from(crypto.getRandomValues(new Uint8Array(32)),x=>x.toString(16).padStart(2,'0')).join('');if(!secret.result) meta.put({id:'device-token',value:this.deviceToken});};
     });
     return this;
   }
