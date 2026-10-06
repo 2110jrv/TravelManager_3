@@ -19,6 +19,8 @@ export class Devices {
   rename(name){return this.call('av2_rename_device',{p_name:name});}
   requestTransfer(installation,ticket){return this.remote.rpc('av2_request_root_transfer',{p_trip:this.remote.credentials().p_trip,p_target:this.remote.device,p_installation:installation,p_target_token:this.remote.token,p_ticket:ticket});}
   pendingTransfers(){return this.call('av2_pending_root_transfers');}
+  transferStatus(installation,ticket){return this.remote.rpc('av2_root_transfer_status',{p_trip:this.remote.credentials().p_trip,p_target:this.remote.device,p_installation:installation,p_target_token:this.remote.token,p_ticket:ticket});}
+  cancelTransfer(id){return this.call('av2_cancel_root_transfer',{p_request:id});}
   approveTransfer(id){return this.call('av2_approve_root_transfer',{p_request:id});}
   consumeTransfer(installation,ticket){return this.remote.rpc('av2_consume_root_transfer',{p_trip:this.remote.credentials().p_trip,p_target:this.remote.device,p_installation:installation,p_target_token:this.remote.token,p_ticket:ticket});}
   adminConfigured(){return this.call('av2_admin_key_status');}

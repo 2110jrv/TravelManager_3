@@ -22,6 +22,7 @@ import {renderEventDetail} from './event-detail.js';
 document.querySelectorAll('nav [data-icon]').forEach(link=>link.insertAdjacentHTML('afterbegin',icon(link.dataset.icon)));
 let calendarRefresh=null;let googleAuthorization=null;let googleState='saved';const pendingGoogleAuth=[];
 let client,remote,devices,google,sync,remoteStartup,authSession=null;
+let refreshingTransfers=false,transferRefreshAt=0;
 const store = await new LocalStore().open();
 if(document.documentElement.dataset.av2Staging==='true'){const config=(await store.get('meta','trip-config'))?.value;if(config&&!Object.isFrozen(TRIP))Object.assign(TRIP,config);}
 const rateService=new ReferenceRates(new FrankfurterProvider(),store);
@@ -105,13 +106,15 @@ function requestValue(label,type='text',value=''){
  return new Promise(resolve=>{const dialog=document.createElement('dialog');dialog.innerHTML=`<form method="dialog"><h2>${escape(label)}</h2><label>${escape(label)}<input type="${type}" value="${escape(value)}" autocomplete="${type==='password'?'off':'on'}" required maxlength="100" ${type==='password'?'minlength="8"':''}></label><div class="actions"><button value="cancel" formnovalidate class="secondary">Cancelar</button><button value="ok" class="primary">Continuar</button></div></form>`;document.body.append(dialog);dialog.showModal();dialog.querySelector('input').focus();dialog.addEventListener('close',()=>{const result=dialog.returnValue==='ok'?dialog.querySelector('input').value:null;dialog.querySelector('input').value='';dialog.remove();resolve(result);},{once:true});});
 }
 async function deviceScreen(){
+ if(Date.now()-transferRefreshAt>4000)setTimeout(()=>refreshRootTransfers(),0);
  const session=authSession,invite=await store.get('meta','pending-invite');
  const list=(await store.get('meta','device-list'))?.value||[],identity=(await store.get('meta','device-identity'))?.value;
  if(identity?.id===store.device&&!list.some(d=>d.id===identity.id))list.push(identity);
  const own=list.find(x=>x.id===store.device&&!x.deleted_at);deviceScreen.root=own?.role==='ROOT_DEVICE';
  const transfers=(await store.get('meta','root-transfer-requests'))?.value||[];
- const transferCard=!own&&session?'<section class="card"><h3>Esta es una instalación nueva de Agenda Viajera.</h3>'+button('request-root-transfer','Transferir PC Casa a este navegador','','primary')+'</section>':'';
- const approvals=(deviceScreen.root?button('refresh-transfers','Actualizar solicitudes'):'')+transfers.map(r=>'<section class="card"><h3>Mover PC Casa a otro navegador</h3><p>Solicitud recibida a las '+escape(formatDateTime(r.created_at))+'. Autoriza únicamente la solicitud que acabas de iniciar en tu Chrome normal.</p>'+button('approve-root-transfer',r.approved?'Autorizada · esperando confirmación':'Autorizar transferencia',r.id)+'</section>').join('');
+ const request=(await store.get('meta','root-transfer'))?.value;
+ const transferCard=!own&&session?'<section class="card"><h3>Esta es una instalación nueva de Agenda Viajera.</h3>'+(!request||request.state==='CANCELLED'?button('request-root-transfer','Transferir PC Casa a este navegador','','primary'):'<p>PC Casa actualmente está vinculada a otra instalación. La instalación anterior dejará de tener acceso.</p><p>'+ (request.approved?'Transferencia autorizada. Solo pulsa Mover PC Casa.':'Esperando autorización de PC Casa. La solicitud se actualiza automáticamente.')+'</p>'+ (request.approved?button('move-root-transfer','Mover PC Casa','','primary'):'') )+'</section>':'';
+ const approvals=deviceScreen.root?(transfers.filter(r=>Date.parse(r.expires_at)>Date.now()).map(r=>'<section class="card"><h3>Solicitud para mover PC Casa</h3><p>Destino: Chrome normal de Jonathan</p><p>'+escape(formatDateTime(r.created_at))+'</p><div class="actions">'+button('cancel-root-transfer','Cancelar',r.id)+(!r.approved?button('approve-root-transfer','Autorizar transferencia',r.id,'primary'):'<p>Autorizada · esperando Mover PC Casa en Chrome normal</p>')+'</div></section>').join('')+button('refresh-transfers','Actualizar solicitudes')):'';
  return transferCard+approvals+`<span class="eyebrow">Cada instalación, independiente</span><h1>Dispositivos</h1><p class="subtitle">Dispositivos vinculados · ${escape(TRIP.name)}</p>${!session&&!own?`<section class="card"><p>Conecta tu cuenta para autorizar esta instalación.</p>${button('google','Conectar Google','','primary')}</section>`:''}${!own&&session?`<section class="card"><h3>Autorizar este dispositivo</h3><p class="muted">Usa el enlace/QR temporal generado por PC Casa.</p>${invite?button('enroll','Registrar este teléfono','','primary'):''}${!list.some(d=>d.role==='ROOT_DEVICE'&&!d.deleted_at)&&rootClaim&&new Date(rootClaim.expires_at)>new Date()?button('claim-root','Activar PC Casa','','primary'):''}</section>`:''}${own?`<div class="actions">${button('invite','Agregar dispositivo','','primary')}${button('rename-device','Nombrar esta instalación')}${deviceScreen.root?'<a class="secondary" href="#security">Seguridad</a>':button('remove-self','Quitar este dispositivo','', 'danger')}</div>`:''}<section class="section">${list.filter(d=>!d.deleted_at).map(d=>`<div class="card list-row row"><div><h3>${escape(d.name)}</h3><small>${d.role==='ROOT_DEVICE'?'ROOT · Autorizado':d.deleted_at?'Revocado':d.id===store.device?'Esta instalación':'Autorizado'}</small></div>${!d.deleted_at&&d.role!=='ROOT_DEVICE'&&d.id!==store.device?button('revoke-device','Revocar',d.id,'danger'):''}</div>`).join('')}</section>`;
 }
 async function securityScreen(){
@@ -207,17 +210,18 @@ app.addEventListener('click', async event => {
     else if (action === 'google') { const { error } = await client.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: `${location.origin}${location.pathname}`,queryParams:await googleAuthorization.oauthQuery(), scopes: 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.calendars.readonly https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly' } }); if (error) throw error; }
     else if(action==='request-root-transfer'){
       if(!navigator.onLine){notice('Conecta Internet para transferir PC Casa.');return;}
-      let request=(await store.get('meta','root-transfer'))?.value;
-      if(!request||Date.parse(request.expires_at)<=Date.now())request={ticket:randomToken()};
-      const status=await devices.requestTransfer(store.installation,request.ticket);
-      await store.put('meta',{id:'root-transfer',value:{...request,...status}});
-      const move=await new Promise(resolve=>{const dialog=document.createElement('dialog');dialog.innerHTML='<form method="dialog"><h2>Mover PC Casa</h2><p>PC Casa actualmente está vinculada a otra instalación. ¿Deseas mover PC Casa a este navegador?</p><p>La instalación anterior dejará de tener acceso.</p><p>Primero autoriza esta solicitud desde Dispositivos en la ventana actual de PC Casa. Vuelve aquí y pulsa Mover PC Casa.</p><div class="actions"><button class="secondary" value="cancel">Cancelar</button><button class="primary" value="move">Mover PC Casa</button></div></form>';document.body.append(dialog);dialog.showModal();dialog.addEventListener('close',()=>{resolve(dialog.returnValue==='move');dialog.remove();},{once:true});});
-      if(!move)return;
-      try{const own=await devices.consumeTransfer(store.installation,request.ticket);await store.bindDevice(own);await store.transaction(['meta'],tx=>tx.objectStore('meta').delete('root-transfer'));await refreshDeviceIdentity();location.hash='#home';await syncAll();notice('PC Casa se movió a este navegador.');}
-      catch(error){if(error.message.includes('AV2_TRANSFER_NOT_APPROVED_OR_EXPIRED')){notice('La solicitud necesita autorización de la PC Casa actual o venció. Autorízala y vuelve a intentar.');return;}throw error;}
+      const ticket=randomToken(),status=await devices.requestTransfer(store.installation,ticket);
+      await store.put('meta',{id:'root-transfer',value:{ticket,...status,state:'PENDING'}});
+      await refreshRootTransfers();
     }
-    else if(action==='refresh-transfers'){await store.put('meta',{id:'root-transfer-requests',value:(await devices.pendingTransfers())||[]});}
-    else if(action==='approve-root-transfer'){if(confirm('¿Autorizar la solicitud que acabas de iniciar en tu Chrome normal? Esta instalación perderá acceso cuando confirmes el traslado allí.')){await devices.approveTransfer(id);await store.put('meta',{id:'root-transfer-requests',value:(await devices.pendingTransfers())||[]});notice('Transferencia autorizada. Confirma Mover PC Casa en tu Chrome normal.');}}
+    else if(action==='move-root-transfer'){
+      const request=(await store.get('meta','root-transfer'))?.value;if(!request)return;
+      try{const own=await devices.consumeTransfer(store.installation,request.ticket);await store.bindDevice(own);await store.transaction(['meta'],tx=>tx.objectStore('meta').delete('root-transfer'));await refreshDeviceIdentity();location.hash='#home';await syncAll();notice('PC Casa se movió a este navegador.');}
+      catch(error){if(error.message.includes('AV2_TRANSFER_NOT_APPROVED_OR_EXPIRED')){await refreshRootTransfers();notice('La solicitud se está actualizando. Espera la autorización de PC Casa.');return;}throw error;}
+    }
+    else if(action==='refresh-transfers'){await refreshRootTransfers();}
+    else if(action==='approve-root-transfer'){await devices.approveTransfer(id);await refreshRootTransfers();notice('Transferencia autorizada. Solo pulsa Mover PC Casa en Chrome normal.');}
+    else if(action==='cancel-root-transfer'){await devices.cancelTransfer(id);await refreshRootTransfers();notice('Solicitud cancelada.');}
     else if(action==='claim-root'){await devices.claimRoot(rootClaim?.token);rootClaim=null;await refreshDeviceIdentity();await store.put('meta',{id:'authorized',value:true});await syncAll();}
     else if(action==='enroll'){const name=await requestValue('Nombre del teléfono','text','Mi teléfono');if(name){await devices.enroll((await store.get('meta','pending-invite'))?.value,name);await refreshDeviceIdentity();await store.transaction(['meta'],tx=>tx.objectStore('meta').delete('pending-invite'));await store.put('meta',{id:'authorized',value:true});location.hash='#home';await syncAll();notice('Dispositivo autorizado. Puedes instalar la PWA y preparar offline.');}}
     else if(action==='rename-device'){const name=await requestValue('Nombre de esta instalación');if(name){await devices.rename(name);await refreshDeviceIdentity();}}
@@ -296,6 +300,19 @@ if ('serviceWorker' in navigator) {
   }).catch(()=>{});
 }
 setInterval(()=>{if(document.visibilityState==='visible'){updateConnection();if((location.hash||'#home')==='#home')render().catch(error=>notice(error.message));}},60000);
+
+async function refreshRootTransfers(){
+ if(refreshingTransfers||!devices||!navigator.onLine||!authSession)return;
+ refreshingTransfers=true;
+ try{
+  const own=(await store.get('meta','device-identity'))?.value;
+  if(own?.id===store.device&&own.role==='ROOT_DEVICE'&&!own.deleted_at){await store.put('meta',{id:'root-transfer-requests',value:(await devices.pendingTransfers())||[]});}
+  else{let request=(await store.get('meta','root-transfer'))?.value;if(request){const status=await devices.transferStatus(store.installation,request.ticket);request={...request,...status};if(status.state==='EXPIRED'){const ticket=randomToken();request={ticket,...await devices.requestTransfer(store.installation,ticket),state:'PENDING'};}await store.put('meta',{id:'root-transfer',value:request});}}
+  transferRefreshAt=Date.now();if(location.hash==='#devices')await render();
+ }catch{/* Keep local UI and retry automatically without discarding installation data. */}
+ finally{refreshingTransfers=false;}
+}
+setInterval(()=>{if(document.visibilityState==='visible'&&location.hash==='#devices')refreshRootTransfers();},5000);
 async function refreshDeviceIdentity(){
  if(!navigator.onLine||!authSession)return;
  try{
