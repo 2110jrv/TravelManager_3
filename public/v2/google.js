@@ -36,7 +36,8 @@ export class GoogleSource {
       // Mark missing Calendar events individually; never replace the local database.
       for (const event of previous) if (!ids.has(event.id)) {
         const label=event.label?labels[event.label.id]:null;
-        tx.objectStore('events').put({...event,label:event.label?{id:event.label.id,name:label?.name||null,color:label?.backgroundColor||null}:null,...(!token?{deleted_at:new Date().toISOString()}: {})});
+        const financial=normalizeEvent({id:event.id,summary:event.title,description:event.description});
+        tx.objectStore('events').put({...event,cost:financial.cost,currency:financial.currency,cost_status:financial.cost_status,purchase_status:financial.purchase_status,purchase_id:financial.purchase_id,financial_fields:financial.financial_fields,financial_state:financial.financial_state,warnings:financial.warnings,label:event.label?{id:event.label.id,name:label?.name||null,color:label?.backgroundColor||null}:null,...(!token?{deleted_at:new Date().toISOString()}: {})});
       }
       tx.objectStore('meta').put({id:'calendar-labels',value:labels});
       tx.objectStore('meta').put({ id: 'calendar-sync', value: nextSync, query_version:2,source:'google-api',synced_at: new Date().toISOString() });

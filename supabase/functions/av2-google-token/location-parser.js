@@ -29,8 +29,8 @@ export function plusPoint(text){
 }
 export function locationInput(event){const explicit=explicitPoint(event);if(explicit)return{key:`gps:${explicit.lat},${explicit.lng}`,point:explicit,source:'explicit'};const url=mapsUrls(event.location)[0]||mapsUrls(event.description)[0];if(url)return{key:url,url,point:pointFromMapsUrl(url),source:'google-maps'};const point=plusPoint(`${event.location||''} ${event.description||''}`);return point?{key:`plus:${point.lat},${point.lng}`,point,source:'plus-code'}:null;}
 export function locationLabel(event){
- const input=locationInput(event);if(event.location_name&&event.location_key===input?.key)return event.location_name;
- const readable=String(event.location||'').replace(/https?:\/\/[^\s<>]+/g,'').replace(/<[^>]*>/g,'').trim();
- if(readable&&!/^[-+\d.,;\s]+$/.test(readable))return readable;
- return input?String(event.title||'Lugar guardado').replace(/^\s*[✅☐]\s*/,''):'Ubicación por confirmar';
+ const input=locationInput(event),resolved=event.location_key===input?.key;
+ return readableLocation(event.resolvedPlaceName||(resolved?event.location_name:null))||readableLocation(event.resolvedAddress||(resolved?event.location_address:null))||readableLocation(event.location)||'Ubicación por confirmar';
 }
+export function readableLocation(value){return String(value||'').replace(/https?:\/\/[^\s<>]+/gi,'').replace(/<[^>]*>/g,'').replace(/\b[23456789CFGHJMPQRVWX]{2,8}\+[23456789CFGHJMPQRVWX]{2,7}\b/gi,'').replace(/(?:GPS\s*[:=]\s*)?[-+]?\d{1,3}\.\d+\s*[,;]\s*[-+]?\d{1,3}\.\d+/gi,'').replace(/\b(?:LAT(?:ITUDE)?|LNG|LON(?:GITUDE)?)\s*=\s*[-+]?\d+\.\d+/gi,'').replace(/^GPS\s*[:=]?\s*$/i,'').trim();}
+export function locationAddress(event){return readableLocation(event.resolvedAddress||(event.location_key===locationInput(event)?.key?event.location_address:null));}

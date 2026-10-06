@@ -1,4 +1,5 @@
 import { TRIP } from './config.js';
+import {calendarText} from './content.js';
 export function categoryFor(item){
  const named=item.label?.name?.trim();if(named)return named;
  if(item.category?.trim())return item.category.trim();
@@ -10,7 +11,7 @@ export function categoryFor(item){
  return 'Otros';
 }
 export function normalizeEvent(raw, colors = {}, labels = {}) {
-  const block = /\[AGENDA_VIAJERA\]([\s\S]*?)\[\/AGENDA_VIAJERA\]/.exec(raw.description || '');
+  const block = /\[\s*AGENDA_VIAJERA\s*\]([\s\S]*?)\[\s*\/\s*AGENDA_VIAJERA\s*\]/i.exec(calendarText(raw.description));
   const fields = Object.fromEntries([...(block?.[1] || '').matchAll(/\b(COST|CURRENCY|COST_STATUS|PURCHASE_ID)\s*=\s*([^\s]+)/g)].map(match => [match[1], match[2]]));
   const parsedCost = fields.COST !== undefined && /^\d+(\.\d+)?$/.test(fields.COST) ? Number(fields.COST) : null;
   const cost=Number.isFinite(parsedCost)?parsedCost:null;
