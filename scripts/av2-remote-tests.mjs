@@ -69,13 +69,17 @@ try{
  // Transfer only the isolated QA trip. Never consume a transfer for Italia 2026.
  const target=randomUUID(),installation=randomUUID(),targetToken=randomBytes(32).toString('hex'),ticket=randomBytes(32).toString('hex');
  const transferArgs={p_trip:trip,p_target:target,p_installation:installation,p_target_token:targetToken,p_ticket:ticket};
+ // Seed an already-authorized QA destination; production PC Casa en Chrome is untouched.
+ query(`insert into public.av2_devices(id,trip_id,user_id,name,role) values(${quote(target)},${quote(trip)},${quote(owner.user.id)},'QA existing Chrome','DEVICE');insert into public.av2_device_keys values(${quote(target)},decode(${quote(hash(targetToken))},'hex'));`);
+ const deviceCountBeforeUpgrade=Number(query(`select count(*) n from public.av2_devices where trip_id=${quote(trip)}`)[0].n);
  const request=await rpc(owner.client,'av2_request_root_transfer',transferArgs);
+ await rpc(owner.client,'av2_root_upgrade_preflight',{...credentials(target,targetToken),p_request:request.id,p_data:{events:65,pins:13,documents:29,records:2,google_connected:true,google_backend:true,budget_ready:true,session_valid:true}});
  await assert.rejects(rpc(owner.client,'av2_consume_root_transfer',transferArgs),/AV2_TRANSFER_NOT_APPROVED/);
  await assert.rejects(rpc(traveler.client,'av2_approve_root_transfer',{...bc,p_request:request.id}),/AV2_ROOT_REQUIRED/);
  await rpc(owner.client,'av2_approve_root_transfer',{...rootCred,p_request:request.id});
  await assert.rejects(rpc(owner.client,'av2_consume_root_transfer',{...transferArgs,p_installation:randomUUID()}),/AV2_TRANSFER_INVALID/);
  const beforeTransfer=await rpc(owner.client,'av2_sync_pull',{...rootCred,p_after:null});
- const moved=await rpc(owner.client,'av2_consume_root_transfer',transferArgs);assert.equal(moved.role,'ROOT_DEVICE');assert.equal(moved.name,'PC Casa');
+ const moved=await rpc(owner.client,'av2_consume_root_transfer',transferArgs);assert.equal(moved.id,target);assert.equal(Number(query(`select count(*) n from public.av2_devices where trip_id=${quote(trip)}`)[0].n),deviceCountBeforeUpgrade);assert.equal(moved.role,'ROOT_DEVICE');assert.equal(moved.name,'PC Casa');
  assert.equal((await rpc(owner.client,'av2_consume_root_transfer',transferArgs)).id,target);
  await assert.rejects(rpc(owner.client,'av2_sync_pull',{...rootCred,p_after:null}),/AV2_DEVICE_REVOKED/);
  assert.deepEqual(await rpc(owner.client,'av2_sync_pull',{...credentials(target,targetToken),p_after:null}),beforeTransfer);
