@@ -21,9 +21,7 @@ import {renderEventDetail} from './event-detail.js';
 
 document.querySelectorAll('nav [data-icon]').forEach(link=>link.insertAdjacentHTML('afterbegin',icon(link.dataset.icon)));
 let calendarRefresh=null;let googleAuthorization=null;let googleState='saved';const pendingGoogleAuth=[];
-const client = createClient('https://cslludzuejkhsydqiabx.supabase.co', 'sb_publishable_8k8xhMZtkay30ZB45aPjGw_4u69Dp0U', { auth: { storageKey: 'av2.auth',storage:googleSafeStorage(localStorage), flowType:'pkce', persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
-// Subscribe before opening IndexedDB: PKCE can finish during database startup.
-client.auth.onAuthStateChange((event,session)=>{if(googleAuthorization)setTimeout(async()=>{try{await googleAuthorization.capture(event,session);if(event==='SIGNED_IN'&&session?.provider_token)await calendarRefresh?.request({force:true});}catch(error){notice(error.message);}},0);else pendingGoogleAuth.push({event,session});});
+let client,remote,devices,google,sync,remoteStartup,authSession=null;
 const store = await new LocalStore().open();
 const rateService=new ReferenceRates(new FrankfurterProvider(),store);
 let referenceRates=(await store.get('meta','fx-view'))?.value||{},financeView=(await store.get('meta','finance-view'))?.value||'USD',financialRemoteReady=false;
@@ -47,18 +45,9 @@ if (['127.0.0.1','localhost'].includes(location.hostname) && new URL(location.hr
     }
   } catch { /* Existing Calendar cache remains usable offline. */ }
 }
-const remote = new SupabaseRemote(client, store.device,store.deviceToken);
-const devices=new Devices(remote);
-const providerBackend=new GoogleProviderBackend(client,()=>remote.credentials());
-const locationCache=new LocationCache(async inputs=>(await providerBackend.call('resolve_locations',{inputs})).locations);
-googleAuthorization=new GoogleAuthorization(store,providerBackend,state=>{googleState=state;const node=document.querySelector('#connection');if(state==='refreshing')node.textContent='Renovando conexión…';});
-await googleAuthorization.capture('INITIAL_SESSION',(await client.auth.getSession()).data.session);
-for(const {event,session}of pendingGoogleAuth)await googleAuthorization.capture(event,session);
-const google = new GoogleSource(()=>googleAuthorization.token(),fetch,()=>remote.check(),token=>googleAuthorization.recover(token),local=>locationCache.refresh(local));
-const sync = new SyncEngine(store, remote, google);
 const app = document.querySelector('#app');
 let rootClaim=null;
-if(['127.0.0.1','localhost'].includes(location.hostname)&&navigator.onLine){try{const response=await fetch('./root-claim',{cache:'no-store'});if(response.ok)rootClaim=await response.json();}catch{/* Claims are available only on PC Casa's local preview. */}}
+
 let selectedDay = days().includes(dateKey()) ? dateKey() : TRIP.start;
 let documents = (await store.get('meta', 'drive-files'))?.value || [];
 let events = [], records = [], pending = [], conflicts = [], now = new Date();
@@ -114,14 +103,16 @@ function requestValue(label,type='text',value=''){
  return new Promise(resolve=>{const dialog=document.createElement('dialog');dialog.innerHTML=`<form method="dialog"><h2>${escape(label)}</h2><label>${escape(label)}<input type="${type}" value="${escape(value)}" autocomplete="${type==='password'?'off':'on'}" required maxlength="100" ${type==='password'?'minlength="8"':''}></label><div class="actions"><button value="cancel" formnovalidate class="secondary">Cancelar</button><button value="ok" class="primary">Continuar</button></div></form>`;document.body.append(dialog);dialog.showModal();dialog.querySelector('input').focus();dialog.addEventListener('close',()=>{const result=dialog.returnValue==='ok'?dialog.querySelector('input').value:null;dialog.querySelector('input').value='';dialog.remove();resolve(result);},{once:true});});
 }
 async function deviceScreen(){
- const session=(await client.auth.getSession()).data.session,invite=await store.get('meta','pending-invite');
- let list=[];if(session)try{list=await devices.list();await store.put('meta',{id:'device-list',value:list});}catch{list=(await store.get('meta','device-list'))?.value||[];}
+ const session=authSession,invite=await store.get('meta','pending-invite');
+ const list=(await store.get('meta','device-list'))?.value||[],identity=(await store.get('meta','device-identity'))?.value;
+ if(identity?.id===store.device&&!list.some(d=>d.id===identity.id))list.push(identity);
  const own=list.find(x=>x.id===store.device&&!x.deleted_at);deviceScreen.root=own?.role==='ROOT_DEVICE';
- return `<span class="eyebrow">Cada instalación, independiente</span><h1>Dispositivos</h1><p class="subtitle">4 celulares + PC Casa · Italia 2026</p>${!session?`<section class="card"><p>Conecta tu cuenta Google para autorizar esta instalación.</p>${button('google','Conectar Google','','primary')}</section>`:''}${!own&&session?`<section class="card"><h3>Autorizar este dispositivo</h3><p class="muted">Usa el enlace/QR temporal generado por PC Casa.</p>${invite?button('enroll','Registrar este teléfono','','primary'):''}${rootClaim&&new Date(rootClaim.expires_at)>new Date()?button('claim-root','Activar PC Casa','','primary'):''}</section>`:''}${own?`<div class="actions">${button('invite','Agregar dispositivo','','primary')}${button('rename-device','Nombrar esta instalación')}${deviceScreen.root?'<a class="secondary" href="#security">Seguridad</a>':button('remove-self','Quitar este dispositivo','', 'danger')}</div>`:''}<section class="section">${list.map(d=>`<div class="card list-row row"><div><h3>${escape(d.name)}</h3><small>${d.role==='ROOT_DEVICE'?'PC protegida':d.deleted_at?'Revocado':d.id===store.device?'Esta instalación':'Autorizado'}</small></div>${!d.deleted_at&&d.role!=='ROOT_DEVICE'&&d.id!==store.device?button('revoke-device','Revocar',d.id,'danger'):''}</div>`).join('')}</section>`;
+ return `<span class="eyebrow">Cada instalación, independiente</span><h1>Dispositivos</h1><p class="subtitle">4 celulares + PC Casa · Italia 2026</p>${!session&&!own?`<section class="card"><p>Conecta tu cuenta para autorizar esta instalación.</p>${button('google','Conectar Google','','primary')}</section>`:''}${!own&&session?`<section class="card"><h3>Autorizar este dispositivo</h3><p class="muted">Usa el enlace/QR temporal generado por PC Casa.</p>${invite?button('enroll','Registrar este teléfono','','primary'):''}${!list.some(d=>d.role==='ROOT_DEVICE'&&!d.deleted_at)&&rootClaim&&new Date(rootClaim.expires_at)>new Date()?button('claim-root','Activar PC Casa','','primary'):''}</section>`:''}${own?`<div class="actions">${button('invite','Agregar dispositivo','','primary')}${button('rename-device','Nombrar esta instalación')}${deviceScreen.root?'<a class="secondary" href="#security">Seguridad</a>':button('remove-self','Quitar este dispositivo','', 'danger')}</div>`:''}<section class="section">${list.map(d=>`<div class="card list-row row"><div><h3>${escape(d.name)}</h3><small>${d.role==='ROOT_DEVICE'?'ROOT · Autorizado':d.deleted_at?'Revocado':d.id===store.device?'Esta instalación':'Autorizado'}</small></div>${!d.deleted_at&&d.role!=='ROOT_DEVICE'&&d.id!==store.device?button('revoke-device','Revocar',d.id,'danger'):''}</div>`).join('')}</section>`;
 }
 async function securityScreen(){
-  const list=await devices.list();const own=list.find(d=>d.id===store.device&&!d.deleted_at);
+  const list=(await store.get('meta','device-list'))?.value||[];const own=list.find(d=>d.id===store.device&&!d.deleted_at);
   if(own?.role!=='ROOT_DEVICE')return '<a class="back" href="#devices">‹ Dispositivos</a><h1>Seguridad</h1><section class="card"><p>La clave se solicita solo al administrar dispositivos. Ver dispositivos no requiere clave.</p><p>Para crear o cambiar la clave administrativa, usa PC Casa.</p></section>';
+  if(!navigator.onLine||!authSession)return '<a class="back" href="#devices">‹ Dispositivos</a><h1>Seguridad</h1><section class="card"><p>PC Casa · ROOT · Autorizado</p><p>Conecta tu cuenta para cambiar la clave administrativa.</p></section>';
   const configured=await devices.adminConfigured();securityScreen.configured=configured;
   return `<a class="back" href="#devices">‹ Dispositivos</a><span class="eyebrow">PC Casa · ROOT protegido</span><h1>Seguridad</h1><section class="card detail"><h2>${configured?'Cambiar clave administrativa':'Crear clave administrativa'}</h2><p class="muted">Los celulares usarán esta clave únicamente para administrar dispositivos. PC Casa administra sin PIN y ningún celular puede revocarla.</p><form id="security-form">${configured?'<label>Clave actual<input name="current" type="password" autocomplete="current-password" required minlength="8" maxlength="100"></label>':''}<label>Nueva clave administrativa<input name="password" type="password" autocomplete="new-password" required minlength="8" maxlength="100"></label><label>Confirmar nueva clave<input name="confirmation" type="password" autocomplete="new-password" required minlength="8" maxlength="100"></label><p class="muted">Usa al menos 8 caracteres. La clave se guarda como una derivación fuerte con salt; no se guarda en este dispositivo.</p><button type="submit" class="primary">${configured?'Cambiar clave administrativa':'Crear clave administrativa'}</button><p id="security-result" role="status"></p></form></section>`;
 }
@@ -141,6 +132,7 @@ async function render() {
   events=events.map(e=>{const parsed=normalizeEvent({id:e.id,summary:e.title,description:e.description});return {...e,cost:parsed.cost,currency:parsed.currency,cost_status:parsed.cost_status,purchase_status:parsed.purchase_status,purchase_id:parsed.purchase_id,financial_fields:parsed.financial_fields,financial_state:parsed.financial_state,warnings:parsed.warnings};});
   const [route, rawId] = (location.hash.slice(1) || 'home').split('/'), id = decodeURIComponent(rawId || '');
   const navRoute=['home','itinerary','map','documents','settings'].includes(route)?route:route==='event'?'itinerary':route==='document'?'documents':'settings';document.querySelectorAll('nav a').forEach(a=>a.classList.toggle('active',a.hash===`#${navRoute}`));
+  updateConnection();
   if(route==='devices'){app.innerHTML=await deviceScreen();return;}
   if(route==='security'){try{app.innerHTML=await securityScreen();}catch{app.innerHTML='<a class="back" href="#devices">‹ Dispositivos</a><h1>Seguridad</h1><p class="warning">Conéctate para consultar o cambiar la configuración de seguridad.</p>';}return;}
 
@@ -159,6 +151,7 @@ async function render() {
 function syncAll(){
  if(syncAll.running)return syncAll.running;
  syncAll.running=(async()=>{
+  await remoteStartup;
   if(!navigator.onLine){calendarStatus='error';updateConnection();throw Error('Sin conexión. Tus cambios siguen guardados localmente.');}
   calendarStatus='updating';calendarFailure='';updateConnection();
   try{
@@ -203,18 +196,19 @@ app.addEventListener('click', async event => {
     else if(action==='pin'){selectMapPin(id);return;}
     else if(action==='close-pin'){selectedPin=null;document.querySelector('#pin-sheet').innerHTML='';return;}
     else if (action === 'google') { const { error } = await client.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: `${location.origin}${location.pathname}`,queryParams:await googleAuthorization.oauthQuery(), scopes: 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.calendars.readonly https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly' } }); if (error) throw error; }
-    else if(action==='claim-root'){await devices.claimRoot(rootClaim?.token);rootClaim=null;await store.put('meta',{id:'authorized',value:true});await syncAll();}
-    else if(action==='enroll'){const name=await requestValue('Nombre del teléfono','text','Jonathan S26 Ultra');if(name){await devices.enroll((await store.get('meta','pending-invite'))?.value,name);await store.transaction(['meta'],tx=>tx.objectStore('meta').delete('pending-invite'));await store.put('meta',{id:'authorized',value:true});location.hash='#home';await syncAll();notice('Dispositivo autorizado. Puedes instalar la PWA y preparar offline.');}}
-    else if(action==='rename-device'){const name=await requestValue('Nombre de esta instalación');if(name)await devices.rename(name);}
+    else if(action==='claim-root'){await devices.claimRoot(rootClaim?.token);rootClaim=null;await refreshDeviceIdentity();await store.put('meta',{id:'authorized',value:true});await syncAll();}
+    else if(action==='enroll'){const name=await requestValue('Nombre del teléfono','text','Jonathan S26 Ultra');if(name){await devices.enroll((await store.get('meta','pending-invite'))?.value,name);await refreshDeviceIdentity();await store.transaction(['meta'],tx=>tx.objectStore('meta').delete('pending-invite'));await store.put('meta',{id:'authorized',value:true});location.hash='#home';await syncAll();notice('Dispositivo autorizado. Puedes instalar la PWA y preparar offline.');}}
+    else if(action==='rename-device'){const name=await requestValue('Nombre de esta instalación');if(name){await devices.rename(name);await refreshDeviceIdentity();}}
     else if(action==='toggle-fx')fxDetailsOpen=!fxDetailsOpen;
     else if(action==='finance-view'){financeView=id==='original'?'original':'USD';await store.put('meta',{id:'finance-view',value:financeView});}
     else if(action==='refresh-fx'){await refreshRates(true);notice('Referencias actualizadas; los pagos conservan su snapshot.');}
     else if(action==='invite'){
+      deviceScreen.root=(await devices.list()).find(d=>d.id===store.device&&!d.deleted_at)?.role==='ROOT_DEVICE';
       const password=deviceScreen.root?null:await requestValue('Clave administrativa','password');if(!deviceScreen.root&&!password)return;
       const invite=await devices.invite(password),url=`${location.origin}${location.pathname}#invite/${invite.token}`;
       const qr=qrcode(0,'M');qr.addData(url);qr.make();const dialog=document.createElement('dialog');dialog.innerHTML=`<form method="dialog"><h2>Agregar dispositivo</h2><p>Un solo uso · válido hasta ${escape(formatDateTime(invite.expires_at))}</p>${qr.createSvgTag(4,4)}<label>Enlace temporal<input readonly value="${escape(url)}"></label><button class="primary">Cerrar</button></form>`;document.body.append(dialog);dialog.showModal();dialog.addEventListener('close',()=>dialog.remove(),{once:true});
     }
-    else if(action==='revoke-device'){if(confirm('¿Revocar este teléfono? Al reconectarse perderá acceso y se invalidarán sus datos locales.')){const password=deviceScreen.root?null:await requestValue('Clave administrativa','password');if(deviceScreen.root||password)await devices.revoke(id,password);}}
+    else if(action==='revoke-device'){if(confirm('¿Revocar este teléfono? Al reconectarse perderá acceso y se invalidarán sus datos locales.')){const password=deviceScreen.root?null:await requestValue('Clave administrativa','password');if(deviceScreen.root||password){await devices.revoke(id,password);await refreshDeviceIdentity();}}}
     else if(action==='remove-self'){if(confirm('¿Quitar esta instalación y eliminar sus datos locales?')){await devices.revoke(store.device,null,true);await store.purge();await client.auth.signOut();location.reload();}}
     else if (action === 'sync') { await syncAll(); notice('Sincronización completada.'); }
     else if (action === 'budget') {
@@ -267,20 +261,53 @@ addEventListener('hashchange', () => render().catch(error => notice(error.messag
 
 addEventListener('offline', () => refreshRates().then(()=>refreshBackground()).catch(()=>refreshBackground()));
 addEventListener('beforeinstallprompt', event => { event.preventDefault(); installPrompt = event; });
-async function refreshBackground(){if(location.hash.startsWith('#expense/')||location.hash==='#security'){updateConnection();return;}await render();}
-function scheduleSync(){clearTimeout(scheduleSync.timer);scheduleSync.timer=setTimeout(async()=>{if(navigator.onLine&&(await store.get('meta','authorized'))?.value){try{await sync.run();await refreshBackground();}catch(error){notice(error.message);if(error.message.includes('AV2_DEVICE_REVOKED'))await render();else await refreshBackground();}}},1000);}
+async function refreshBackground(){if(location.hash.startsWith('#expense/')||(location.hash==='#security'&&document.querySelector('#security-form'))){updateConnection();return;}await render();}
+function scheduleSync(){clearTimeout(scheduleSync.timer);scheduleSync.timer=setTimeout(async()=>{if(sync&&navigator.onLine&&(await store.get('meta','authorized'))?.value){try{await sync.run();await refreshBackground();}catch(error){notice(error.message);if(error.message.includes('AV2_DEVICE_REVOKED'))await render();else await refreshBackground();}}},1000);}
+await render();
 if ('serviceWorker' in navigator) {
   const hadController = !!navigator.serviceWorker.controller;
-  const registration = await navigator.serviceWorker.register('./sw.js', { scope: './' });
+  navigator.serviceWorker.register('./sw.js', { scope: './' }).then(registration=>{
   const showUpdate = () => { const update = document.querySelector('#update'); update.hidden = false; update.onclick = () => registration.waiting?.postMessage('ACTIVATE_UPDATE'); };
   if (registration.waiting) showUpdate();
   registration.addEventListener('updatefound', () => { registration.installing?.addEventListener('statechange', () => { if (registration.waiting && navigator.serviceWorker.controller) showUpdate(); }); });
   let changing = false; navigator.serviceWorker.addEventListener('controllerchange', () => { if (!hadController || changing) return; changing = true; location.reload(); });
+  }).catch(()=>{});
 }
-await render();
 setInterval(()=>{if(document.visibilityState==='visible'){updateConnection();if((location.hash||'#home')==='#home')render().catch(error=>notice(error.message));}},60000);
+async function refreshDeviceIdentity(){
+ if(!navigator.onLine||!authSession)return;
+ try{
+  const own=await remote.rpc('av2_recover_device',{p_trip:TRIP.id,p_token:store.deviceToken});
+  if(own?.id){await store.bindDevice(own);remote.device=store.device;}
+  const list=await devices.list();await store.put('meta',{id:'device-list',value:list});
+  const current=list.find(d=>d.id===store.device&&!d.deleted_at);
+  if(current)await store.bindDevice(current);
+ }catch{/* Retain the last verified installation identity during auth/network failure. */}
+}
+async function startRemote(){
+client = createClient('https://cslludzuejkhsydqiabx.supabase.co', 'sb_publishable_8k8xhMZtkay30ZB45aPjGw_4u69Dp0U', { auth: { storageKey: 'av2.auth',storage:googleSafeStorage(localStorage), flowType:'pkce', persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
+// Network/auth startup runs only after the local view is rendered.
+client.auth.onAuthStateChange((event,session)=>{if(googleAuthorization)setTimeout(async()=>{try{authSession=session;await refreshDeviceIdentity();await googleAuthorization.capture(event,session);await refreshBackground();if(event==='SIGNED_IN'&&session?.provider_token)await calendarRefresh?.request({force:true});}catch(error){notice(error.message);}},0);else pendingGoogleAuth.push({event,session});});
+remote = new SupabaseRemote(client, store.device,store.deviceToken);
+devices=new Devices(remote);
+const providerBackend=new GoogleProviderBackend(client,()=>remote.credentials());
+const locationCache=new LocationCache(async inputs=>(await providerBackend.call('resolve_locations',{inputs})).locations);
+googleAuthorization=new GoogleAuthorization(store,providerBackend,state=>{googleState=state;const node=document.querySelector('#connection');if(state==='refreshing')node.textContent='Renovando conexión…';});
+authSession=(await client.auth.getSession()).data.session;
+await refreshDeviceIdentity();
+await googleAuthorization.capture('INITIAL_SESSION',authSession);
+for(const {event,session}of pendingGoogleAuth)await googleAuthorization.capture(event,session);
+google = new GoogleSource(()=>googleAuthorization.token(),fetch,()=>remote.check(),token=>googleAuthorization.recover(token),local=>locationCache.refresh(local));
+sync = new SyncEngine(store, remote, google);
+
+if(['127.0.0.1','localhost'].includes(location.hostname)&&navigator.onLine){try{const response=await fetch('./root-claim',{cache:'no-store'});if(response.ok)rootClaim=await response.json();}catch{/* Claims are available only on PC Casa's local preview. */}}
+await refreshBackground();
 calendarRefresh=new CalendarRefresh({refresh:syncAll,lastSync:async()=>(await store.get('meta','calendar-sync'))?.synced_at,available:async()=>navigator.onLine&&!!(await client.auth.getSession()).data.session&&!!(await store.get('meta','authorized'))?.value});
 calendarRefresh.start();
-if (navigator.onLine && (await client.auth.getSession()).data.session) {if(!(await store.get('meta','authorized'))?.value){location.hash='#devices';await render();}else calendarRefresh.request({force:true}).catch(error=>notice(error.message));}
+if (navigator.onLine && (await client.auth.getSession()).data.session) {if(!(await store.get('meta','authorized'))?.value){await refreshBackground();}else calendarRefresh.request({force:true}).catch(error=>notice(error.message));}
 setInterval(scheduleSync,30000);
 refreshRates().then(()=>refreshBackground()).catch(()=>{});
+
+}
+remoteStartup=new Promise((resolve,reject)=>setTimeout(()=>startRemote().then(resolve,reject),0));
+remoteStartup.catch(()=>{calendarStatus='error';updateConnection();});

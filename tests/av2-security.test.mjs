@@ -14,7 +14,7 @@ const rpc=async(name,args)=> (await db.query(`select ${name}(${args.map((_,i)=>`
 async function user(id){await db.exec('reset role');await db.query("select set_config('request.jwt.claim.sub',$1,false)",[id]);await db.exec('set role authenticated');}
 before(async()=>{
  await db.exec(`create role anon;create role authenticated;create schema auth;create table auth.users(id uuid primary key);create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;grant usage on schema public,auth to authenticated;grant execute on function auth.uid() to authenticated;`);
- for(const name of ['20261005090000_agenda_viajera_v2.sql','20261005100000_av2_device_authorization.sql','20261005110000_av2_sync_validation.sql','20261005200000_av2_admin_key_rotation.sql'])await db.exec(readFileSync(new URL(`../supabase/migrations/${name}`,import.meta.url),'utf8'));
+ for(const name of ['20261005090000_agenda_viajera_v2.sql','20261005100000_av2_device_authorization.sql','20261005110000_av2_sync_validation.sql','20261005200000_av2_admin_key_rotation.sql','20261006040000_av2_device_persistence.sql'])await db.exec(readFileSync(new URL(`../supabase/migrations/${name}`,import.meta.url),'utf8'));
  await db.query('insert into auth.users values($1),($2)',[a,b]);await db.query("insert into av2_trip_users(trip_id,user_id,role) values($1,$2,'OWNER')",[TRIP.id,a]);
  await db.query("insert into av2_root_claims values($1,$2,$3,now()+interval '1 hour',null)",[TRIP.id,a,hash(claim)]);await user(a);
 });
@@ -84,4 +84,15 @@ test('existing administrative key cannot be replaced without its current single-
  assert.equal((await rpc('av2_change_admin_key',[TRIP.id,root,rootToken,nextSalt,600000,next,challenge.id,proof])).error,'AV2_ADMIN_PROOF_INVALID');
  await db.exec('reset role');const row=(await db.query('select salt,encode(verifier,\'hex\') verifier from av2_admin_security where trip_id=$1',[TRIP.id])).rows[0];assert.equal(row.salt,nextSalt);assert.equal(row.verifier,next);
  await user(b);await assert.rejects(rpc('av2_set_admin_key',[TRIP.id,phone,phoneToken,nextSalt,600000,next]),/AV2_ROOT_REQUIRED/);
+});
+
+test('ROOT retry and recovery retain the existing device and reject account-only impersonation',async()=>{
+ await user(a);
+ assert.equal((await rpc('av2_claim_root',[TRIP.id,root,rootToken,null])).id,root);
+ assert.equal((await rpc('av2_recover_device',[TRIP.id,rootToken])).id,root);
+ assert.equal(await rpc('av2_recover_device',[TRIP.id,'1'.repeat(64)]),null);
+ await user(b);assert.equal(await rpc('av2_recover_device',[TRIP.id,rootToken]),null);
+ await assert.rejects(rpc('av2_claim_root',[TRIP.id,root,phoneToken,claim]),/AV2_ROOT_CLAIM_INVALID/);
+ await db.exec('reset role');assert.equal((await db.query("select count(*)::int as n from av2_devices where role='ROOT_DEVICE'")).rows[0].n,1);
+ await user(a);
 });
