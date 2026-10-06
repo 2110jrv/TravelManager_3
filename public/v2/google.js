@@ -2,12 +2,12 @@ import { TRIP } from './config.js';
 import { normalizeEvent } from './domain.js';
 export class GoogleSource {
   constructor(getToken, request = fetch, guard = async()=>{}, unauthorized=async()=>{}) { this.getToken = getToken; this.request = (...args)=>request(...args); this.guard=guard; this.unauthorized=unauthorized; }
-  async api(path, options = {}) {
+  async api(path, options = {}, retry = true) {
     await this.guard();
     const token = await this.getToken();
     if (!token) throw Error('Autoriza Google para leer Calendar y Drive.');
     const response = await this.request(`https://www.googleapis.com/${path}`, { ...options, headers: { ...options.headers, Authorization: `Bearer ${token}` } });
-    if (!response.ok) { if(response.status===401)await this.unauthorized();const error = Error(response.status === 401 ? 'La autorización Google expiró. Conecta nuevamente.' : `Google: error ${response.status}`); error.status = response.status; throw error; }
+    if (!response.ok) { if(response.status===401&&retry&&await this.unauthorized(token))return this.api(path,options,false);const error = Error(response.status === 401&&retry ? 'La autorización Google expiró. Conecta nuevamente.' : `Google: error ${response.status}. Tus datos guardados están conservados.`); error.status = response.status; throw error; }
     return response;
   }
   async syncCalendar(store) {
