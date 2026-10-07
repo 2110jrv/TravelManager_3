@@ -5,7 +5,8 @@ test('PIN SQL: 100 logins, two users, version, revoke, inactive, queue actor, RL
  const rpc=async(n,a)=>(await db.query(`select ${n}(${a.map((_,i)=>'$'+(i+1)).join(',')}) result`,a)).rows[0].result;
  try{
  await db.exec("create role anon;create role authenticated;create role service_role bypassrls;create schema auth;create table auth.users(id uuid primary key);create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;grant usage on schema public,auth to authenticated;grant execute on function auth.uid() to authenticated;");
- for(const f of ['20261005090000_agenda_viajera_v2.sql','20261005100000_av2_device_authorization.sql','20261005110000_av2_sync_validation.sql','20261007010000_av2_person_pin_auth.sql'])await db.exec(readFileSync(new URL('../supabase/migrations/'+f,import.meta.url),'utf8'));
+ for(const f of ['20261005090000_agenda_viajera_v2.sql','20261005100000_av2_device_authorization.sql','20261005110000_av2_sync_validation.sql','20261007010000_av2_person_pin_auth.sql','20261007011000_av2_pin_google_owner_read.sql'])await db.exec(readFileSync(new URL('../supabase/migrations/'+f,import.meta.url),'utf8'));
+ assert.equal((await db.query("select has_table_privilege('service_role','av2_trip_users','select') allowed")).rows[0].allowed,true);
  await db.query('insert into auth.users values($1)',[auth]);await db.query("select set_config('request.jwt.claim.sub',$1,false)",[auth]);
  await db.exec("update av2_app_users set pin_salt='fake-test-salt',pin_hash='fake-test-hash',pin_version=1");const users=(await db.query('select id,name from av2_app_users order by name')).rows,jon=users.find(u=>u.name==='Jonathan').id,jenny=users.find(u=>u.name==='Jenny').id;
  const authorize=id=>rpc('av2_pin_authorize',[trip,id,auth,install,token,{platform:'Android'},'Equipo de prueba','qa']);
