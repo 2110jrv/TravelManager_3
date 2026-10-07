@@ -172,7 +172,7 @@ async function render() {
   } else app.innerHTML = await settings();
   app.querySelectorAll('.back').forEach(a=>{const text=a.textContent.replace(/^‹\s*/, '').trim();a.innerHTML=icon('back')+' '+escape(text);a.setAttribute('aria-label',text);a.title=text;});app.querySelectorAll('button[type=submit]').forEach(b=>{if(/Guardar/.test(b.textContent)&&!b.querySelector('svg')){b.setAttribute('aria-label',b.textContent.trim());b.title=b.textContent.trim();b.insertAdjacentHTML('afterbegin',icon('save')+' ');}});
   if(route==='itinerary')wireDayCarousel(app.querySelector('.day-strip'));
-  if(route==='map')mountTripMap(app.querySelector('#trip-map'),mapUx.visible(),selectMapPin,mapUx.mode+':'+mapUx.label+':'+selectedDay,mapUx.position);else closeTripMap();
+  if(route==='map')mountTripMap(app.querySelector('#trip-map'),mapUx.visible(),selectMapPin,mapUx.mode+':'+mapUx.label+':'+selectedDay,mapUx.position,mapUx.selected);else closeTripMap();
   if(route==='event'){const warnings=events.find(x=>x.id===id)?.warnings||[];if(warnings.length)app.insertAdjacentHTML('beforeend',`<p class="warning">${warnings.map(escape).join('<br>')}</p>`);}
   if(route==='document'&&documents.some(x=>x.id===id))app.insertAdjacentHTML('beforeend',`<div class="actions">${button('trash-document','Enviar archivo a la papelera de Google Drive',id,'danger')}</div>`);
 }
@@ -226,7 +226,7 @@ app.addEventListener('click', async event => {
     if(action==='restore-expense'){await store.restoreExpense(id);}else if(action==='clear-drilldown'){expenseDrilldown=null;}else if(action==='budget-phase'){budgetPhase=id||null;}else if(action==='budget-slice'){document.querySelector('#budget-slice-detail').innerHTML=budgetSliceDetail(summary(budgetPhase),Number(id));return;}else if(action==='budget-drilldown'){expenseDrilldown=budgetSlices(summary(budgetPhase))[Number(id)];location.hash='#expenses';}else if (action === 'day') selectedDay = id;
     else if(action==='map-filter'){mapFilter=id;selectedPin=null;}
     else if(action==='pin'){selectMapPin(id);return;}
-    else if(action==='close-pin'){selectedPin=null;mapUx.selected=null;document.querySelector('#pin-sheet').innerHTML='';return;}
+    else if(action==='close-pin'){selectedPin=null;mapUx.selected=null;focusTripPin(null);document.querySelector('#pin-sheet').innerHTML='';return;}
     else if (action === 'google') { const { error } = await client.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: `${location.origin}${location.pathname}`,queryParams:await googleAuthorization.oauthQuery(), scopes: 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.calendars.readonly https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly' } }); if (error) throw error; }
     else if(action==='request-root-transfer'){
       if(!navigator.onLine){notice('Conecta Internet para transferir PC Casa.');return;}

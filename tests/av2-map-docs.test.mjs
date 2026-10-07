@@ -16,3 +16,7 @@ test('POI SQL is a separate PIN-gated entity with canonical dedupe, actor audit 
  assert.equal(placeIsPast({end:'2026-10-29T22:30:00Z'},new Date('2026-10-29T23:30:00Z')),true);
  assert.equal(placeIsPast({end:'2026-10-29T23:15:00Z'},new Date('2026-10-29T23:30:00Z')),false);
  });
+
+test('remaining map filter keeps multi-day POIs and undated references; all restores past pins',async()=>{
+ const{MapUX}=await import('../public/v2/map-ux.js');const past={id:'old',kind:'places_of_interest',data:{name:'Pasado',lat:40,lng:14,assigned_dates:['2000-01-01']}},future={id:'next',kind:'places_of_interest',data:{name:'Futuro',lat:41,lng:15,assigned_dates:['2099-01-01']}},undated={id:'ref',kind:'places_of_interest',data:{name:'Referencia',lat:42,lng:16,assigned_dates:[]}},ux=new MapUX(null,()=>[],()=>[past,future,undated],()=> '2026-10-20',()=>{});ux.mode='remaining';assert.deepEqual(ux.visible().map(p=>p.id),['next','ref']);ux.mode='trip';assert.equal(ux.visible().length,3);ux.mode='today';assert.equal(ux.visible().length,0);ux.mode='tomorrow';assert.equal(ux.visible().length,0);
+});

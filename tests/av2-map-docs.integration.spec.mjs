@@ -13,6 +13,6 @@ test('mobile map list selects and centers a pin; past entries expand with keyboa
  const toggle=row.getByRole('button',{name:'Expandir lugar'});await toggle.focus();await page.keyboard.press('Enter');await expect(row).not.toHaveClass(/collapsed/);
  await row.locator('[data-action="pin"]').click();await expect(page.locator('#pin-sheet')).toContainText('Pompeya');await expect(page.locator('.trip-pin.selected')).toHaveCount(1);
  const position=await page.locator('.trip-pin.selected').evaluate(el=>{const pin=el.getBoundingClientRect(),map=document.querySelector('#trip-map').getBoundingClientRect();return Math.abs(pin.x+pin.width/2-(map.x+map.width/2));});expect(position).toBeLessThan(5);
- await row.getByRole('button',{name:'Contraer lugar'}).click();await expect(row).toHaveClass(/collapsed/);
+ await row.getByRole('button',{name:'Contraer lugar'}).click();await expect(row).toHaveClass(/collapsed/);await expect(page.locator('.trip-pin.selected')).toHaveCount(1);await page.getByRole('button',{name:'Cerrar',exact:true}).click();await expect(page.locator('.trip-pin.selected')).toHaveCount(0);
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
 });
