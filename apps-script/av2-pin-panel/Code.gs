@@ -58,7 +58,7 @@ function av2ReadPlaces(book,props){
  return{sheet,original,rows,deleted};
 }
 function av2WritePlaces(snapshot,result,props){
- const sheet=snapshot.sheet,count=Math.max(0,sheet.getLastRow()-1),now=count?av2PlaceCells(sheet,count):[];if(JSON.stringify(now)!==JSON.stringify(snapshot.original))return;
+ const sheet=snapshot.sheet;if(!av2DataUnchanged(snapshot,17,[7,16]))return;
  const lookup=new Map(result.places.map(p=>[p.code,p])),mapping=new Map(result.mappings.map(m=>[m.row_key,m.poi_code])),seen=new Set(),output=snapshot.original.map(()=>Array(17).fill('')),notes=snapshot.original.map(()=>['']);
  const put=(p,index,pending)=>{let values=p.values.slice(),conflict=result.conflicts.includes(p.code);if(conflict&&pending){values.splice(1,9,...pending.slice(1,10));values[9]='Revisar';}output[index]=values;notes[index]=['AV2_POI_BASE:'+JSON.stringify({data:p.data,values:values.map(v=>String(v??'')),...(conflict?{conflict:true,serverValues:p.values.map(v=>String(v??''))}:{})})];seen.add(p.code);props.setProperty('AV2_POI_VERSION_'+p.code,String(p.data.version));};
  snapshot.rows.forEach(row=>{const code=row.values[0]||mapping.get(row.row_key),p=lookup.get(code);if(p&&!seen.has(code))put(p,row.row_number-2,row.values);});
@@ -79,7 +79,7 @@ function av2ReadExpenses(book,props){
  const previous=JSON.parse(props.getProperty('AV2_EXP_IDS')||'[]'),deleted=previous.filter(code=>!ids.has(code)).map(code=>({code,base:{version:Number(props.getProperty('AV2_EXP_VERSION_'+code)||0)}}));return{sheet,original,notes,rows,deleted};
 }
 function av2WriteExpenses(snapshot,result,props){
- const sheet=snapshot.sheet,count=Math.max(0,sheet.getLastRow()-1),now=count?av2ExpenseCells(sheet,count):[];if(JSON.stringify(now)!==JSON.stringify(snapshot.original))return;
+ const sheet=snapshot.sheet;if(!av2DataUnchanged(snapshot,19,[1,17]))return;
  const lookup=new Map(result.expenses.map(p=>[p.code,p])),mapping=new Map(result.mappings.map(m=>[m.row_key,m.expense_id])),seen=new Set(),writeRows=new Set(),output=snapshot.original.map(row=>row.slice()),notes=snapshot.notes?snapshot.notes.map(row=>row.slice()):snapshot.original.map(()=>['']);
  const put=(p,index,pending)=>{let values=p.values.slice();if(result.conflicts.includes(p.code)&&pending){values=pending.slice();values[0]=p.code;}if(values[6]==='PAID')values[6]='Pagado';else if(values[6]==='ESTIMATED')values[6]='Estimado';output[index]=values;writeRows.add(index);const conflict=result.conflicts.includes(p.code)&&pending;notes[index]=[(conflict?'Conflicto pendiente: modifica esta fila para confirmar tus valores.\n':'')+'AV2_EXP_BASE:'+JSON.stringify({data:p.record,values:(conflict?values:p.values).map(v=>String(v??'')),...(conflict?{conflict:true,serverValues:p.values.map(v=>String(v??''))}:{})})];seen.add(p.code);props.setProperty('AV2_EXP_VERSION_'+p.code,String(p.record.version));};
  snapshot.rows.forEach(row=>{const code=(row.row_key?mapping.get(row.row_key):null)||row.base?.data?.data?.expense_id||row.values[0],p=lookup.get(code);if(p&&!seen.has(code)&&!(result.errors||[]).some(e=>e.row_number===row.row_number))put(p,row.row_number-2,row.values);});
@@ -92,3 +92,6 @@ function av2WriteExpenses(snapshot,result,props){
 function av2ExpenseCells(sheet,count){const timezone=sheet.getParent().getSpreadsheetTimeZone();return sheet.getRange(2,1,count,19).getValues().map(row=>row.map((value,i)=>value instanceof Date?Utilities.formatDate(value,timezone,i===1?'yyyy-MM-dd':'yyyy-MM-dd HH:mm:ss'):String(value??'')));}
 
 function av2PlaceCells(sheet,count){const timezone=sheet.getParent().getSpreadsheetTimeZone();return sheet.getRange(2,1,count,17).getValues().map(row=>row.map((value,i)=>value instanceof Date?Utilities.formatDate(value,timezone,i===7?'yyyy-MM-dd':'yyyy-MM-dd HH:mm:ss'):String(value??'')));}
+
+// A fresh Sheets API read avoids SpreadsheetApp read-cache hiding an API edit during HTTP sync.
+function av2DataUnchanged(snapshot,width,dateColumns){const range=snapshot.sheet.getName()+'!A2:'+String.fromCharCode(64+width)+'501',response=UrlFetchApp.fetch('https://sheets.googleapis.com/v4/spreadsheets/'+AV2_SPREADSHEET+'/values/'+encodeURIComponent(range)+'?valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=SERIAL_NUMBER',{headers:{Authorization:'Bearer '+ScriptApp.getOAuthToken()},muteHttpExceptions:true});if(response.getResponseCode()!==200)throw new Error('No se pudo verificar el estado actual de '+snapshot.sheet.getName());const trim=rows=>{while(rows.length&&rows[rows.length-1].every(v=>!v))rows.pop();return rows;},current=(JSON.parse(response.getContentText()).values||[]).map(row=>Array.from({length:width},(_,i)=>{const value=row[i];return dateColumns.includes(i)&&typeof value==='number'?Utilities.formatDate(new Date(Math.round((value-25569)*86400000)),'UTC',i===dateColumns[0]?'yyyy-MM-dd':'yyyy-MM-dd HH:mm:ss'):String(value??'');}));return JSON.stringify(trim(current))===JSON.stringify(trim(snapshot.original.map(row=>row.slice())));}
