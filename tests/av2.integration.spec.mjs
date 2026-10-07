@@ -14,7 +14,7 @@ test('mobile shell, real Calendar snapshot, expense receipt, persistence and off
     await page.goto('/v2/#itinerary'); await expect(page.getByRole('link',{name:/SALIDA UA 2024/})).toBeVisible();
     await page.getByRole('link',{name:/SALIDA UA 2024/}).click(); await expect(page.getByRole('heading',{name:/SALIDA UA 2024/})).toBeVisible();
   }
-  await page.goto('/v2/#expense/new'); await page.getByLabel('Descripción',{exact:true}).fill('Cena offline'); await page.getByLabel('Importe original').fill('25');
+  await page.goto('/v2/#expense/new'); await page.getByLabel('Descripción',{exact:true}).fill('Cena offline'); await page.getByLabel('Monto',{exact:true}).fill('25');
   await page.getByLabel('Foto o archivo de recibo').setInputFiles({name:'receipt.png',mimeType:'image/png',buffer:Buffer.from('receipt')});
   await page.getByRole('button',{name:'Guardar gasto'}).click(); await expect(page.getByRole('heading',{name:'Cena offline'})).toBeVisible();
   await context.setOffline(true); await page.reload(); await expect(page.getByRole('heading',{name:'Cena offline'})).toBeVisible();
@@ -118,4 +118,11 @@ test('explicit service worker update preserves IndexedDB and legacy caches',asyn
  await expect.poll(()=>page.evaluate(async()=>navigator.serviceWorker.controller?.scriptURL.includes('test-update=2'))).toBe(true);
  const state=await page.evaluate(async()=>{const{LocalStore}=await import('/v2/store.js');const s=await new LocalStore().open();return{device:s.device,notes:(await s.all('records')).filter(x=>x.data?.text==='update-survivor').length,legacy:(await caches.keys()).includes('legacy-cache-sentinel')};});
  expect(state).toEqual({device:identity,notes:1,legacy:true});
+});
+
+test('offline expense create/delete/restore preserves one identity and advances dependent versions',async({page})=>{
+ await page.goto('/v2/?fixture=1');const result=await page.evaluate(async()=>{
+ const{LocalStore}=await import('/v2/store.js'),{SyncEngine}=await import('/v2/sync.js');const s=await new LocalStore().open();s.pinMode=true;s.activeUser={id:crypto.randomUUID(),authorized:true};const id=crypto.randomUUID();await s.mutate('expenses',id,{amount:10,currency:'USD',cost_status:'PAID',description:'Offline restoration'});await s.mutate('expenses',id,{},true);await s.restoreExpense(id);
+ let remoteRecord=null,calls=0;const remote={check:async()=>{},apply:async operation=>{calls++;if(remoteRecord&&operation.base_version!==remoteRecord.version)throw Error('STALE_DEPENDENT_VERSION');remoteRecord={id,kind:'expenses',version:(remoteRecord?.version||0)+1,data:{...remoteRecord?.data,...operation.changes},deleted_at:operation.action==='restore'?null:operation.deleted_at};return{record:structuredClone(remoteRecord),conflicts:[]};},pull:async()=>[remoteRecord]};const engine=new SyncEngine(s,remote);await engine.run();await engine.run();return{calls,queued:(await s.all('outbox')).length,record:await s.get('records',id),copies:(await s.all('records')).filter(r=>r.id===id).length};});
+ expect(result.calls).toBe(3);expect(result.queued).toBe(0);expect(result.copies).toBe(1);expect(result.record.deleted_at).toBeNull();expect(result.record.data.amount).toBe(10);
 });

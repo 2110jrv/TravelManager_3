@@ -53,14 +53,27 @@ export function days() {
   for (let time = Date.parse(`${TRIP.start}T12:00:00Z`); time <= Date.parse(`${TRIP.end}T12:00:00Z`); time += 86400000) result.push(new Date(time).toISOString().slice(0, 10));
   return result;
 }
-export function finance(events, expenses, budget = null, referenceRates = {}) {
+export function expensePhase(item){return item.phase || ((item.date || item.start || '').slice(0,10)<TRIP.start?'PRE_TRIP':'DURING_TRIP');}
+export function financialLedger(events,expenses){
+ const calendar=[...new Map(events.filter(e=>!e.deleted_at).map(e=>[e.id,e])).values()];
+ const eventPurchases=new Map(calendar.map(e=>[e.id,e.purchase_id]));
+ const rows=[...calendar.map(e=>({...e,amount:e.cost,calendar_event_id:e.id,origin:'Calendar'})),...expenses.filter(e=>!e.deleted_at).map(e=>({...e.data,id:e.id,origin:'Agenda'}))];
+ const groups=new Map();
+ for(const row of rows){
+  if(row.amount==null||!['PAID','ESTIMATED'].includes(row.cost_status))continue;
+  const purchase=row.purchase_id||eventPurchases.get(row.calendar_event_id);
+  const key=purchase?`PURCHASE:${purchase}`:row.calendar_event_id?`CAL:${row.calendar_event_id}`:`EXP:${row.expense_id||row.id}`;
+  const existing=groups.get(key),priority=(row.cost_status==='PAID'?2:0)+(row.origin==='Agenda'?1:0);
+  if(!existing||priority>existing.priority)groups.set(key,{...row,ledger_key:key,phase:expensePhase(row),priority});
+ }
+ return [...groups.values()];
+}
+export function finance(events, expenses, budget = null, referenceRates = {},phase=null) {
   let paid = 0, estimated = 0; const missing = [], by_currency={};
   const unique = [...new Map(events.filter(x => !x.deleted_at).map(x => [x.id, x])).values()];
   const audit=financialAudit(unique),financial_issues=audit.filter(row=>row.states.some(state=>!['OK','NON_FINANCIAL','DUPLICATE_PURCHASE'].includes(state)));
-  const seenPurchases=new Set(),by_category={};
-  for (const item of [...unique.map(x => ({ ...x, amount: x.cost })), ...expenses.filter(x => !x.deleted_at).map(x => ({ id: x.id, ...x.data }))]) {
-    if (item.amount == null || !item.cost_status) continue;
-    if(item.purchase_id){if(seenPurchases.has(item.purchase_id))continue;seenPurchases.add(item.purchase_id);}
+  const by_category={},ledger=financialLedger(unique,expenses).filter(row=>!phase||row.phase===phase);
+  for (const item of ledger) {
     const original=item.amount_original ?? item.amount,currency=item.currency_original ?? item.currency;
     const originalTotals=by_currency[currency]??={paid:0,estimated:0,projected:0};
     if(item.cost_status==='PAID')originalTotals.paid+=Number(original);
@@ -76,7 +89,7 @@ export function finance(events, expenses, budget = null, referenceRates = {}) {
     if (item.cost_status === 'PAID') {paid += Number(equivalent);totals.paid+=Number(equivalent);} else if (item.cost_status === 'ESTIMATED') {estimated += Number(equivalent);totals.estimated+=Number(equivalent);}
     totals.projected=totals.paid+totals.estimated;
   }
-  return { paid, estimated, projected: paid + estimated, budget, difference: budget == null ? null : budget - paid - estimated, missing,by_currency,by_category,audit,financial_issues,missing_costs:financial_issues.filter(row=>row.states.includes('MISSING_COST')),partial:missing.length>0||financial_issues.length>0 };
+  return { paid, estimated, projected: paid + estimated, budget, balance:budget==null?null:budget-paid,available:budget==null?null:Math.max(0,budget-paid-estimated),over_budget:budget==null?0:Math.max(0,paid+estimated-budget),difference: budget == null ? null : budget - paid - estimated,ledger, missing,by_currency,by_category,audit,financial_issues,missing_costs:financial_issues.filter(row=>row.states.includes('MISSING_COST')),partial:missing.length>0||financial_issues.length>0 };
 }
 export function financialAudit(events){
  const groups=new Map();for(const event of events.filter(e=>!e.deleted_at&&e.purchase_id)){const group=groups.get(event.purchase_id)||[];group.push(event);groups.set(event.purchase_id,group);}

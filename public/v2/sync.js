@@ -10,7 +10,7 @@ export class SupabaseRemote {
     if(status==='UNENROLLED')throw Error('AV2_DEVICE_ENROLLMENT_REQUIRED');
     if(status!=='ACTIVE')throw Error('AV2_DEVICE_REVOKED');
   }
-  apply(operation) { return this.rpc(operation.kind==='places_of_interest'?'av2_place_apply':'av2_sync_apply', { ...this.credentials(), p_operation: operation }); }
+  apply(operation) { return this.rpc(operation.action==='restore'&&operation.kind==='expenses'?'av2_expense_restore':operation.kind==='places_of_interest'?'av2_place_apply':'av2_sync_apply', { ...this.credentials(), p_operation: operation }); }
   async pull() {
     const result = [];
     let after = null;
@@ -35,11 +35,11 @@ export class SyncEngine {
   async perform() {
     try {
       await this.remote.check();
-      const queue = (await this.store.all('outbox')).sort((a,b) => (a.sequence || 0) - (b.sequence || 0));
+      const acknowledged=new Map();const queue = (await this.store.all('outbox')).sort((a,b) => (a.sequence || 0) - (b.sequence || 0));
       for (const operation of queue) {
         if(this.store.pinMode&&operation.actor_user!==this.store.activeUser?.id)continue;
         if(this.store.pinMode){await this.remote.check();if(operation.actor_user!==this.store.activeUser?.id)continue;operation.device_id=this.store.device;}
-        const result = await this.remote.apply(operation); await this.store.acknowledge(operation, result);
+        const predecessor=operation.kind==='expenses'?acknowledged.get(operation.record_id):null;if(predecessor){operation.base_version=predecessor.version;await this.store.put('outbox',operation);}const result = await this.remote.apply(operation); await this.store.acknowledge(operation, result);if(operation.kind==='expenses'&&result.record&&!(result.conflicts||[]).length)acknowledged.set(operation.record_id,result.record);else acknowledged.delete(operation.record_id);
       }
       await this.store.ingest(await this.remote.pull());
       if (this.remote.pullConflicts) await this.store.ingestConflicts(await this.remote.pullConflicts());

@@ -68,6 +68,12 @@ export class LocalStore {
     });
     return this.get('records', id);
   }
+  async restoreExpense(id){
+    if(this.pinMode&&!this.activeUser?.authorized)throw Error('Necesitamos verificar tu acceso.');
+    const old=await this.get('records',id);if(!old||old.kind!=='expenses'||!old.deleted_at)return;
+    const now=new Date().toISOString(),operation={id:crypto.randomUUID(),record_id:id,kind:'expenses',action:'restore',base_version:old.version,base:old.data,changes:{},deleted_at:null,device_id:this.device,actor_user:this.activeUser.id,installation_id:this.installation,created_at:now};
+    await this.transaction(['records','outbox','meta'],tx=>{tx.objectStore('records').put({...old,deleted_at:null,updated_at:now});const counter=tx.objectStore('meta').get('queue-sequence');counter.onsuccess=()=>{operation.sequence=(counter.result?.value||0)+1;tx.objectStore('meta').put({id:'queue-sequence',value:operation.sequence});tx.objectStore('outbox').put(operation);};});
+  }
   async acknowledge(operation, result) {
     await this.transaction(['records', 'outbox', 'conflicts'], tx => {
       tx.objectStore('outbox').delete(operation.id);
@@ -78,7 +84,7 @@ export class LocalStore {
           const record = structuredClone(result.record);
           if(result.deduplicated_from){tx.objectStore('records').delete(result.deduplicated_from);for(const item of pending){item.record_id=record.id;item.base=record.data;item.base_version=record.version;tx.objectStore('outbox').put(item);}}
           // Keep local edits made while a request was in flight visible until their own acknowledgement.
-          if (!record.deleted_at) for (const item of pending) { Object.assign(record.data, item.changes || {}); if (item.deleted_at) record.deleted_at = item.deleted_at; }
+          for (const item of pending) {if(item.action==='restore')record.deleted_at=null;if(!record.deleted_at){Object.assign(record.data,item.changes||{});if(item.deleted_at)record.deleted_at=item.deleted_at;}}
           tx.objectStore('records').put(record);
         }
         for (const conflict of result.conflicts || []) tx.objectStore('conflicts').put({ ...conflict, id: conflict.id || crypto.randomUUID(), record_id: operation.record_id, kind: operation.kind });

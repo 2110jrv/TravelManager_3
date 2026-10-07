@@ -74,3 +74,24 @@ test('financial integrity separates missing paid/pending costs from zero and non
 });
 test('all-day formatter never invents midnight or a military time',()=>{const e=normalizeEvent({id:'stay',summary:'Hotel',start:{date:'2026-10-21'},end:{date:'2026-10-24'}});assert.equal(formatEventTime(e),'Todo el día');assert.doesNotMatch(formatEventTime(e),/AM|PM|00:00/);});
 test('same instant uses each event zone and survives Europe daylight-saving transition',()=>{const instant='2026-10-25T06:50:00Z';assert.equal(formatEventTime({start:instant,timezone:'Europe/Zurich'}),'7:50 AM (07:50)');assert.equal(formatEventTime({start:instant,timezone:'America/Puerto_Rico'}),'2:50 AM (02:50)');});
+
+ test('linked actual expense settles Calendar estimate; repeat purchase events count once',()=>{
+ const events=Array.from({length:4},(_,i)=>({id:'cal'+i,cost:20,currency:'USD',cost_status:'ESTIMATED',purchase_id:'joint'}));
+ const expense={id:'expense',data:{calendar_event_id:'cal0',amount:12,currency:'USD',cost_status:'PAID'}};
+ const f=finance(events,[expense],100);assert.equal(f.paid,12);assert.equal(f.estimated,0);assert.equal(f.ledger.length,1);assert.equal(f.available,88);
+ assert.equal(finance(events,[{...expense,data:{...expense.data,amount:10}}]).paid,10);
+ assert.equal(finance(events,[{...expense,deleted_at:'2026-10-01'}]).estimated,20);
+ assert.equal(finance(events,[expense]).paid,12);
+ });
+ test('Calendar paid and linked auxiliary expense never double count; independent expenses remain separate',()=>{
+ const cal={id:'cal',cost:10,currency:'USD',cost_status:'PAID'};
+ const expense={id:'exp',data:{calendar_event_id:'cal',amount:12,currency:'USD',cost_status:'PAID'}};
+ const independent={id:'ind',data:{amount:5,currency:'USD',cost_status:'PAID'}};
+ assert.equal(finance([cal],[expense,independent]).paid,17);
+ assert.equal(finance([cal],[]).paid,10);
+ });
+ test('free budget is zero when over budget and phase defaults include both phases',()=>{
+ const rows=[{id:'pre',data:{amount:10,currency:'USD',cost_status:'PAID',date:'2026-10-19'}},{id:'trip',data:{amount:12,currency:'USD',cost_status:'ESTIMATED',date:'2026-10-20'}}];
+ const f=finance([],rows,20);assert.equal(f.available,0);assert.equal(f.over_budget,2);assert.equal(f.balance,10);
+ assert.equal(finance([],rows,20,{},'PRE_TRIP').paid,10);assert.equal(finance([],rows,20,{},'DURING_TRIP').estimated,12);
+ });

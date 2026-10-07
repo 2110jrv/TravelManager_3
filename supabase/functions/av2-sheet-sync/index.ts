@@ -1,3 +1,5 @@
+import {FrankfurterProvider} from '../../../public/v2/fx-reference.js';
+import {syncExpenses,expenseValues} from './expenses.js';
 import {createClient} from 'npm:@supabase/supabase-js@2.45.4';
 import {hashPin,equalSecret,randomSecret} from '../av2-pin-auth/crypto.js';
 import {syncPlaces,placeValues} from './places.js';
@@ -40,7 +42,14 @@ Deno.serve(async req=>{
    placesResult=await syncPlaces({rows:b.places,deleted:b.deleted_places||[],repository,resolve,assign,actor:b.places_actor==='Jenny'?'Jenny':'Jonathan',origin:b.places_origin==='Google Sheet'?'Google Sheet':'ChatGPT/Admin',externalActor:typeof b.places_external_actor==='string'?b.places_external_actor.slice(0,250):null});
    placesResult.places=placesResult.places.map((p:any)=>({code:p.poi_code,data:p,values:placeValues(p,users)}));
   }
+  let expensesResult:any=null;if(b.expenses!==undefined){
+   const repository={list:async()=>{const rows=await checked(admin.from('av2_records').select('*').eq('trip_id',trip).eq('kind','expenses').order('created_at').limit(501));if(rows.length>500)throw Error('EXPENSES_LIMIT');return rows;},apply:async(v:any)=>checked(admin.rpc('av2_sheet_expense_apply',{p_trip:trip,p_code:v.code,p_row_key:v.rowKey,p_changes:v.changes,p_base:v.base,p_actor:v.actor,p_origin:v.origin,p_external_actor:v.externalActor}))};
+   const provider=new FrankfurterProvider();const snapshot=async(data:any,previous:any)=>{const amount=Number(data.amount),currency=data.currency,unchanged=previous.cost_status==='PAID'&&data.cost_status==='PAID'&&Number(previous.amount_original??previous.amount)===amount&&(previous.currency_original??previous.currency)===currency;if(unchanged)return{};let reference:any=currency==='USD'?{rate:1,rate_date:new Date().toISOString().slice(0,10),source:'identity'}:null;
+    if(currency!=='USD')try{reference=await provider.get(currency,'USD');}catch{const known=(await repository.list()).map((r:any)=>r.data).filter((d:any)=>d.currency_original===currency&&d.fx_rate_to_base>0).sort((a:any,c:any)=>String(c.rate_date).localeCompare(String(a.rate_date)))[0];if(known)reference={rate:known.fx_rate_to_base,rate_date:known.rate_date,source:(known.rate_source||'Referencia')+' · guardada'};}
+    return{amount_original:amount,currency_original:currency,fx_rate_to_base:reference?.rate??null,amount_base:reference?amount*reference.rate:null,rate_date:reference?.rate_date??null,rate_source:reference?.source??null};};
+   expensesResult=await syncExpenses({rows:b.expenses,deleted:b.deleted_expenses||[],repository,snapshot,actor:b.places_actor==='Jenny'?'Jenny':'Jonathan',origin:b.places_origin==='Google Sheet'?'Google Sheet':'ChatGPT/Admin',externalActor:b.places_external_actor||null});expensesResult.expenses=expensesResult.expenses.map((record:any)=>({code:record.data.expense_id,record,values:expenseValues(record,users)}));
+  }
   const audit=await checked(admin.from('av2_audit_log').select('*').eq('trip_id',trip).gt('id',Number(b.audit_cursor)||0).order('id').limit(200));
-  return json({devices:devices.map((d:any)=>({...d,user:users.find((u:any)=>u.id===d.user_id)?.name})),audit:audit.map((a:any)=>({...a,user:a.origin!=='Agenda'&&a.external_actor?a.external_actor:users.find((u:any)=>u.id===a.actor_user)?.name||'',entity_id:a.poi_code||a.entity_id,summary:a.entity==='places_of_interest'?'['+a.origin+'] '+a.summary:a.summary})),pin_configured:configured.map((u:any)=>({name:u.name,configured:!!u.pin_hash})),...(placesResult?{places_result:placesResult}:{})});
+  return json({devices:devices.map((d:any)=>({...d,user:users.find((u:any)=>u.id===d.user_id)?.name})),audit:audit.map((a:any)=>({...a,user:a.origin!=='Agenda'&&a.external_actor?a.external_actor:users.find((u:any)=>u.id===a.actor_user)?.name||'',entity_id:a.poi_code||a.entity_id,summary:a.entity==='places_of_interest'?'['+a.origin+'] '+a.summary:a.summary})),pin_configured:configured.map((u:any)=>({name:u.name,configured:!!u.pin_hash})),...(placesResult?{places_result:placesResult}:{}),...(expensesResult?{expenses_result:expensesResult}:{})});
  }catch{return json({error:'SHEET_SYNC_UNAVAILABLE'},503);}
 });
