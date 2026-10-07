@@ -76,6 +76,7 @@ export class LocalStore {
         const pending = request.result.filter(x => x.record_id === operation.record_id).sort((a,b) => (a.sequence || 0) - (b.sequence || 0));
         if (result.record) {
           const record = structuredClone(result.record);
+          if(result.deduplicated_from){tx.objectStore('records').delete(result.deduplicated_from);for(const item of pending){item.record_id=record.id;item.base=record.data;item.base_version=record.version;tx.objectStore('outbox').put(item);}}
           // Keep local edits made while a request was in flight visible until their own acknowledgement.
           if (!record.deleted_at) for (const item of pending) { Object.assign(record.data, item.changes || {}); if (item.deleted_at) record.deleted_at = item.deleted_at; }
           tx.objectStore('records').put(record);

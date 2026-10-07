@@ -51,7 +51,7 @@ export class GoogleSource {
       const folder = folders.shift(); if (visited.has(folder)) continue; visited.add(folder);
       let page = null;
       do {
-        const params = new URLSearchParams({ q: `'${folder}' in parents and trashed = false`, fields: 'nextPageToken,files(id,name,mimeType,size,webViewLink,modifiedTime)', pageSize: '1000' });
+        const params = new URLSearchParams({ q: `'${folder}' in parents and trashed = false`, fields: 'nextPageToken,files(id,name,mimeType,size,webViewLink,modifiedTime,version,md5Checksum)', pageSize: '1000' });
         if (page) params.set('pageToken', page);
         const data = await (await this.api(`drive/v3/files?${params}`)).json();
         for (const file of data.files || []) { if (file.mimeType === 'application/vnd.google-apps.folder') folders.push(file.id); else result.push(file); }
@@ -62,7 +62,7 @@ export class GoogleSource {
   }
   async download(file) {
     await this.verifyInTrip(file.id);
-    if (file.mimeType.startsWith('application/vnd.google-apps.')) throw Error('Exporta este documento como PDF antes de prepararlo offline.');
+    if (file.mimeType.startsWith('application/vnd.google-apps.')) return (await this.api(`drive/v3/files/${encodeURIComponent(file.id)}/export?mimeType=application%2Fpdf`)).blob();
     return (await this.api(`drive/v3/files/${encodeURIComponent(file.id)}?alt=media`)).blob();
   }
   async uploadReceipt(blob, name, operationId) {

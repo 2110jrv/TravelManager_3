@@ -5,4 +5,4 @@ export const TRIP = Object.freeze({
   calendarId: 'eee85f5d7c0e07fc9a8174d8a3bc640a9b0327901c9f09059d196c1058f5d346@group.calendar.google.com',
   drive: { root: '1jY6BLvJDy4PqWQ6iRqztcT-vOmUvBkKI', trip: '1uoM3Fti_Cr8nvrPGs_pU7ojs6DJowL98', documents: '1B3k8rHiBy4DhVSU3f9Ik3e4sXbWWazXv', receipts: '1O2d0I_ynIFOMCgFCnJPU0zCpt1KEQyiT', app: '1gqsdkC5i7a_ytGvBwYwMOEDM5NJ_fMHz', exports: '1itHjXNdzdO3ap4AfP0WgJbxZIgQotyTb' }
 });
-export const KINDS = ['expenses', 'budgets', 'document_links', 'receipts', 'categories', 'exchange_rates', 'app_settings', 'notes', 'purchases'];
+export const KINDS = ['expenses', 'budgets', 'document_links', 'receipts', 'categories', 'exchange_rates', 'app_settings', 'notes', 'purchases', 'places_of_interest'];

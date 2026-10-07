@@ -19,7 +19,7 @@ Deno.serve(async req=>{
   if(body.action==='resolve_locations'){
    if(!Array.isArray(body.inputs)||body.inputs.length>16||body.inputs.some((input:unknown)=>typeof input!=='string'||input.length>4096||!allowedMapsUrl(input)))return json({error:'INVALID_MAP_INPUT'},400);
    const admin=createClient(url,service,{auth:{persistSession:false}}),cache=()=>admin.from('av2_map_locations');
-   const repository={get:async(input:string)=>{const{data,error}=await cache().select('latitude,longitude,display_name').eq('trip_id',body.p_trip).eq('source_url',input).maybeSingle();if(error)throw Error('MAP_CACHE_UNAVAILABLE');return data?{input,point:{lat:data.latitude,lng:data.longitude},name:data.display_name,source:'google-maps'}:null;},save:async(value:any)=>{const{error}=await cache().upsert({trip_id:body.p_trip,source_url:value.input,latitude:value.point.lat,longitude:value.point.lng,display_name:value.name});if(error)throw Error('MAP_CACHE_UNAVAILABLE');}};
+   const repository={get:async(input:string)=>{const{data,error}=await cache().select('latitude,longitude,display_name,place_id').eq('trip_id',body.p_trip).eq('source_url',input).maybeSingle();if(error)throw Error('MAP_CACHE_UNAVAILABLE');return data?{input,point:{lat:data.latitude,lng:data.longitude},name:data.display_name,place_id:data.place_id,source:'google-maps'}:null;},save:async(value:any)=>{const{error}=await cache().upsert({trip_id:body.p_trip,source_url:value.input,latitude:value.point.lat,longitude:value.point.lng,display_name:value.name,place_id:value.place_id||null});if(error)throw Error('MAP_CACHE_UNAVAILABLE');}};
    try{return json({locations:await resolveLocations(body.inputs,repository)});}catch{return json({error:'MAP_LOCATIONS_UNAVAILABLE'},503);}
   }
   let providerUser=user;

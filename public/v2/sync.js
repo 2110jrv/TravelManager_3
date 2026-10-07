@@ -10,14 +10,16 @@ export class SupabaseRemote {
     if(status==='UNENROLLED')throw Error('AV2_DEVICE_ENROLLMENT_REQUIRED');
     if(status!=='ACTIVE')throw Error('AV2_DEVICE_REVOKED');
   }
-  apply(operation) { return this.rpc('av2_sync_apply', { ...this.credentials(), p_operation: operation }); }
+  apply(operation) { return this.rpc(operation.kind==='places_of_interest'?'av2_place_apply':'av2_sync_apply', { ...this.credentials(), p_operation: operation }); }
   async pull() {
     const result = [];
     let after = null;
     for (;;) {
       const data = await this.rpc('av2_sync_pull', { ...this.credentials(), p_after: after });
-      result.push(...data); if (data.length < 500) return result; after = data.at(-1).id;
+      result.push(...data); if (data.length < 500) break; after = data.at(-1).id;
     }
+    if(this.pinAccess){after=null;for(;;){const data=await this.rpc('av2_sync_places',{...this.credentials(),p_after:after})||[];result.push(...data);if(data.length<500)break;after=data.at(-1).id;}}
+    return result;
   }
   async pullConflicts() {
     const result=[];let after=null;
