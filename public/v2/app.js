@@ -350,6 +350,8 @@ async function refreshRootTransfers(){
  finally{refreshingTransfers=false;}
 }
 setInterval(()=>{if(document.visibilityState==='visible'&&location.hash==='#devices')refreshRootTransfers();},5000);
+// Sheet API changes arrive independently of Calendar; pull while this PWA is visible.
+setInterval(()=>{if(PIN_MODE&&document.visibilityState==='visible'&&store.activeUser?.authorized)scheduleSync();},15000);
 async function refreshDeviceIdentity(){
  if(PIN_MODE){if(!navigator.onLine||!store.activeUser?.authorized||!pinAccess)return;try{await pinAccess.validate();}catch(error){if(error.message!=='ACCESS_UNAVAILABLE'){pinScreen.reverify=true;await render();}}return;}
  if(!navigator.onLine||!authSession||verifyingDevice)return;
