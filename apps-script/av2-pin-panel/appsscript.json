@@ -1,0 +1,6 @@
+{
+ "timeZone":"America/Puerto_Rico",
+ "runtimeVersion":"V8",
+ "exceptionLogging":"NONE",
+ "oauthScopes":["https://www.googleapis.com/auth/spreadsheets","https://www.googleapis.com/auth/script.external_request","https://www.googleapis.com/auth/script.scriptapp"]
+}

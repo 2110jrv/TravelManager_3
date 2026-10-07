@@ -21,7 +21,8 @@ createServer(async (req, res) => {
     let path = decodeURIComponent(url.pathname); if (path.endsWith('/')) path += 'index.html';
     const file = resolve(publicRoot, `.${path}`);
     if (!file.startsWith(publicRoot + sep)) { res.writeHead(403).end(); return; }
-    const body = await readFile(file);
+    let body = await readFile(file);
+    if(path==='/v2/index.html'&&process.env.AV2_TEST_FIXTURE==='1')body=Buffer.from(body.toString('utf8').replace('<html lang="es">','<html lang="es" data-av2-test-legacy-auth="true">'));
     res.writeHead(200, { 'Content-Type':mime[extname(file)] || 'application/octet-stream','Cache-Control':'no-cache','X-Content-Type-Options':'nosniff' }).end(body);
   } catch { res.writeHead(404).end('Not found'); }
 }).listen(port, '127.0.0.1', () => console.log(`Agenda Viajera 2.0: http://127.0.0.1:${port}/v2/`));

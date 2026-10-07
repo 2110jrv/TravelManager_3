@@ -1,0 +1,4 @@
+[functions.av2-pin-auth]
+verify_jwt = false
+[functions.av2-sheet-sync]
+verify_jwt = false

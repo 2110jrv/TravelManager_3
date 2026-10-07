@@ -13,12 +13,15 @@ export class LocalStore {
       const meta=tx.objectStore('meta'),identity=meta.get('device'),known=meta.get('device-identity'),secret=meta.get('device-token'),installation=meta.get('installation');
       installation.onsuccess=()=>{
         this.device=identity.result?.value || installation.result?.value?.device_id || crypto.randomUUID();
-        this.installation=installation.result?.value?.installation_id || this.device;
+        let backup;try{backup=JSON.parse(localStorage.getItem('av2.installation')||'null');}catch{}
+        this.installation=installation.result?.value?.installation_id || backup?.installation_id || this.device;
+        try{localStorage.setItem('av2.installation',JSON.stringify({installation_id:this.installation}));}catch{/* IndexedDB remains the primary identity store. */}
         meta.put({id:'device',value:this.device});
         meta.put({id:'installation',value:{installation_id:this.installation,device_id:this.device}});
       };
       secret.onsuccess=()=>{if(!secret.result&&known.result?.value){this.deviceToken=null;return;}this.deviceToken=secret.result?.value || Array.from(crypto.getRandomValues(new Uint8Array(32)),x=>x.toString(16).padStart(2,'0')).join('');if(!secret.result) meta.put({id:'device-token',value:this.deviceToken});};
     });
+    this.activeUser=(await this.get('meta','active-user'))?.value||null;
     return this;
   }
   async bindDevice(device) {
@@ -44,6 +47,7 @@ export class LocalStore {
   read(store, query) { return new Promise((resolve, reject) => { const request = query(this.db.transaction(store).objectStore(store)); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); }); }
   put(store, value) { return this.transaction([store], tx => tx.objectStore(store).put(value)); }
   async mutate(kind, id, changes, deleted = false, blob = null, editBase = null) {
+    if(this.pinMode&&!this.activeUser?.authorized)throw Error('Necesitamos verificar tu acceso.');
     if (!KINDS.includes(kind)) throw Error('Tipo no permitido');
     const now = new Date().toISOString(), operationId = crypto.randomUUID();
     await this.transaction(['records', 'outbox', 'blobs', 'meta'], tx => {
@@ -55,7 +59,7 @@ export class LocalStore {
         const delta=Object.fromEntries(Object.entries(changes).filter(([field,value])=>JSON.stringify(base?.data?.[field]??null)!==JSON.stringify(value??null)));
         const record = { id, trip_id: TRIP.id, kind, version: old?.version || 0, created_at: old?.created_at || now, updated_at: now, updated_by_device: this.device, deleted_at: deleted ? now : null, data: { ...old?.data, ...delta } };
         if(old&&!deleted&&!Object.keys(delta).length)return;
-        const operation = { id: operationId, record_id: id, kind, base_version: base?.version || 0, base: base?.data || {}, changes:delta, deleted_at: record.deleted_at, device_id: this.device, created_at: now };
+        const operation = { id: operationId, record_id: id, kind, base_version: base?.version || 0, base: base?.data || {}, changes:delta, deleted_at: record.deleted_at, device_id: this.device, ...(this.pinMode?{actor_user:this.activeUser?.id,installation_id:this.installation}:{}), created_at: now };
         tx.objectStore('records').put(record);
         const counter = tx.objectStore('meta').get('queue-sequence');
         counter.onsuccess = () => { operation.sequence = (counter.result?.value || 0) + 1; tx.objectStore('meta').put({id:'queue-sequence',value:operation.sequence}); tx.objectStore('outbox').put(operation); };
@@ -91,10 +95,11 @@ export class LocalStore {
   }
   async purge() { await this.transaction(STORES, tx => { for (const name of STORES) tx.objectStore(name).clear(); }); }
   async resolve(conflict, choice) {
+    if(this.pinMode&&!this.activeUser?.authorized)throw Error('Necesitamos verificar tu acceso.');
     await this.transaction(['outbox', 'conflicts', 'meta'], tx => {
       const counter=tx.objectStore('meta').get('queue-sequence');
       counter.onsuccess=()=>{ const sequence=(counter.result?.value || 0)+1;tx.objectStore('meta').put({id:'queue-sequence',value:sequence});
-        tx.objectStore('outbox').put({ id: crypto.randomUUID(), action: 'resolve', conflict_id: conflict.id, record_id: conflict.record_id, choice, device_id: this.device, created_at: new Date().toISOString(),sequence }); };
+        tx.objectStore('outbox').put({ id: crypto.randomUUID(), action: 'resolve', conflict_id: conflict.id, record_id: conflict.record_id, choice, device_id: this.device, ...(this.pinMode?{actor_user:this.activeUser?.id,installation_id:this.installation}:{}), created_at: new Date().toISOString(),sequence }); };
       tx.objectStore('conflicts').put({ ...conflict, resolving: true });
     });
   }

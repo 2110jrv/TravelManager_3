@@ -1,0 +1,34 @@
+import{test,expect,chromium}from'@playwright/test';import{readFileSync,mkdtempSync}from'node:fs';import{resolve}from'node:path';import{TRIP}from'../public/v2/config.js';
+const trip='7c0801ee-07b1-4d86-95d7-202610200001',uid='10000000-0000-4000-8000-000000000010',people={Jonathan:'20000000-0000-4000-8000-000000000001',Jenny:'20000000-0000-4000-8000-000000000002'};
+async function setup(context,state={}){
+ await context.route(/\/v2\/(?:index\.html)?(?:\?.*)?$/,r=>r.fulfill({contentType:'text/html',body:readFileSync(new URL('../public/v2/index.html',import.meta.url),'utf8')}));
+ await context.route('https://api.frankfurter.dev/**',r=>r.abort());
+ await context.route('https://cslludzuejkhsydqiabx.supabase.co/**',async r=>{
+  const name=new URL(r.request().url()).pathname.split('/').at(-1),a=r.request().postDataJSON()||{};let body=null,status=200;
+  if(name==='user')body={id:uid,user_metadata:{av2_technical:true}};
+  if(name==='av2-pin-auth'){
+   if(a.pin==='001234')state.name='Jonathan';else if(a.pin==='005678')state.name='Jenny';else{status=403;body={error:state.rate?'PIN_RATE_LIMIT':'PIN_INVALID'};}
+   if(status===200){state.installation=a.installation_id;state.device=people[state.name];const exp=Math.floor(Date.now()/1000)+3600,jwt=[Buffer.from('{"alg":"HS256"}').toString('base64url'),Buffer.from(JSON.stringify({sub:uid,exp,iat:exp-3600,role:'authenticated'})).toString('base64url'),'qa'].join('.');body={user:{id:state.device,name:state.name,pin_version:1},device:{id:state.device,trip_id:trip,name:'PC Windows · Chrome',installation_id:state.installation},session:{access_token:jwt,refresh_token:'qa-technical-refresh'}};}
+  }
+  if(name==='av2_pin_validate')body=state.invalid?{error:state.invalid}:{user:{id:state.device,name:state.name,pin_version:1},device:{id:state.device,trip_id:trip,name:'PC Windows · Chrome',installation_id:state.installation}};
+  if(name==='av2_trip_configuration')body={...TRIP};
+  if(name==='av2_sync_pull'||name==='av2_sync_conflicts')body=[];
+  if(name==='av2_sync_apply'){state.uploads=(state.uploads||0)+1;body={record:{id:a.p_operation.record_id,kind:a.p_operation.kind,data:a.p_operation.changes,version:1},conflicts:[]};}
+  if(name==='av2-google-token'){status=503;body={error:'GOOGLE_BACKEND_UNAVAILABLE'};}
+  await r.fulfill({status,contentType:'application/json',body:JSON.stringify(body)});
+ });return state;
+}
+async function login(page,pin){await page.getByLabel('PIN',{exact:true}).fill(pin);await page.getByRole('button',{name:'Entrar',exact:true}).click();}
+test('PIN-only fresh browser, incorrect PIN, two users, switch locks view, no Google or ROOT UI',async({page,context})=>{
+ const state=await setup(context);await page.goto('/v2/');await expect(page.getByRole('heading',{name:'Agenda Viajera',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Conectar Google'})).toHaveCount(0);await expect(page.locator('nav')).toBeHidden();
+ await login(page,'999999');await expect(page.locator('#pin-result')).toContainText('No pudimos verificar');await expect(page.getByLabel('PIN',{exact:true})).toHaveValue('');await login(page,'001234');await expect(page.locator('#active-user-header')).toContainText('Jonathan');const install=state.installation;
+ await page.goto('/v2/#devices');await expect(page.locator('#app')).not.toContainText('ROOT');await expect(page.locator('#app')).not.toContainText('Transferir');await page.getByRole('button',{name:'Cambiar usuario'}).click();await expect(page.getByLabel('PIN',{exact:true})).toBeVisible();await expect(page.locator('nav')).toBeHidden();await expect(page.locator('#active-user-header')).not.toContainText('Jonathan');await login(page,'005678');await expect(page.locator('#active-user-header')).toContainText('Jenny');expect(state.installation).toBe(install);
+});
+test('reconnect validates before queue upload and revocation conserves cached data and outbox',async({page,context})=>{
+ const state=await setup(context);await page.goto('/v2/');await login(page,'001234');await expect(page.locator('#active-user-header')).toContainText('Jonathan');
+ await page.evaluate(async()=>{const{LocalStore}=await import('/v2/store.js');const s=await new LocalStore().open();s.pinMode=true;await s.mutate('notes',crypto.randomUUID(),{text:'offline note'});});state.invalid='PIN_CHANGED';await page.evaluate(()=>dispatchEvent(new Event('online')));await expect(page.getByLabel('PIN',{exact:true})).toBeVisible();expect(state.uploads||0).toBe(0);expect(await page.evaluate(async()=>{const{LocalStore}=await import('/v2/store.js');const s=await new LocalStore().open();return(await s.all('outbox')).length;})).toBe(1);
+});
+test('Chromium full process restart retains installation, active user and offline data',async()=>{
+ const profile=mkdtempSync(resolve('.av2-private/pin-chromium-'));let context=await chromium.launchPersistentContext(profile,{headless:true});let state=await setup(context),page=await context.newPage();await page.goto('http://127.0.0.1:5005/v2/');await login(page,'001234');await expect(page.locator('#active-user-header')).toContainText('Jonathan');const install=state.installation;await page.evaluate(async()=>{const{LocalStore}=await import('/v2/store.js');const s=await new LocalStore().open();await s.put('events',{id:'qa-cached-event',title:'Pompeya QA',start:'2026-10-20T09:00:00+02:00',end:'2026-10-20T13:00:00+02:00',description:'',coordinates:{lat:40.749,lng:14.485}});await s.put('meta',{id:'drive-files',value:[{id:'qa-document',name:'Documento offline QA',mimeType:'application/pdf'}]});await s.put('records',{id:crypto.randomUUID(),kind:'expenses',data:{amount:1,currency:'USD',cost_status:'PAID'},version:1});});await page.evaluate(()=>navigator.serviceWorker.ready);await expect.poll(()=>page.evaluate(()=>!!navigator.serviceWorker.controller)).toBe(true);await context.close();
+ context=await chromium.launchPersistentContext(profile,{headless:true});await context.setOffline(true);page=await context.newPage();await page.goto('http://127.0.0.1:5005/v2/#devices');await expect(page.locator('#active-user-header')).toContainText('Jonathan');expect(await page.evaluate(async()=>{const{LocalStore}=await import('/v2/store.js');return(await new LocalStore().open()).installation;})).toBe(install);await expect(page.locator('#connection')).toContainText('Sin conexión');await page.goto('http://127.0.0.1:5005/v2/#itinerary');await expect(page.locator('#app')).toContainText('Pompeya QA');await page.goto('http://127.0.0.1:5005/v2/#budget');await expect(page.locator('.paid-stat strong')).toBeVisible();await page.goto('http://127.0.0.1:5005/v2/#map');await expect(page.locator('#app')).toContainText('1 pins');await page.goto('http://127.0.0.1:5005/v2/#documents');await expect(page.locator('#app')).toContainText('Documento offline QA');await context.close();
+});
