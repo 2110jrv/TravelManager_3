@@ -367,7 +367,7 @@ async function startRemote(){
 if(PIN_MODE){
  client=createClient('https://cslludzuejkhsydqiabx.supabase.co','sb_publishable_8k8xhMZtkay30ZB45aPjGw_4u69Dp0U',{auth:{storageKey:'av2.pin.auth',persistSession:true,autoRefreshToken:true,detectSessionInUrl:false}});
  pinAccess=new PinAccess(store,client);remote=new SupabaseRemote(client,store.device,store.deviceToken);remote.pinAccess=pinAccess;
- const backend=new GoogleProviderBackend(client,()=>remote.credentials());mapUx.resolve=async inputs=>(await backend.call('resolve_locations',{inputs})).locations;const locationCache=new LocationCache(async inputs=>(await backend.call('resolve_locations',{inputs})).locations);
+ const backend=new GoogleProviderBackend(client,()=>remote.credentials());mapUx.resolve=async inputs=>(await backend.call('resolve_locations',{inputs,details:true})).locations;const locationCache=new LocationCache(async inputs=>(await backend.call('resolve_locations',{inputs})).locations);
  googleAuthorization=new GoogleAuthorization(store,backend,state=>{googleState=state;updateConnection();});
  google=new GoogleSource(()=>googleAuthorization.token(),fetch,()=>remote.check(),token=>googleAuthorization.recover(token),local=>locationCache.refresh(local));sync=new SyncEngine(store,remote,google);
  if(navigator.onLine&&store.activeUser?.authorized){try{await pinAccess.validate();remote.device=store.device;{const config=await remote.rpc('av2_trip_configuration',remote.credentials());if(!Object.isFrozen(TRIP))Object.assign(TRIP,config);if(!days().includes(selectedDay))selectedDay=TRIP.start;}await store.put('meta',{id:'trip-config',value:{...TRIP}});}catch(error){if(error.message!=='ACCESS_UNAVAILABLE')pinScreen.reverify=true;}}
