@@ -19,6 +19,11 @@ async function setup(context,state={}){
  });return state;
 }
 async function login(page,pin){await page.getByLabel('PIN',{exact:true}).fill(pin);await page.getByRole('button',{name:'Entrar',exact:true}).click();}
+test('sanitized staging starts on the real trip first day after PIN configuration loads',async({page,context})=>{
+ await setup(context);await context.route(/\/v2\/(?:index\.html)?$/,r=>r.fulfill({contentType:'text/html',body:readFileSync(new URL('../public/v2/index.html',import.meta.url),'utf8').replace('<html lang="es">','<html lang="es" data-av2-staging="true">')}));
+ await context.route('**/v2/config.js',r=>r.fulfill({contentType:'text/javascript',body:`export const TRIP=${JSON.stringify({id:trip,name:'Agenda Viajera',start:null,end:null,timezone:'UTC',travelers:[],currency:'USD',calendarId:'',drive:{}})};export const KINDS=['expenses','budgets','document_links','receipts','categories','exchange_rates','app_settings','notes','purchases'];`}));
+ await page.goto('/v2/');await login(page,'001234');await expect(page.locator('#active-user-header')).toContainText('Jonathan');await page.evaluate(async()=>{const{LocalStore}=await import('/v2/store.js');await(await new LocalStore().open()).put('events',{id:'staging-first-day',title:'Primer día real',start:'2026-10-20T09:00:00+02:00',end:'2026-10-20T10:00:00+02:00',description:''});});await page.goto('/v2/#itinerary');await expect(page.locator('#app')).toContainText('Primer día real');
+});
 test('PIN-only fresh browser, incorrect PIN, two users, switch locks view, no Google or ROOT UI',async({page,context})=>{
  const state=await setup(context);await page.goto('/v2/');await expect(page.getByRole('heading',{name:'Agenda Viajera',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Conectar Google'})).toHaveCount(0);await expect(page.locator('nav')).toBeHidden();
  await login(page,'999999');await expect(page.locator('#pin-result')).toContainText('No pudimos verificar');await expect(page.getByLabel('PIN',{exact:true})).toHaveValue('');await login(page,'001234');await expect(page.locator('#active-user-header')).toContainText('Jonathan');const install=state.installation;
