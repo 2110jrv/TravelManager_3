@@ -16,7 +16,7 @@ test('mobile shell, real Calendar snapshot, expense receipt, persistence and off
   }
   await page.goto('/v2/#expense/new'); await page.getByLabel('Descripción',{exact:true}).fill('Cena offline'); await page.getByLabel('Monto',{exact:true}).fill('25');
   await page.getByLabel('Foto o archivo de recibo').setInputFiles({name:'receipt.png',mimeType:'image/png',buffer:Buffer.from('receipt')});
-  await page.getByRole('button',{name:'Guardar gasto'}).click(); await expect(page.getByRole('heading',{name:'Cena offline'})).toBeVisible();
+  await page.getByRole('button',{name:'Guardar gasto'}).click(); await expect(page.getByRole('heading',{name:'Cena offline'})).toBeVisible(); await page.getByRole('link').filter({has:page.getByRole('heading',{name:'Cena offline'})}).click();await page.getByText('Más detalles',{exact:true}).click();await expect(page.getByText(/Recibo: receipt.png/)).toBeVisible();await expect(page.getByRole('button',{name:'Quitar recibo del gasto'})).toBeVisible();await page.goto('/v2/#expenses');
   await context.setOffline(true); await page.reload(); await expect(page.getByRole('heading',{name:'Cena offline'})).toBeVisible();
   await page.locator('nav a[href="#settings"]').click();await page.getByRole('link',{name:'Presupuesto',exact:true}).click();
   await expect.poll(async()=>Number((await page.locator('.stat strong').first().innerText()).replace(/[^\d.-]/g,''))).toBeCloseTo(baseline+25);
