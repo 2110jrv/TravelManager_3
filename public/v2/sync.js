@@ -10,7 +10,7 @@ export class SupabaseRemote {
     if(status==='UNENROLLED')throw Error('AV2_DEVICE_ENROLLMENT_REQUIRED');
     if(status!=='ACTIVE')throw Error('AV2_DEVICE_REVOKED');
   }
-  apply(operation) { return this.rpc(operation.action==='restore'&&operation.kind==='expenses'?'av2_expense_restore':operation.kind==='places_of_interest'?'av2_place_apply':'av2_sync_apply', { ...this.credentials(), p_operation: operation }); }
+  apply(operation) { return this.rpc(operation.action==='restore'&&operation.kind==='expenses'?'av2_expense_restore':operation.kind==='day_pin_schedule'?'av2_day_pin_apply':operation.kind==='places_of_interest'?'av2_place_apply':'av2_sync_apply', { ...this.credentials(), p_operation: operation }); }
   async pull() {
     const result = [];
     let after = null;
@@ -19,6 +19,7 @@ export class SupabaseRemote {
       result.push(...data); if (data.length < 500) break; after = data.at(-1).id;
     }
     if(this.pinAccess){after=null;for(;;){const data=await this.rpc('av2_sync_places',{...this.credentials(),p_after:after})||[];result.push(...data);if(data.length<500)break;after=data.at(-1).id;}}
+    if(this.pinAccess){const access=await this.rpc('av2_schedule_access',this.credentials());await this.pinAccess.store.put('meta',{id:'schedule-access',value:access});after=null;for(;;){const data=await this.rpc('av2_sync_day_pins',{...this.credentials(),p_after:after})||[];result.push(...data);if(data.length<500)break;after=data.at(-1).id;}}
     return result;
   }
   async pullConflicts() {
@@ -39,7 +40,7 @@ export class SyncEngine {
       for (const operation of queue) {
         if(this.store.pinMode&&operation.actor_user!==this.store.activeUser?.id)continue;
         if(this.store.pinMode){await this.remote.check();if(operation.actor_user!==this.store.activeUser?.id)continue;operation.device_id=this.store.device;}
-        const predecessor=operation.kind==='expenses'?acknowledged.get(operation.record_id):null;if(predecessor){operation.base_version=predecessor.version;await this.store.put('outbox',operation);}const result = await this.remote.apply(operation); await this.store.acknowledge(operation, result);if(operation.kind==='expenses'&&result.record&&!(result.conflicts||[]).length)acknowledged.set(operation.record_id,result.record);else acknowledged.delete(operation.record_id);
+        const predecessor=['expenses','day_pin_schedule'].includes(operation.kind)?acknowledged.get(operation.record_id):null;if(predecessor){operation.base_version=predecessor.version;await this.store.put('outbox',operation);}const result = await this.remote.apply(operation); await this.store.acknowledge(operation, result);if(['expenses','day_pin_schedule'].includes(operation.kind)&&result.record&&!(result.conflicts||[]).length)acknowledged.set(operation.record_id,result.record);else acknowledged.delete(operation.record_id);
       }
       await this.store.ingest(await this.remote.pull());
       if (this.remote.pullConflicts) await this.store.ingestConflicts(await this.remote.pullConflicts());
