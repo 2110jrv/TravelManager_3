@@ -27,7 +27,7 @@ export function normalizeEvent(raw, colors = {}, labels = {}) {
   const timezone=raw.start?.timeZone || raw.end?.timeZone || raw.calendarTimezone || null;
   return { id: raw.id, title: raw.summary || 'Sin título', description: raw.description || '',
     start: raw.start?.dateTime || raw.start?.date, end: raw.end?.dateTime || raw.end?.date,
-    allDay: !!raw.start?.date,gps:raw.gps||raw.coordinates||raw.extendedProperties?.private||null, timezone, end_timezone:raw.end?.timeZone || timezone,location: raw.location || '',
+    allDay: !!raw.start?.date, ...Object.fromEntries(['pin_id','pinId','placeId','poi_id','poi_code','location_id','origin_pin','originPin','origin_pin_id','destination_pin','destinationPin','destination_pin_id'].map(key=>[key,raw[key]??raw.extendedProperties?.private?.[key]]).filter(([,value])=>value!=null)),gps:raw.gps||raw.coordinates||raw.extendedProperties?.private||null, timezone, end_timezone:raw.end?.timeZone || timezone,location: raw.location || '',
     label: labelId ? { id: labelId, name: labels[labelId]?.name || (typeof labels[labelId] === 'string' ? labels[labelId] : null), color: labels[labelId]?.backgroundColor || labels[labelId]?.background_color || null } : null,
     color_id: raw.colorId || raw.color_id || null, color: colors[raw.colorId || raw.color_id]?.background || null,
     cost:valid?cost:null, currency:valid?currency:null, cost_status:valid?status:null, purchase_status:purchase,purchase_id:fields.PURCHASE_ID||null,financial_fields:{cost,currency,status},financial_state:valid?'OK':cost===null&&purchase==='PAID'?'PAID_COST_MISSING':cost===null&&purchase==='PENDING'?'ESTIMATE_MISSING':block?'INVALID_FINANCIAL':'NON_FINANCIAL',warnings,
@@ -36,7 +36,7 @@ export function normalizeEvent(raw, colors = {}, labels = {}) {
     deleted_at: raw.status === 'cancelled' ? raw.updated || new Date().toISOString() : null, updated_at: raw.updated, html_link: raw.htmlLink || null };
 }
 export function validCurrency(value){if(!/^[A-Z]{3}$/.test(value||''))return false;return Intl.supportedValuesOf?Intl.supportedValuesOf('currency').includes(value):true;}
-function localEventDate(event,value) {return event.timezone?dateKey(new Date(value),event.timezone):value.slice(0,10);}
+export function localEventDate(event,value) {return event.timezone?dateKey(new Date(value),event.timezone):value.slice(0,10);}
 export function dateKey(now = new Date(), timezone = TRIP.timezone) {
   return new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
 }

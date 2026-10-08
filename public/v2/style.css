@@ -14,3 +14,8 @@ nav[hidden]{display:none!important}
 .budget-donut{display:block;width:min(100%,300px);margin:auto}.budget-donut circle[role=button]{cursor:pointer}.budget-donut circle:focus{outline:none;stroke-width:38}.donut-caption{font-size:10px;fill:#667085}.donut-total{font-size:15px;font-weight:700;fill:#243042}.budget-legend-group>strong{display:block;margin:12px 0 4px}.budget-legend-group button{display:flex;align-items:center;gap:8px;width:100%;min-height:44px;text-align:left;background:none;border:0}.budget-legend-group button i{width:12px;height:12px;border-radius:50%}.budget-legend-group button span{flex:1}.place-list-item .place-row{border:0;background:none;flex:1;text-align:left;min-height:44px}.place-list-item.collapsed{padding-block:4px}.place-list-item p,.place-list-item small{margin-left:38px}.trip-pin.selected span{outline:3px solid #386cde;outline-offset:3px}
 
 .map-modes{flex-wrap:nowrap;overflow-x:auto}.map-modes button{flex:none;white-space:nowrap;min-height:44px}
+
+/* Itinerary dates and visited cities expand with their content. */
+.day-strip{align-items:stretch}.day-strip button{flex:0 0 108px;min-width:108px;padding:11px 8px;white-space:normal;height:auto;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:10px}.day-date,.day-cities{display:flex;flex-direction:column;align-items:center;gap:3px;width:100%}.day-strip .day-cities span{display:block;font-size:12px;line-height:1.4;white-space:normal;overflow-wrap:anywhere;color:inherit}.day-strip .day-date strong{display:block}
+
+.day-strip .day-date span{font-size:12px;line-height:1.4;color:inherit}
