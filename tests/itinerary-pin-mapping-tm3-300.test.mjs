@@ -44,3 +44,14 @@ test('cities come from locality fields or explicit postal addresses, never event
  assert.equal(pinLocality({name:'Via Bona Lombarda, 36, 23037 Tirano SO, Italy'}),'Tirano');
  assert.deepEqual(visitedCities([event],[place('optional','Roma',{assigned_dates:[day]})],day).cities,[]);
 });
+test('route fields retain endpoint coverage when one endpoint needs an associated pin',()=>{
+ const normalized=normalizeEvent({id:'route',summary:'Transfer',start:{dateTime:event.start,timeZone:event.timezone},end:{dateTime:event.end},extendedProperties:{private:{origin_city:'Napoli',destination_pin_id:'arrival'}}});
+ const result=visitedCities([normalized],[place('arrival','Piano di Sorrento')],day);
+ assert.deepEqual(result.cities,['Napoli','Piano di Sorrento']);assert.equal(result.incomplete.length,0);
+ assert.deepEqual(visitedCities([{...normalized,cities:['Sorrento','Amalfi','Ravello']}],[],day).cities,['Sorrento','Amalfi','Ravello']);
+});
+test('structured address supplies locality after an associated pin has none',()=>{
+ const normalized=normalizeEvent({id:'address',summary:'Hotel',start:{dateTime:event.start,timeZone:event.timezone},end:{dateTime:event.end},location:'https://maps.app.goo.gl/NoLocality123',address:{addressLocality:'Firenze'}});
+ assert.deepEqual(visitedCities([normalized],[],day).cities,['Firenze']);
+ const result=visitedCities([{...event,cities:['Venezia']}],[],day);assert.equal(result.associations[0].cause,null);
+});

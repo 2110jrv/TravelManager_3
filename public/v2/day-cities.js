@@ -28,12 +28,16 @@ export function matchPin(pin,places){
 }
 function eventVisits(event,day){
  const explicit=cityList(event.cities);if(explicit.length)return explicit.map(city=>({city,explicit:true}));
- const endpoints=[];
- for(const [role,value] of [['origin',event.origin_pin||event.originPin||event.origin_pin_id],['destination',event.destination_pin||event.destinationPin||event.destination_pin_id]])if(value){
+ const endpoints=[];let hasEndpoints=false;
+ for(const role of ['origin','destination']){
+  const city=event[role+'_city']||pinLocality(event[role]),value=event[role+'_pin']||event[role+'Pin']||event[role+'_pin_id'];
+  if(!city&&!value)continue;hasEndpoints=true;
   const date=role==='origin'?localEventDate(event,event.start):localEventDate({...event,timezone:event.end_timezone||event.timezone},event.end);
-  if(date===day)endpoints.push(typeof value==='object'?{...value,role}:{pin_id:value,role});
+  if(date!==day)continue;
+  if(city)for(const name of cityList(city))endpoints.push({city:name,role,explicit:true,source:'origin_destination'});
+  else endpoints.push(typeof value==='object'?{...value,role}:{pin_id:value,role});
  }
- if(event.origin_pin||event.originPin||event.origin_pin_id||event.destination_pin||event.destinationPin||event.destination_pin_id)return endpoints;
+ if(hasEndpoints)return endpoints;
  const input=locationInput(event),current=input&&event.location_key===input.key;
  const links=[...new Set([...mapsUrls(event.location),...mapsUrls(event.description)])];
  if(links.length)return links.map(url=>{
@@ -42,14 +46,14 @@ function eventVisits(event,day){
   const refs=Object.fromEntries(['pin_id','pinId','placeId','poi_id','poi_code','location_id'].map(key=>[key,event[key]]).filter(([,value])=>value!=null));
   return {...saved,...refs,url,...(main?{gps:saved?.gps||gpsFor(event),google_place_id:saved?.google_place_id||event.google_place_id,city:saved?.city||(current?event.location_city:null)}:{})};
  });
- return [{...event,gps:gpsFor(event),city:current?event.location_city:event.gps?.city}];
+ return [{...event,gps:gpsFor(event),city:(current?event.location_city:event.gps?.city)||pinLocality(event.structured_location)||pinLocality(event)}];
 }
 export function visitedCities(events,records,day,locations={}){
  const cities=[],seen=new Set(),incomplete=[],associations=[],places=candidates(records,locations);
  for(const event of events.filter(e=>occursOn(e,day)&&!artificial(e)).sort(chronological))for(const pin of eventVisits(event,day)){
-  const match=pin.explicit?{method:'EVENT_CITIES',candidates:[],city:pin.city}:matchPin(pin,places),city=match.ambiguous?'':match.city||pinLocality(pin);
+  const match=pin.explicit?{method:pin.source||'EVENT_CITIES',candidates:[],city:pin.city}:matchPin(pin,places),city=match.ambiguous?'':match.city||pinLocality(pin)||pinLocality(event.structured_location)||pinLocality(event);
   const related=match.place||pin,point=pin.gps||related.gps||related.point||related;
-  const missing=[...(!city?['city']:[]),...(!pointKey(point)&&!ids(related).length&&!urls(related).length&&!references(pin).length?['pin']:[])];
+  const missing=[...(!city?['city']:[]),...(!pin.explicit&&!pointKey(point)&&!ids(related).length&&!urls(related).length&&!references(pin).length?['pin']:[])];
   const row={event_id:event.id,title:event.title,day,role:pin.role||null,method:match.method,city,pin_id:match.place?.id||null,candidates:match.candidates.map(p=>p.id||p.url||p.source_url),cause:match.ambiguous?'ambiguous_place':missing.includes('pin')?'event_without_pin':!city?'pin_without_locality':null};
   associations.push(row);
   if(!city){incomplete.push({...row,missing});continue;}

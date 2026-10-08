@@ -331,7 +331,7 @@ function scheduleSync(){clearTimeout(scheduleSync.timer);scheduleSync.timer=setT
 await render();
 if ('serviceWorker' in navigator) {
   const hadController = !!navigator.serviceWorker.controller;
-  navigator.serviceWorker.register('./sw.js', { scope: './' }).then(registration=>{
+  navigator.serviceWorker.register('./sw.js', { scope: './',updateViaCache:'none' }).then(registration=>{
   const showUpdate = () => { const update = document.querySelector('#update'); update.hidden = false; update.onclick = () => registration.waiting?.postMessage('ACTIVATE_UPDATE'); };
   if (registration.waiting) showUpdate();
   registration.addEventListener('updatefound', () => { registration.installing?.addEventListener('statechange', () => { if (registration.waiting && navigator.serviceWorker.controller) showUpdate(); }); });
@@ -378,7 +378,7 @@ if(PIN_MODE){
  pinAccess=new PinAccess(store,client);remote=new SupabaseRemote(client,store.device,store.deviceToken);remote.pinAccess=pinAccess;
  const backend=new GoogleProviderBackend(client,()=>remote.credentials());mapUx.resolve=async inputs=>(await backend.call('resolve_locations',{inputs,details:true})).locations;const locationCache=new LocationCache(async inputs=>(await backend.call('resolve_locations',{inputs,details:true})).locations);
  googleAuthorization=new GoogleAuthorization(store,backend,state=>{googleState=state;updateConnection();});
- google=new GoogleSource(()=>googleAuthorization.token(),fetch,()=>remote.check(),token=>googleAuthorization.recover(token),local=>locationCache.refresh(local),async()=>(await backend.call("event_cities")).rows);sync=new SyncEngine(store,remote,google);
+ google=new GoogleSource(()=>googleAuthorization.token(),fetch,()=>remote.check(),token=>googleAuthorization.recover(token),async local=>{await refreshBackground();return locationCache.refresh(local);},async()=>(await backend.call("event_cities")).rows);sync=new SyncEngine(store,remote,google);
  if(navigator.onLine&&store.activeUser?.authorized){try{await pinAccess.validate();remote.device=store.device;{const config=await remote.rpc('av2_trip_configuration',remote.credentials());if(!Object.isFrozen(TRIP))Object.assign(TRIP,config);if(!days().includes(selectedDay))selectedDay=TRIP.start;}await store.put('meta',{id:'trip-config',value:{...TRIP}});}catch(error){if(error.message!=='ACCESS_UNAVAILABLE')pinScreen.reverify=true;}}
  await render();calendarRefresh=new CalendarRefresh({refresh:syncAll,lastSync:async()=>(await store.get('meta','calendar-sync'))?.synced_at,available:async()=>navigator.onLine&&!!store.activeUser?.authorized});calendarRefresh.start();if(store.activeUser?.authorized&&navigator.onLine)calendarRefresh.request({force:true}).catch(()=>{});
  setInterval(()=>{if(document.visibilityState==='visible'&&store.activeUser?.authorized)refreshDeviceIdentity().then(()=>refreshBackground()).catch(()=>{});scheduleSync();},30000);
@@ -397,7 +397,7 @@ authSession=(await client.auth.getSession()).data.session;
 await refreshDeviceIdentity();
 await googleAuthorization.capture('INITIAL_SESSION',authSession);
 for(const {event,session}of pendingGoogleAuth)await googleAuthorization.capture(event,session);
-google = new GoogleSource(()=>googleAuthorization.token(),fetch,()=>remote.check(),token=>googleAuthorization.recover(token),local=>locationCache.refresh(local),async()=>(await providerBackend.call("event_cities")).rows);
+google = new GoogleSource(()=>googleAuthorization.token(),fetch,()=>remote.check(),token=>googleAuthorization.recover(token),async local=>{await refreshBackground();return locationCache.refresh(local);},async()=>(await providerBackend.call("event_cities")).rows);
 sync = new SyncEngine(store, remote, google);
 
 if(['127.0.0.1','localhost'].includes(location.hostname)&&navigator.onLine){try{const response=await fetch('./root-claim',{cache:'no-store'});if(response.ok)rootClaim=await response.json();}catch{/* Claims are available only on PC Casa's local preview. */}}
