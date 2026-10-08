@@ -16,6 +16,11 @@ Deno.serve(async req=>{
   let ownerMaintenance=false;if(body.action==='import'&&user.identities?.some(identity=>identity.provider==='google')){const owner=await admin.from('av2_trip_users').select('id').eq('trip_id',body.p_trip).eq('user_id',user.id).eq('role','OWNER').is('deleted_at',null).maybeSingle();ownerMaintenance=!!owner.data&&!owner.error;}
   const {data:status,error:deviceError}=await client.rpc('av2_device_status',{p_trip:body.p_trip,p_device:body.p_device,p_token:body.p_token});
   if(!ownerMaintenance&&(deviceError||status!=='ACTIVE'))return json({error:'AV2_DEVICE_NOT_AUTHORIZED'},403);
+  if(body.action==='event_cities'){
+   const {data,error}=await admin.from('av2_event_cities').select('event_id,cities').eq('trip_id',body.p_trip).order('event_id').limit(501);
+   if(error||!data||data.length>500)return json({error:'EVENT_CITIES_UNAVAILABLE'},503);
+   return json({rows:data});
+  }
   if(body.action==='resolve_locations'){
    if(!Array.isArray(body.inputs)||body.inputs.length>16||body.inputs.some((input:unknown)=>typeof input!=='string'||input.length>4096||!allowedMapsUrl(input)))return json({error:'INVALID_MAP_INPUT'},400);
    const admin=createClient(url,service,{auth:{persistSession:false}}),cache=()=>admin.from('av2_map_locations');

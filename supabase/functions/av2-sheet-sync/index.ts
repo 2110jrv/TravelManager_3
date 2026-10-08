@@ -15,6 +15,7 @@ Deno.serve(async req=>{
   const b=await req.json();if(b.spreadsheet_id!==sheet||!Array.isArray(b.pins)||b.pins.length>10||!Array.isArray(b.devices)||b.devices.length>200)return json({error:'INVALID_SNAPSHOT'},400);
   const admin=createClient(Deno.env.get('SUPABASE_URL')!,Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,{auth:{persistSession:false}}),trip='7c0801ee-07b1-4d86-95d7-202610200001',pepper=Deno.env.get('AV2_PIN_PEPPER');if(!pepper)return json({error:'CONFIGURATION_REQUIRED'},503);
   const checked=async(p:any)=>{const r=await p;if(r.error)throw Error('STORAGE');return r.data;};
+  if(b.event_cities!==undefined)await checked(admin.rpc('av2_event_cities_snapshot',{p_trip:trip,p_rows:b.event_cities}));
   const users=await checked(admin.from('av2_app_users').select('*').eq('trip_id',trip));
   const supplied=new Set();for(const row of b.pins){const user=users.find((u:any)=>u.name===row.name);if(!['Activo','Inactivo'].includes(row.state)||!user||supplied.has(row.name))return json({error:'INVALID_USERS'},400);supplied.add(row.name);}
   // Reject duplicate PINs; comparing both existing and proposed credentials never returns PINs.

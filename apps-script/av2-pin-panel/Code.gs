@@ -8,7 +8,7 @@ function av2Install(){
 }
 function av2InstallDataReconciler(){ScriptApp.getProjectTriggers().filter(t=>t.getHandlerFunction()==='av2ReconcileData').forEach(t=>ScriptApp.deleteTrigger(t));ScriptApp.newTrigger('av2ReconcileData').timeBased().everyMinutes(1).create();av2ReconcileData();}
 function av2ReconcileData(){av2Reconcile({dataOnly:true});}
-function av2OnEdit(e){if(e&&['PINS','DISPOSITIVOS','LUGARES','GASTOS'].includes(e.range.getSheet().getName()))av2Reconcile({origin:'Google Sheet',editor:e.user?e.user.getEmail():''});}
+function av2OnEdit(e){if(e&&['PINS','DISPOSITIVOS','LUGARES','GASTOS','EVENT_CITIES'].includes(e.range.getSheet().getName()))av2Reconcile({origin:'Google Sheet',editor:e.user?e.user.getEmail():''});}
 function av2OnChange(e){if(e&&['REMOVE_ROW','INSERT_ROW','OTHER'].includes(e.changeType))av2Reconcile({origin:'Google Sheet',editor:e.user?e.user.getEmail():''});}
 function av2Reconcile(event){
  const lock=LockService.getScriptLock();if(!lock.tryLock(30000))return;
@@ -23,7 +23,7 @@ function av2Reconcile(event){
   const changed=Object.keys(current).filter(k=>JSON.stringify(current[k])!==JSON.stringify(previous[k])).map(k=>current[k]);
   const deleted=Object.keys(previous).filter(k=>!current[k]);
   const cursor=Number(props.getProperty('AV2_AUDIT_CURSOR')||0),places=av2ReadPlaces(book,props),expenses=av2ReadExpenses(book,props);
-  const response=UrlFetchApp.fetch(endpoint,{method:'post',contentType:'application/json',headers:{'x-av2-sheet-secret':secret},payload:JSON.stringify({spreadsheet_id:AV2_SPREADSHEET,pins,devices:dataOnly?[]:changed,deleted_keys:dataOnly?[]:deleted,audit_cursor:cursor,...(expenses?{expenses:expenses.rows,deleted_expenses:expenses.deleted}:{}),places:places.rows,deleted_places:places.deleted,places_actor:'Jonathan',places_origin:event&&event.origin==='Google Sheet'?'Google Sheet':'ChatGPT/Admin',places_external_actor:event&&event.editor||null}),muteHttpExceptions:true});
+  const response=UrlFetchApp.fetch(endpoint,{method:'post',contentType:'application/json',headers:{'x-av2-sheet-secret':secret},payload:JSON.stringify({event_cities:av2ReadEventCities(book),spreadsheet_id:AV2_SPREADSHEET,pins,devices:dataOnly?[]:changed,deleted_keys:dataOnly?[]:deleted,audit_cursor:cursor,...(expenses?{expenses:expenses.rows,deleted_expenses:expenses.deleted}:{}),places:places.rows,deleted_places:places.deleted,places_actor:'Jonathan',places_origin:event&&event.origin==='Google Sheet'?'Google Sheet':'ChatGPT/Admin',places_external_actor:event&&event.editor||null}),muteHttpExceptions:true});
   if(response.getResponseCode()!==200)throw new Error('Sincronización del panel no disponible ('+response.getResponseCode()+')');
   const result=JSON.parse(response.getContentText());
   // Do not overwrite an edit made while the HTTP request was in flight.
@@ -95,3 +95,10 @@ function av2PlaceCells(sheet,count){const timezone=sheet.getParent().getSpreadsh
 
 // A fresh Sheets API read avoids SpreadsheetApp read-cache hiding an API edit during HTTP sync.
 function av2DataUnchanged(snapshot,width,dateColumns){const range=snapshot.sheet.getName()+'!A2:'+String.fromCharCode(64+width)+'501',response=UrlFetchApp.fetch('https://sheets.googleapis.com/v4/spreadsheets/'+AV2_SPREADSHEET+'/values/'+encodeURIComponent(range)+'?valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=SERIAL_NUMBER',{headers:{Authorization:'Bearer '+ScriptApp.getOAuthToken()},muteHttpExceptions:true});if(response.getResponseCode()!==200)throw new Error('No se pudo verificar el estado actual de '+snapshot.sheet.getName());const trim=rows=>{while(rows.length&&rows[rows.length-1].every(v=>!v))rows.pop();return rows;},current=(JSON.parse(response.getContentText()).values||[]).map(row=>Array.from({length:width},(_,i)=>{const value=row[i];return dateColumns.includes(i)&&typeof value==='number'?Utilities.formatDate(new Date(Math.round((value-25569)*86400000)),'UTC',i===dateColumns[0]?'yyyy-MM-dd':'yyyy-MM-dd HH:mm:ss'):String(value??'');}));return JSON.stringify(trim(current))===JSON.stringify(trim(snapshot.original.map(row=>row.slice())));}
+
+function av2ReadEventCities(book){
+ const sheet=book.getSheetByName('EVENT_CITIES');if(!sheet)throw new Error('Falta EVENT_CITIES');
+ if(JSON.stringify(sheet.getRange(1,1,1,5).getDisplayValues()[0])!==JSON.stringify(['Calendar Event ID','Date','Title','Cities','UpdatedAt']))throw new Error('Headers EVENT_CITIES incorrectos');
+ const count=Math.max(0,sheet.getLastRow()-1);if(count>500)throw new Error('EVENT_CITIES excede 500 filas');
+ const ids=new Set();return (count?sheet.getRange(2,1,count,5).getDisplayValues():[]).filter(r=>r.some(v=>v)).map(r=>{const id=r[0];if(!id||ids.has(id))throw new Error('EVENT_CITIES ID vacío o duplicado');ids.add(id);const seen=new Set(),cities=r[3].split('|').map(v=>v.trim().normalize('NFC')).filter(v=>{const key=v.normalize('NFKC').toLocaleLowerCase().replace(/\s+/g,' ');if(!v||seen.has(key))return false;seen.add(key);return true;});return{event_id:id,cities};});
+}

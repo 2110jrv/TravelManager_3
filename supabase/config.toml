@@ -2,3 +2,5 @@
 verify_jwt = false
 [functions.av2-sheet-sync]
 verify_jwt = false
+[functions.av2-google-token]
+verify_jwt = true

@@ -3,6 +3,7 @@ import {chronological} from './itinerary.js';
 import {locationInput,mapsUrls} from './location.js';
 import {gpsFor} from './places.js';
 import {mapsIdentity,pointKey,pinLocality} from './pin-identity.js';
+import {cityList} from './event-cities.js';
 const artificial=event=>/^\s*[✅☐]?\s*(?:ciudad|city|base)\s*:/i.test(event.title||'');
 const cityKey=city=>city.normalize('NFKC').toLocaleLowerCase().replace(/\s+/g,' ');
 const urls=pin=>[pin.url,pin.google_maps_url,pin.maps_url,pin.source_url,pin.resolved_url].filter(Boolean);
@@ -26,6 +27,7 @@ export function matchPin(pin,places){
  return best||{method:null,candidates:[],city:''};
 }
 function eventVisits(event,day){
+ const explicit=cityList(event.cities);if(explicit.length)return explicit.map(city=>({city,explicit:true}));
  const endpoints=[];
  for(const [role,value] of [['origin',event.origin_pin||event.originPin||event.origin_pin_id],['destination',event.destination_pin||event.destinationPin||event.destination_pin_id]])if(value){
   const date=role==='origin'?localEventDate(event,event.start):localEventDate({...event,timezone:event.end_timezone||event.timezone},event.end);
@@ -45,7 +47,7 @@ function eventVisits(event,day){
 export function visitedCities(events,records,day,locations={}){
  const cities=[],seen=new Set(),incomplete=[],associations=[],places=candidates(records,locations);
  for(const event of events.filter(e=>occursOn(e,day)&&!artificial(e)).sort(chronological))for(const pin of eventVisits(event,day)){
-  const match=matchPin(pin,places),city=match.ambiguous?'':match.city||pinLocality(pin);
+  const match=pin.explicit?{method:'EVENT_CITIES',candidates:[],city:pin.city}:matchPin(pin,places),city=match.ambiguous?'':match.city||pinLocality(pin);
   const related=match.place||pin,point=pin.gps||related.gps||related.point||related;
   const missing=[...(!city?['city']:[]),...(!pointKey(point)&&!ids(related).length&&!urls(related).length&&!references(pin).length?['pin']:[])];
   const row={event_id:event.id,title:event.title,day,role:pin.role||null,method:match.method,city,pin_id:match.place?.id||null,candidates:match.candidates.map(p=>p.id||p.url||p.source_url),cause:match.ambiguous?'ambiguous_place':missing.includes('pin')?'event_without_pin':!city?'pin_without_locality':null};
@@ -55,6 +57,7 @@ export function visitedCities(events,records,day,locations={}){
  }
  return{cities,incomplete,associations};
 }
+export function itemCities(event,records,day,locations={}){if(artificial(event))return [];return cityList(event.cities).length?cityList(event.cities):visitedCities([event],records,day,locations).cities;}
 const escape=value=>String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 export function dayCityCards(events,records,days,selectedDay,locations={}){
  return days.map(day=>{

@@ -1,7 +1,8 @@
 import { TRIP } from './config.js';
 import { normalizeEvent } from './domain.js';
+import {cityMetadata,withCities} from './event-cities.js';
 export class GoogleSource {
-  constructor(getToken, request = fetch, guard = async()=>{}, unauthorized=async()=>{},locations=async()=>{}) { this.getToken = getToken; this.request = (...args)=>request(...args); this.guard=guard; this.unauthorized=unauthorized;this.locations=locations; }
+  constructor(getToken, request = fetch, guard = async()=>{}, unauthorized=async()=>{},locations=async()=>{},cities=null) { this.getToken = getToken; this.request = (...args)=>request(...args); this.guard=guard; this.unauthorized=unauthorized;this.locations=locations;this.cities=cities; }
   async api(path, options = {}, retry = true) {
     await this.guard();
     const token = await this.getToken();
@@ -31,13 +32,17 @@ export class GoogleSource {
     } while (page || (!nextSync && token === null));
     const ids = new Set(changes.map(x => x.id));
     const previous = await store.all('events');
+    // Fetch the complete Sheet metadata snapshot even for incremental Calendar sync.
+    // Failure occurs before the transaction, preserving the previous offline snapshot.
+    const metadata=this.cities?cityMetadata(await this.cities()):null;
+    const attach=event=>metadata?withCities(event,metadata):event;
     await store.transaction(['events', 'meta'], tx => {
-      for (const raw of changes) tx.objectStore('events').put(normalizeEvent({...raw,calendarTimezone:calendar.timeZone}, colors.event, labels));
+      for (const raw of changes) tx.objectStore('events').put(attach(normalizeEvent({...raw,calendarTimezone:calendar.timeZone}, colors.event, labels)));
       // Mark missing Calendar events individually; never replace the local database.
       for (const event of previous) if (!ids.has(event.id)) {
         const label=event.label?labels[event.label.id]:null;
         const financial=normalizeEvent({id:event.id,summary:event.title,description:event.description});
-        tx.objectStore('events').put({...event,cost:financial.cost,currency:financial.currency,cost_status:financial.cost_status,purchase_status:financial.purchase_status,purchase_id:financial.purchase_id,financial_fields:financial.financial_fields,financial_state:financial.financial_state,warnings:financial.warnings,label:event.label?{id:event.label.id,name:label?.name||null,color:label?.backgroundColor||null}:null,...(!token?{deleted_at:new Date().toISOString()}: {})});
+        tx.objectStore('events').put(attach({...event,cost:financial.cost,currency:financial.currency,cost_status:financial.cost_status,purchase_status:financial.purchase_status,purchase_id:financial.purchase_id,financial_fields:financial.financial_fields,financial_state:financial.financial_state,warnings:financial.warnings,label:event.label?{id:event.label.id,name:label?.name||null,color:label?.backgroundColor||null}:null,...(!token?{deleted_at:new Date().toISOString()}: {})}));
       }
       tx.objectStore('meta').put({id:'calendar-labels',value:labels});
       tx.objectStore('meta').put({ id: 'calendar-sync', value: nextSync, query_version:2,source:'google-api',synced_at: new Date().toISOString() });

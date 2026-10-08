@@ -19,3 +19,5 @@ nav[hidden]{display:none!important}
 .day-strip{align-items:stretch}.day-strip button{flex:0 0 108px;min-width:108px;padding:11px 8px;white-space:normal;height:auto;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:10px}.day-date,.day-cities{display:flex;flex-direction:column;align-items:center;gap:3px;width:100%}.day-strip .day-cities span{display:block;font-size:12px;line-height:1.4;white-space:normal;overflow-wrap:anywhere;color:inherit}.day-strip .day-date strong{display:block}
 
 .day-strip .day-date span{font-size:12px;line-height:1.4;color:inherit}
+
+.item-cities{display:block;width:100%;font-size:11px;line-height:1.4;color:#405775;white-space:normal;overflow-wrap:anywhere;text-align:center;margin-top:5px}
