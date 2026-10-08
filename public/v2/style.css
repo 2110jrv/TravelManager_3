@@ -21,3 +21,5 @@ nav[hidden]{display:none!important}
 .day-strip .day-date span{font-size:12px;line-height:1.4;color:inherit}
 
 .item-cities{display:block;width:100%;font-size:11px;line-height:1.4;color:#405775;white-space:normal;overflow-wrap:anywhere;text-align:center;margin-top:5px}
+
+.day-strip button{flex:0 0 auto;width:max-content}.day-strip .day-cities span{white-space:nowrap;overflow-wrap:normal}

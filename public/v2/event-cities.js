@@ -1,6 +1,7 @@
+export function cityKey(value){return value.normalize('NFKC').replace(/^[\s\p{P}\p{S}]+|[\s\p{P}\p{S}]+$/gu,'').trim().replace(/\s+/gu,' ').toLocaleLowerCase();}
 export function cityList(value){
  const seen=new Set();
- return (Array.isArray(value)?value:typeof value==='string'?value.split('|'):[]).filter(v=>typeof v==='string').map(v=>v.trim().normalize('NFC')).filter(v=>{const key=v.normalize('NFKC').toLocaleLowerCase().replace(/\s+/g,' ');if(!v||seen.has(key))return false;seen.add(key);return true;});
+ return (Array.isArray(value)?value:typeof value==='string'?value.split('|'):[]).filter(v=>typeof v==='string').map(v=>v.trim().normalize('NFC')).filter(v=>{const key=cityKey(v);if(!key||seen.has(key))return false;seen.add(key);return true;});
 }
 export function cityMetadata(rows){
  const result=new Map();
