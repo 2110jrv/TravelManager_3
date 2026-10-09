@@ -24,6 +24,7 @@ import {LocationCache} from './location-cache.js';
 import {dayCityCards,itemCities} from './day-cities.js';
 import {dayPlan,canSchedule,saveSchedule,removeSchedule} from './day-pin-schedule.js';
 import {pinLocality} from './pin-identity.js';
+import {captureScreenState,restoreScreenState,ManualRefresh} from './manual-refresh.js';
 import {renderEventDetail} from './event-detail.js';
 
 document.querySelectorAll('nav [data-icon]').forEach(link=>link.insertAdjacentHTML('afterbegin',icon(link.dataset.icon)));
@@ -55,7 +56,7 @@ if (['127.0.0.1','localhost'].includes(location.hostname) && new URL(location.hr
     }
   } catch { /* Existing Calendar cache remains usable offline. */ }
 }
-const app = document.querySelector('#app');
+const app = document.querySelector('#app'),refreshButton=document.querySelector('#screen-refresh');refreshButton.innerHTML=icon('sync');
 let rootClaim=null;
 
 let selectedDay=(await store.get('meta','itinerary-day'))?.value;if(!days().includes(selectedDay))selectedDay=days().includes(dateKey())?dateKey():TRIP.start;
@@ -124,7 +125,7 @@ function requestValue(label,type='text',value=''){
 function pinScreen(){return '<span class="eyebrow">Acceso privado</span><h1>Agenda Viajera</h1><section class="card"><p>'+(pinScreen.reverify?'Necesitamos verificar tu acceso.':'Ingresa tu PIN para continuar')+'</p><form id="pin-form"><label>PIN<input name="pin" type="password" inputmode="numeric" autocomplete="off" minlength="4" maxlength="32" required aria-label="PIN"></label><p role="status" id="pin-result"></p><button class="primary" type="submit">Entrar</button></form></section>'; }
 async function deviceScreen(){
  if(PIN_MODE){const own=(await store.get('meta','device-identity'))?.value;return '<h1>Dispositivos</h1><section class="card"><h2>'+escape(own?.name||'Este dispositivo')+'</h2><p>Autorizado · '+escape(store.activeUser?.name||'')+'</p><p class="muted">Los nombres y permisos se administran en el panel privado de dispositivos.</p></section>';}
- if(Date.now()-transferRefreshAt>4000)setTimeout(()=>refreshRootTransfers(),0);
+
  const session=authSession,invite=await store.get('meta','pending-invite');
  const list=(await store.get('meta','device-list'))?.value||[],identity=(await store.get('meta','device-identity'))?.value;
  if(identity?.id===store.device&&!list.some(d=>d.id===identity.id))list.push(identity);
@@ -155,7 +156,13 @@ async function offline() {
 async function documentList(){const available=new Set(await new OfflineDocuments(store,google).available(documents));return '<div class="row"><h1>Documentos</h1>'+iconButton('load-documents','Actualizar Drive','sync')+'</div><section class="card"><div class="actions">'+button('download-all-documents','Descargar todo para offline','','primary')+button('update-offline-documents','Actualizar documentos offline')+'</div><div id="documents-progress" role="status" aria-live="polite">'+(docsProgress?docsProgress.completed+' / '+docsProgress.total:'✓ '+available.size+' documentos disponibles offline')+'</div></section>'+documents.map(file=>'<div class="card list-row row"><a href="#document/'+encodeURIComponent(file.id)+'"><h3>'+escape(file.name)+'</h3><small>'+(available.has(file.id)?'✓ Disponible offline':'Pendiente de descarga')+'</small></a>'+iconButton('download-document','Descargar copia offline','download',file.id)+'</div>').join('');}
 async function downloadDocuments(files,fullListing=false){offlineDocuments ||= new OfflineDocuments(store,google);const result=await offlineDocuments.download(files,p=>{docsProgress=p;const node=document.querySelector('#documents-progress');if(node)node.textContent=p.completed+' / '+p.total;},fullListing);docsProgress=null;if(result.failures.length)notice(result.completed+' / '+result.total+' disponibles. Algunas descargas no terminaron; puedes reintentar.');else notice('✓ '+result.completed+' documentos disponibles offline');return result;}
 function conflictValue(conflict,value){if(['amount','amount_original','cost','amount_base','actual_base_amount','base_amount'].includes(conflict.field)){const record=records.find(r=>r.id===conflict.record_id);return formatMoney(value,['amount_base','actual_base_amount','base_amount'].includes(conflict.field)?'USD':record?.data.currency_original||record?.data.currency||'USD');}return JSON.stringify(value??null);}
-async function render() {
+async function render(){
+ const state=render.route===location.hash?captureScreenState(app):null;
+ await renderScreen();render.route=location.hash;restoreScreenState(app,state);
+ if(render.pending){restoreScreenState(app,render.pending);render.pending=null;}
+}
+try{render.pending=JSON.parse(sessionStorage.getItem('av2.screen-reload')||'null');sessionStorage.removeItem('av2.screen-reload');}catch{}
+async function renderScreen() {
 
   now = new Date(); [events, records, pending, conflicts] = await Promise.all(['events','records','outbox','conflicts'].map(name => store.all(name)));
   mapLocations=(await store.get('meta','map-locations'))?.value||{};
@@ -164,7 +171,7 @@ async function render() {
   const [route, rawId] = (location.hash.slice(1) || 'home').split('/'), id = decodeURIComponent((rawId||'').split('?')[0]);pinScheduleDay=route==='place'?new URLSearchParams((rawId||'').split('?')[1]||'').get('day'):null;if(!days().includes(pinScheduleDay))pinScheduleDay=null;
   const navRoute=['home','itinerary','map','documents','settings'].includes(route)?route:route==='event'?'itinerary':route==='document'?'documents':'settings';document.querySelectorAll('nav a').forEach(a=>a.classList.toggle('active',a.hash===`#${navRoute}`));
   updateConnection();
-  if(PIN_MODE){const active=store.activeUser?.authorized;document.querySelector('nav').hidden=!active;let userHeader=document.querySelector('#active-user-header');if(!userHeader){userHeader=document.createElement('span');userHeader.id='active-user-header';document.querySelector('header').append(userHeader);}userHeader.innerHTML=active?escape(store.activeUser.name)+' '+button('switch-user','Cambiar usuario'):'';if(!active){app.innerHTML=pinScreen();closeTripMap();return;}}
+  if(PIN_MODE){const active=store.activeUser?.authorized;document.querySelector('nav').hidden=!active;let userHeader=document.querySelector('#active-user-header');if(!userHeader){userHeader=document.createElement('span');userHeader.id='active-user-header';document.querySelector('header').insertBefore(userHeader,refreshButton);}refreshButton.hidden=!active;userHeader.innerHTML=active?escape(store.activeUser.name)+' '+button('switch-user','Cambiar usuario'):'';if(!active){app.innerHTML=pinScreen();closeTripMap();return;}}
   if(!PIN_MODE&&document.documentElement.dataset.av2Staging==='true'&&(!(await store.get('meta','authorized'))?.value||(!Object.isFrozen(TRIP)&&!(await store.get('meta','trip-config'))?.value))&&!events.length&&!records.length){
     app.innerHTML=authSession?await deviceScreen():`<span class="eyebrow">Acceso privado</span><h1>Agenda Viajera 2.0</h1><section class="card"><p>Inicia sesión para acceder a tus viajes desde un dispositivo autorizado.</p>${PIN_MODE?'':button('google','Conectar Google','','primary')}</section>`;
     closeTripMap();return;
@@ -186,7 +193,7 @@ async function render() {
   if(route==='event'){const warnings=events.find(x=>x.id===id)?.warnings||[];if(warnings.length)app.insertAdjacentHTML('beforeend',`<p class="warning">${warnings.map(escape).join('<br>')}</p>`);}
   if(route==='document'&&documents.some(x=>x.id===id))app.insertAdjacentHTML('beforeend',`<div class="actions">${button('trash-document','Enviar archivo a la papelera de Google Drive',id,'danger')}</div>`);
 }
-function syncAll(){
+function syncAll({renderUI=true}={}){
  if(syncAll.running)return syncAll.running;
  syncAll.running=(async()=>{
   await remoteStartup;
@@ -195,11 +202,10 @@ function syncAll(){
   try{
    let remoteError=null;try{await sync.run();financialRemoteReady=true;}catch(error){remoteError=error;}
    await remote.check();await google.syncCalendar(store);calendarUpdatedAt=(await store.get('meta','calendar-sync'))?.synced_at;
-   // Every Calendar commit immediately replaces the inputs of all derived views.
-   await refreshBackground();await refreshRates();await refreshBackground();await loadDocuments();if(remoteError)throw remoteError;
+   await refreshRates();await loadDocuments();if(remoteError)throw remoteError;
    calendarStatus='ready';
   }catch(error){calendarStatus='error';calendarFailure=error.message;if(PIN_MODE&&['PIN_CHANGED','DEVICE_REVOKED','USER_INACTIVE','AV2_DEVICE_REVOKED'].some(code=>error.message.includes(code))){await pinAccess.lock(false);pinScreen.reverify=true;await render();}else if(error.message.includes('AV2_DEVICE_REVOKED')){financialRemoteReady=false;await store.purge();await client.auth.signOut({scope:'local'});documents=[];await render();}throw error;}
-  finally{await refreshBackground();updateConnection();}
+  finally{if(renderUI)await refreshBackground();updateConnection();}
  })().finally(()=>{syncAll.running=null;});return syncAll.running;
 }
 async function refreshRates(force=false){
@@ -337,21 +343,21 @@ app.addEventListener('submit', async event => {
 });
 addEventListener('hashchange', () => render().catch(error => notice(error.message)));
 
-addEventListener('offline', () => refreshRates().then(()=>refreshBackground()).catch(()=>refreshBackground()));
+addEventListener('offline',updateConnection);
 addEventListener('beforeinstallprompt', event => { event.preventDefault(); installPrompt = event; });
 async function refreshBackground(){if(PIN_MODE&&!store.activeUser?.authorized&&document.querySelector('#pin-form')){updateConnection();return;}if(location.hash.startsWith('#place')||location.hash.startsWith('#expense/')||(location.hash==='#security'&&document.querySelector('#security-form'))){updateConnection();return;}await render();}
-function scheduleSync(){clearTimeout(scheduleSync.timer);scheduleSync.timer=setTimeout(async()=>{if(sync&&navigator.onLine&&(!PIN_MODE||store.activeUser?.authorized)&&(await store.get('meta','authorized'))?.value){try{await sync.run();await refreshBackground();}catch(error){notice(error.message);if(error.message.includes('AV2_DEVICE_REVOKED'))await render();else await refreshBackground();}}},1000);}
+function scheduleSync(){clearTimeout(scheduleSync.timer);scheduleSync.timer=setTimeout(async()=>{if(sync&&navigator.onLine&&(!PIN_MODE||store.activeUser?.authorized)&&(await store.get('meta','authorized'))?.value){try{await sync.run();}catch(error){notice(error.message);if(PIN_MODE&&!store.activeUser?.authorized)await render();}}},1000);}
 await render();
 if ('serviceWorker' in navigator) {
   const hadController = !!navigator.serviceWorker.controller;
+ const applyUpdate=()=>{sessionStorage.setItem('av2.screen-reload',JSON.stringify(captureScreenState(app)));location.reload();};
   navigator.serviceWorker.register('./sw.js', { scope: './',updateViaCache:'none' }).then(registration=>{
-  const showUpdate = () => { const update = document.querySelector('#update'); update.hidden = false; update.onclick = () => registration.waiting?.postMessage('ACTIVATE_UPDATE'); };
+  const showUpdate = () => { const update = document.querySelector('#update'); update.hidden = false; update.onclick = () => {if(registration.waiting){registration.waiting.postMessage('ACTIVATE_UPDATE');navigator.serviceWorker.addEventListener('controllerchange',applyUpdate,{once:true});}else applyUpdate();}; };
   if (registration.waiting) showUpdate();
   registration.addEventListener('updatefound', () => { registration.installing?.addEventListener('statechange', () => { if (registration.waiting && navigator.serviceWorker.controller) showUpdate(); }); });
-  let changing = false; navigator.serviceWorker.addEventListener('controllerchange', () => { if (!hadController || changing) return; changing = true; location.reload(); });
+  navigator.serviceWorker.addEventListener('controllerchange',()=>{if(hadController)showUpdate();});
   }).catch(()=>{});
 }
-setInterval(()=>{if(document.visibilityState==='visible'){updateConnection();if((location.hash||'#home')==='#home')render().catch(error=>notice(error.message));}},60000);
 
 async function refreshRootTransfers(){
  if(PIN_MODE||refreshingTransfers||!devices||!navigator.onLine||!authSession)return;
@@ -365,9 +371,7 @@ async function refreshRootTransfers(){
  }catch{/* Keep local UI and retry automatically without discarding installation data. */}
  finally{refreshingTransfers=false;}
 }
-setInterval(()=>{if(document.visibilityState==='visible'&&location.hash==='#devices')refreshRootTransfers();},5000);
 // Sheet API changes arrive independently of Calendar; pull while this PWA is visible.
-setInterval(()=>{if(PIN_MODE&&document.visibilityState==='visible'&&store.activeUser?.authorized)scheduleSync();},15000);
 async function refreshDeviceIdentity(){
  if(PIN_MODE){if(!navigator.onLine||!store.activeUser?.authorized||!pinAccess)return;try{await pinAccess.validate();}catch(error){if(error.message!=='ACCESS_UNAVAILABLE'){pinScreen.reverify=true;await render();}}return;}
  if(!navigator.onLine||!authSession||verifyingDevice)return;
@@ -391,16 +395,14 @@ if(PIN_MODE){
  pinAccess=new PinAccess(store,client);remote=new SupabaseRemote(client,store.device,store.deviceToken);remote.pinAccess=pinAccess;
  const backend=new GoogleProviderBackend(client,()=>remote.credentials());mapUx.resolve=async inputs=>(await backend.call('resolve_locations',{inputs,details:true})).locations;const locationCache=new LocationCache(async inputs=>(await backend.call('resolve_locations',{inputs,details:true})).locations);
  googleAuthorization=new GoogleAuthorization(store,backend,state=>{googleState=state;updateConnection();});
- google=new GoogleSource(()=>googleAuthorization.token(),fetch,()=>remote.check(),token=>googleAuthorization.recover(token),async local=>{await refreshBackground();return locationCache.refresh(local);},async()=>(await backend.call("event_cities")).rows);sync=new SyncEngine(store,remote,google);
+ google=new GoogleSource(()=>googleAuthorization.token(),fetch,()=>remote.check(),token=>googleAuthorization.recover(token),local=>locationCache.refresh(local),async()=>(await backend.call("event_cities")).rows);sync=new SyncEngine(store,remote,google);
  if(navigator.onLine&&store.activeUser?.authorized){try{await pinAccess.validate();remote.device=store.device;{const config=await remote.rpc('av2_trip_configuration',remote.credentials());if(!Object.isFrozen(TRIP))Object.assign(TRIP,config);if(!days().includes(selectedDay))selectedDay=TRIP.start;}await store.put('meta',{id:'trip-config',value:{...TRIP}});}catch(error){if(error.message!=='ACCESS_UNAVAILABLE')pinScreen.reverify=true;}}
- await render();calendarRefresh=new CalendarRefresh({refresh:syncAll,lastSync:async()=>(await store.get('meta','calendar-sync'))?.synced_at,available:async()=>navigator.onLine&&!!store.activeUser?.authorized});calendarRefresh.start();if(store.activeUser?.authorized&&navigator.onLine)calendarRefresh.request({force:true}).catch(()=>{});
- setInterval(()=>{if(document.visibilityState==='visible'&&store.activeUser?.authorized)refreshDeviceIdentity().then(()=>refreshBackground()).catch(()=>{});scheduleSync();},30000);
- addEventListener('online',()=>refreshDeviceIdentity().then(()=>{if(store.activeUser?.authorized)calendarRefresh.request({force:true}).catch(()=>{});return refreshBackground();}));return;
+ await render();calendarRefresh=new CalendarRefresh({refresh:syncAll,lastSync:async()=>(await store.get('meta','calendar-sync'))?.synced_at,available:async()=>navigator.onLine&&!!store.activeUser?.authorized});if(store.activeUser?.authorized&&navigator.onLine)calendarRefresh.request({force:true}).catch(()=>{});return;
 }
 
 client = createClient('https://cslludzuejkhsydqiabx.supabase.co', 'sb_publishable_8k8xhMZtkay30ZB45aPjGw_4u69Dp0U', { auth: { storageKey: 'av2.auth',storage:googleSafeStorage(localStorage), flowType:'pkce', persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
 // Network/auth startup runs only after the local view is rendered.
-client.auth.onAuthStateChange((event,session)=>{if(googleAuthorization)setTimeout(async()=>{try{authSession=session;await refreshDeviceIdentity();await googleAuthorization.capture(event,session);await refreshBackground();if(event==='SIGNED_IN'&&session?.provider_token)await calendarRefresh?.request({force:true});}catch(error){notice(error.message);}},0);else pendingGoogleAuth.push({event,session});});
+client.auth.onAuthStateChange((event,session)=>{if(googleAuthorization)setTimeout(async()=>{try{const changed=authSession?.user?.id!==session?.user?.id;authSession=session;await googleAuthorization.capture(event,session);if(changed){await refreshDeviceIdentity();await refreshBackground();}}catch(error){notice(error.message);}},0);else pendingGoogleAuth.push({event,session});});
 remote = new SupabaseRemote(client, store.device,store.deviceToken);
 devices=new Devices(remote);
 const providerBackend=new GoogleProviderBackend(client,()=>remote.credentials());
@@ -410,21 +412,21 @@ authSession=(await client.auth.getSession()).data.session;
 await refreshDeviceIdentity();
 await googleAuthorization.capture('INITIAL_SESSION',authSession);
 for(const {event,session}of pendingGoogleAuth)await googleAuthorization.capture(event,session);
-google = new GoogleSource(()=>googleAuthorization.token(),fetch,()=>remote.check(),token=>googleAuthorization.recover(token),async local=>{await refreshBackground();return locationCache.refresh(local);},async()=>(await providerBackend.call("event_cities")).rows);
+google = new GoogleSource(()=>googleAuthorization.token(),fetch,()=>remote.check(),token=>googleAuthorization.recover(token),local=>locationCache.refresh(local),async()=>(await providerBackend.call("event_cities")).rows);
 sync = new SyncEngine(store, remote, google);
 
 if(['127.0.0.1','localhost'].includes(location.hostname)&&navigator.onLine){try{const response=await fetch('./root-claim',{cache:'no-store'});if(response.ok)rootClaim=await response.json();}catch{/* Claims are available only on PC Casa's local preview. */}}
 await refreshBackground();
 calendarRefresh=new CalendarRefresh({refresh:syncAll,lastSync:async()=>(await store.get('meta','calendar-sync'))?.synced_at,available:async()=>navigator.onLine&&!!(await client.auth.getSession()).data.session&&!!(await store.get('meta','authorized'))?.value});
-calendarRefresh.start();
+
 if (navigator.onLine && (await client.auth.getSession()).data.session) {if(!(await store.get('meta','authorized'))?.value){await refreshBackground();}else calendarRefresh.request({force:true}).catch(error=>notice(error.message));}
-addEventListener('online',()=>refreshDeviceIdentity().then(()=>refreshBackground()).catch(()=>{}));
-addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&store.activeUser?.authorized)refreshDeviceIdentity().then(()=>refreshBackground()).catch(()=>{});});
-setInterval(()=>{refreshDeviceIdentity().then(()=>refreshBackground()).catch(()=>{});scheduleSync();},30000);
-refreshRates().then(()=>refreshBackground()).catch(()=>{});
+refreshRates().catch(()=>{});
 
 }
 remoteStartup=new Promise((resolve,reject)=>setTimeout(()=>startRemote().then(resolve,reject),0));
 remoteStartup.catch(()=>{calendarStatus='error';updateConnection();});
 
+const manualRefresh=new ManualRefresh(async()=>{await remoteStartup;await refreshDeviceIdentity();await syncAll({renderUI:false});},async()=>{await render();notice('Actualizado.');});
+refreshButton.addEventListener('click',async()=>{if(manualRefresh.running)return;refreshButton.disabled=true;refreshButton.setAttribute('aria-busy','true');try{await manualRefresh.run();}catch(error){notice(error.message);}finally{refreshButton.disabled=false;refreshButton.removeAttribute('aria-busy');}});
+addEventListener('online',async()=>{updateConnection();try{await remoteStartup;if(sync&&(!PIN_MODE||store.activeUser?.authorized))await sync.run();}catch(error){notice(error.message);if(PIN_MODE&&!store.activeUser?.authorized)await render();}});
 document.addEventListener('keydown',event=>{if(event.target.matches('circle[data-action="budget-slice"]')&&['Enter',' '].includes(event.key)){event.preventDefault();event.target.dispatchEvent(new MouseEvent('click',{bubbles:true}));}});
