@@ -5,6 +5,7 @@ export class GoogleSource {
   constructor(getToken, request = fetch, guard = async()=>{}, unauthorized=async()=>{},locations=async()=>{},cities=null) { this.getToken = getToken; this.request = (...args)=>request(...args); this.guard=guard; this.unauthorized=unauthorized;this.locations=locations;this.cities=cities; }
   async api(path, options = {}, retry = true) {
     await this.guard();
+    if(this.readonly){const response=await this.readonly(path,options);if(response)return response;}
     const token = await this.getToken();
     if (!token) throw Error('Autoriza Google para leer Calendar y Drive.');
     const response = await this.request(`https://www.googleapis.com/${path}`, { ...options, headers: { ...options.headers, Authorization: `Bearer ${token}` } });

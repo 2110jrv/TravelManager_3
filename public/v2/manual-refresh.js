@@ -8,7 +8,7 @@ export function captureScreenState(root){
  return {route:location.hash,x:scrollX,y:scrollY,
  scroll:[...root.querySelectorAll('*')].filter(n=>n.scrollLeft||n.scrollTop||n.matches('.day-strip')).map(n=>({selector:selector(n,root),x:n.scrollLeft,y:n.scrollTop})),
  details:[...root.querySelectorAll('details')].map(n=>({selector:selector(n,root),open:n.open})),
- fields:[...root.querySelectorAll('input:not([type="password"]),textarea,select')].map(n=>({selector:selector(n,root),value:n.value,checked:n.checked,files:n.type==='file'?[...n.files]:null})),
+ fields:[...root.querySelectorAll('input:not([type="password"]),textarea,select')].filter(n=>!n.closest('#item-times-form')||n.value!==n.defaultValue).map(n=>({selector:selector(n,root),value:n.value,checked:n.checked,files:n.type==='file'?[...n.files]:null})),
  focus:root.contains(document.activeElement)?selector(document.activeElement,root):null};
 }
 export function restoreScreenState(root,state){

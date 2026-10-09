@@ -48,7 +48,7 @@ export class LocalStore {
   put(store, value) { return this.transaction([store], tx => tx.objectStore(store).put(value)); }
   async mutate(kind, id, changes, deleted = false, blob = null, editBase = null) {
     if(this.pinMode&&!this.activeUser?.authorized)throw Error('Necesitamos verificar tu acceso.');
-    if(kind==='day_pin_schedule'){const access=(await this.get('meta','schedule-access'))?.value;if(!this.activeUser?.authorized||access?.user_id!==this.activeUser.id||!access.can_edit||!['ADMIN','TRAVELER'].includes(access.role))throw Error('Solo lectura.');}
+    if(kind==='day_pin_schedule'||this.pinMode&&kind==='places_of_interest'){const access=(await this.get('meta','schedule-access'))?.value;if(!this.activeUser?.authorized||access?.user_id!==this.activeUser.id||!access.can_edit||!['ADMIN','TRAVELER'].includes(access.role))throw Error('Solo lectura.');}
     if (!KINDS.includes(kind)) throw Error('Tipo no permitido');
     const now = new Date().toISOString(), operationId = crypto.randomUUID();
     await this.transaction(['records', 'outbox', 'blobs', 'meta'], tx => {

@@ -11,13 +11,13 @@ test('Tour original paid includes Colosseum 36, Footsteps 80 and Pompei 54.76 EU
  const tours=[['Colosseum & Roman Forum',36,{name:'Tour'}],['In Footsteps of Paul',80,null],['Pompei Plus',54.76,{name:null}]].map(([title,cost,label],i)=>({id:String(i),title,cost,label,currency:'EUR',cost_status:'PAID',exchange_rate:1.1235}));
  const f=finance(tours,[]);assert.equal(Number(f.by_category.Tour.by_currency.EUR.paid.toFixed(2)),170.76);assert.ok(f.by_category.Tour.paid>190);assert.equal(f.paid+f.estimated,f.projected);
 });
-test('normal intervals use effective end and 15 minute arrival markers use start',()=>{
- const arrival=timed('arrival','13:15','13:30','✅ ✈ LLEGADA UA126 FCO'),train=timed('train','15:38','16:10','Leonardo Express');assert.equal(effectiveEnd(arrival),Date.parse(arrival.start));let day=agendaForDay([train,arrival],'2026-10-21');assert.equal(day.gaps.get('arrival').label,'2 h 23 min disponibles');
+test('intervals use the recorded final time including arrival markers',()=>{
+ const arrival=timed('arrival','13:15','13:30','✅ ✈ LLEGADA UA126 FCO'),train=timed('train','15:38','16:10','Leonardo Express');assert.equal(effectiveEnd(arrival),Date.parse(arrival.start));let day=agendaForDay([train,arrival],'2026-10-21');assert.equal(day.gaps.get('arrival').label,'2 h 8 min libres');
  day=agendaForDay([timed('normal','13:15','13:30','Visita'),train],'2026-10-21');assert.equal(day.gaps.get('normal').minutes,128);
 });
 test('overlaps never fabricate free time and multiday/all-day contexts stay outside the agenda chain',()=>{
  const context=[{id:'city',title:'Ciudad: Roma',start:'2026-10-20T12:00:00+02:00',end:'2026-10-23T12:00:00+02:00',timezone:'Europe/Rome'},{id:'abb',title:'Airbnb',start:'2026-10-20',end:'2026-10-24',allDay:true},{id:'pass',title:'Pase ACTV',start:'2026-10-20',end:'2026-10-23',allDay:true}];
- const day=agendaForDay([...context,timed('long','09:00','13:00'),timed('short','10:00','11:00'),timed('inside','12:00','12:30'),timed('after','14:00','15:00')],'2026-10-21');assert.equal(day.context.length,3);assert.equal(day.agenda.length,4);assert.equal(day.gaps.size,1);assert.equal(day.gaps.get('inside').minutes,60);
+ const day=agendaForDay([...context,timed('long','09:00','13:00'),timed('short','10:00','11:00'),timed('inside','12:00','12:30'),timed('after','14:00','15:00')],'2026-10-21');assert.equal(day.context.length,3);assert.equal(day.agenda.length,4);assert.equal(day.gaps.size,3);assert.equal(day.gaps.get('long').minutes,-180);assert.equal(day.gaps.get('short').minutes,60);assert.equal(day.gaps.get('inside').minutes,90);
 });
 test('precise GPS is preserved and Maps links open search pins, never directions',()=>{
  const event={description:'<p>GPS:</p><p>40.646677, 14.408274</p>'};assert.deepEqual(gpsFor(event),{lat:40.646677,lng:14.408274});const url=mapsPinUrl(event);assert.equal(url,'https://www.google.com/maps/search/?api=1&query=40.646677,14.408274');assert.ok(!/dir|destination|navigation/.test(url));

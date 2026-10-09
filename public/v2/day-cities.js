@@ -1,3 +1,5 @@
+import {TRIP} from './config.js';
+import {scheduledInstant} from './day-pin-schedule.js';
 import {occursOn,localEventDate} from './domain.js';
 import {chronological} from './itinerary.js';
 import {locationInput,mapsUrls} from './location.js';
@@ -64,7 +66,7 @@ export function itemCities(event,records,day,locations={}){if(artificial(event))
 const escape=value=>String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 export function dayCityCards(events,records,days,selectedDay,locations={}){
  return days.map(day=>{
-  const {cities,incomplete}=visitedCities(events,records,day,locations),date=new Date(day+'T12:00:00Z');
+  const scheduled=records.filter(r=>r.kind==='day_pin_schedule'&&!r.deleted_at&&r.data.active&&r.data.date===day).flatMap(r=>{const pin=records.find(p=>p.id===r.data.pin_id&&!p.deleted_at);return pin?[{id:r.id,order_without_time:!(r.data.start_time||r.data.scheduled_time),start:scheduledInstant(day,r.data.start_time||r.data.scheduled_time||'23:59'),end:new Date(Date.parse(scheduledInstant(day,'23:59'))+59999).toISOString(),timezone:TRIP.timezone,cities:cityList([pinLocality(pin.data)]),added_order:r.data.added_order||r.created_at}]:[];});const {cities,incomplete}=visitedCities([...events,...scheduled],records,day,locations),date=new Date(day+'T12:00:00Z');
   return '<button data-action="day" data-id="'+day+'" class="'+(day===selectedDay?'active':'')+'" data-incomplete-associations="'+(cities.length?0:incomplete.length)+'"><span class="day-date"><span>'+new Intl.DateTimeFormat('en',{weekday:'short',timeZone:'UTC'}).format(date)+'</span><strong>'+Number(day.slice(8))+'</strong><span>'+new Intl.DateTimeFormat('en',{month:'short',timeZone:'UTC'}).format(date)+'</span></span><span class="day-cities">'+cities.map(city=>'<span>'+escape(city)+'</span>').join('')+'</span></button>';
  }).join('');
 }

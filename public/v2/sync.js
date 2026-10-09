@@ -19,7 +19,7 @@ export class SupabaseRemote {
       result.push(...data); if (data.length < 500) break; after = data.at(-1).id;
     }
     if(this.pinAccess){after=null;for(;;){const data=await this.rpc('av2_sync_places',{...this.credentials(),p_after:after})||[];result.push(...data);if(data.length<500)break;after=data.at(-1).id;}}
-    if(this.pinAccess){const access=await this.rpc('av2_schedule_access',this.credentials());await this.pinAccess.store.put('meta',{id:'schedule-access',value:access});after=null;for(;;){const data=await this.rpc('av2_sync_day_pins',{...this.credentials(),p_after:after})||[];result.push(...data);if(data.length<500)break;after=data.at(-1).id;}}
+    if(this.pinAccess){const access=await this.rpc('av2_schedule_access',this.credentials());await this.pinAccess.store.put('meta',{id:'schedule-access',value:access});if(access.role==='VIEWER')await this.pinAccess.store.transaction(['meta'],tx=>tx.objectStore('meta').delete('google-access'));after=null;for(;;){const data=await this.rpc('av2_sync_day_pins',{...this.credentials(),p_after:after})||[];result.push(...data);if(data.length<500)break;after=data.at(-1).id;}}
     return result;
   }
   async pullConflicts() {

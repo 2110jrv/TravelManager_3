@@ -1,6 +1,8 @@
 import {createClient} from 'npm:@supabase/supabase-js@2.45.4';
 import {ProviderLifecycle,ProviderError,credentialCipher} from './lifecycle.js';
 import {resolveLocations} from './locations.js';
+import {readTripGoogle} from './google-read.js';
+import {updateCalendarTimes} from './calendar-times.js';
 import {allowedMapsUrl} from './location-parser.js';
 const cors={'Access-Control-Allow-Origin':'*','Access-Control-Allow-Headers':'authorization, apikey, content-type, x-client-info','Access-Control-Allow-Methods':'POST, OPTIONS'};
 const json=(value:unknown,status=200)=>new Response(JSON.stringify(value),{status,headers:{...cors,'Content-Type':'application/json','Cache-Control':'no-store','Pragma':'no-cache'}});
@@ -30,11 +32,12 @@ Deno.serve(async req=>{
   let providerUser=user;
   const pinDevice=await admin.from('av2_user_devices').select('id').eq('device_id',body.p_device).maybeSingle();
   if(pinDevice.data&&!ownerMaintenance){
-   if(!['access','status'].includes(body.action))return json({error:'ACTION_NOT_ALLOWED'},403);
+   if(!['access','status','calendar_times','google_read'].includes(body.action))return json({error:'ACTION_NOT_ALLOWED'},403);
    const owner=await admin.from('av2_trip_users').select('user_id').eq('trip_id',body.p_trip).eq('role','OWNER').is('deleted_at',null).single();
    if(owner.error)return json({error:'GOOGLE_STORAGE_UNAVAILABLE'},503);
    providerUser=(await admin.auth.admin.getUserById(owner.data.user_id)).data.user!;
   }
+  if(pinDevice.data&&body.action==='access'){const {data:access,error}=await client.rpc('av2_schedule_access',{p_trip:body.p_trip,p_device:body.p_device,p_token:body.p_token});if(error||!access?.can_edit)return json({error:'AV2_AGENDA_READ_ONLY'},403);}
   const subject=providerUser?.identities?.find(identity=>identity.provider==='google')?.identity_data?.sub;
   if(!subject)return json({error:'GOOGLE_IDENTITY_REQUIRED'},403);
   const table=()=>admin.from('av2_google_credentials');
@@ -47,6 +50,14 @@ Deno.serve(async req=>{
    unlock:async(owner:string,lease:string)=>checked(table().update({lease_id:null,lease_until:null}).eq('user_id',owner).eq('lease_id',lease))
   };
   const lifecycle=new ProviderLifecycle({repository,cipher:await credentialCipher(Deno.env.get('AV2_GOOGLE_CREDENTIAL_KEY')),clientId:Deno.env.get('AV2_GOOGLE_CLIENT_ID'),clientSecret:Deno.env.get('AV2_GOOGLE_CLIENT_SECRET')});
+  if(body.action==='google_read'){const {data:trip,error}=await admin.from('av2_trips').select('calendar_id,drive_folders').eq('id',body.p_trip).single();if(error||!trip)return json({error:'TRIP_UNAVAILABLE'},403);const token=await lifecycle.run(providerUser.id,String(subject),{action:'access'});return json(await readTripGoogle(trip,body.path,token.access_token));}
+  if(body.action==='calendar_times'){
+   const {data:access,error:accessError}=await client.rpc('av2_schedule_access',{p_trip:body.p_trip,p_device:body.p_device,p_token:body.p_token});
+   if(accessError||!access?.can_edit||!['ADMIN','TRAVELER'].includes(access.role))return json({error:'AV2_AGENDA_READ_ONLY'},403);
+   const {data:trip,error:tripError}=await admin.from('av2_trips').select('calendar_id').eq('id',body.p_trip).single();if(tripError||!trip)return json({error:'TRIP_UNAVAILABLE'},403);
+   const token=await lifecycle.run(providerUser.id,String(subject),{action:'access'});
+   return json(await updateCalendarTimes(trip.calendar_id,body,token.access_token));
+  }
   return json(await lifecycle.run(providerUser.id,String(subject),body));
  }catch(error){if(error instanceof ProviderError)return json({error:error.message},error.status);return json({error:'GOOGLE_BACKEND_UNAVAILABLE'},503);}
 });

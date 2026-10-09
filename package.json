@@ -6,7 +6,7 @@
     "start:v2": "node scripts/av2-preview.mjs",
     "lint:v2": "node scripts/check-av2.mjs",
     "build:v2": "node scripts/check-av2.mjs --build",
-    "test:v2": "node --test tests/av2-domain.test.mjs tests/av2-day-pin-schedule.test.mjs tests/av2-manual-refresh.test.mjs tests/av2-schema.test.mjs tests/av2-security.test.mjs tests/av2-finance.test.mjs tests/av2-provider.test.mjs tests/av2-ux.test.mjs tests/av2-locations.test.mjs tests/av2-event-detail.test.mjs tests/av2-root-transfer.test.mjs tests/av2-pin-auth.test.mjs tests/av2-pin-sheet.test.mjs tests/av2-map-docs.test.mjs tests/av2-places-bridge.test.mjs tests/av2-expenses-bridge.test.mjs",
+    "test:v2": "node --test tests/av2-domain.test.mjs tests/av2-day-pin-schedule.test.mjs tests/av2-manual-refresh.test.mjs tests/av2-item-times.test.mjs tests/av2-schema.test.mjs tests/av2-security.test.mjs tests/av2-finance.test.mjs tests/av2-provider.test.mjs tests/av2-ux.test.mjs tests/av2-locations.test.mjs tests/av2-event-detail.test.mjs tests/av2-root-transfer.test.mjs tests/av2-pin-auth.test.mjs tests/av2-pin-sheet.test.mjs tests/av2-map-docs.test.mjs tests/av2-places-bridge.test.mjs tests/av2-expenses-bridge.test.mjs",
     "test:v2:integration": "playwright test --config playwright.av2.config.mjs",
     "test:v2:remote": "node scripts/av2-remote-tests.mjs",
     "test:v2:remote:browser": "playwright test --config playwright.av2.remote.config.mjs",

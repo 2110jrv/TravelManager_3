@@ -1,5 +1,5 @@
 import {occursOn,categoryFor} from './domain.js';
-export const chronological=(a,b)=>Date.parse(a.start)-Date.parse(b.start)||String(a.id).localeCompare(String(b.id));
+export const chronological=(a,b)=>{const x=a.order_without_time?Infinity:a.start?Date.parse(a.start):Infinity,y=b.order_without_time?Infinity:b.start?Date.parse(b.start):Infinity;return (x-y)||((a.added_order||'').localeCompare(b.added_order||''))||String(a.id).localeCompare(String(b.id));};
 export function isContext(event){
  const title=event.title||'',multiday=Date.parse(event.end)-Date.parse(event.start)>=86400000;
  const pass=/\b(?:pase|pass|abono)\b/i.test(title)&&categoryFor(event)==='Transportation';
@@ -10,12 +10,9 @@ export function effectiveEnd(event){
  const marker=/salida|llegada|departure|arrival/i.test(title)&&/✈|vuelo|flight|united|\bUA\s*\d/i.test(title)&&end-start<=900000&&end>=start;
  return marker?start:end;
 }
-export function gapLabel(minutes){const hours=Math.floor(minutes/60),rest=minutes%60;return`${hours?hours+' h'+(rest?' ':''):''}${rest?rest+' min':''} ${minutes<30?'de margen':'disponibles'}`;}
-export function agendaForDay(events,day){
- const list=events.filter(e=>occursOn(e,day)).sort(chronological),context=list.filter(isContext),agenda=list.filter(e=>!isContext(e)),gaps=new Map();let occupied=-Infinity;
- for(let i=0;i<agenda.length-1;i++){occupied=Math.max(occupied,effectiveEnd(agenda[i]));const minutes=Math.floor((Date.parse(agenda[i+1].start)-occupied)/60000);if(minutes>0)gaps.set(agenda[i].id,{minutes,label:gapLabel(minutes),tone:minutes<30?'short':minutes>90?'wide':'normal',next_id:agenda[i+1].id});}
- return{context,agenda,gaps};
-}
+export function gapLabel(minutes){const value=Math.abs(minutes),hours=Math.floor(value/60),rest=value%60;return `${minutes<0?'Solapa ':''}${hours?hours+' h'+(rest?' ':''):''}${rest||!hours?rest+' min':''}${minutes>0?' libres':''}`;}
+export function agendaGaps(items){const gaps=new Map(),ordered=[...items].sort(chronological);for(let i=0;i<ordered.length-1;i++){const a=ordered[i],b=ordered[i+1];if(a.allDay||b.allDay||!a.end||!b.start)continue;const minutes=Math.floor((Date.parse(b.start)-Date.parse(a.end))/60000);if(Number.isFinite(minutes)&&minutes!==0)gaps.set(a.id,{minutes,label:gapLabel(minutes),tone:minutes<0?'overlap':'normal',next_id:b.id});}return gaps;}
+export function agendaForDay(events,day){const list=events.filter(e=>occursOn(e,day)).sort(chronological),context=list.filter(isContext),agenda=list.filter(e=>!isContext(e));return{context,agenda,gaps:agendaGaps(agenda)};}
 export function wireDayCarousel(strip){
  if(!strip)return;
  strip.querySelector('.active')?.scrollIntoView({block:'nearest',inline:'center',behavior:'instant'});

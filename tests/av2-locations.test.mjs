@@ -4,7 +4,7 @@ const short='https://maps.app.goo.gl/76Uww5zdwCN3yMpG7',long='https://www.google
 const event=(id,title,start,end)=>({id,title,start:`2026-10-29T${start}:00+01:00`,end:`2026-10-29T${end}:00+01:00`,timezone:'Europe/Rome',label:{name:'Transportation'}});
 test('real October 29 daily pass is context and never blocks 1h55 and 5min gaps',()=>{
  const pass=event('pass','☐ Pase diario de transporte (EAV / Pompeya-Herculano)','06:00','22:00'),pompei=event('pompei','Pompeya','09:00','13:00'),herculano=event('herculano','Herculano','14:55','15:55'),train=event('train','Tren Herculano → Piano di Sorrento','16:00','16:40');
- const day=agendaForDay([train,pass,herculano,pompei],'2026-10-29');assert.deepEqual(day.context.map(e=>e.id),['pass']);assert.equal(day.gaps.get('pompei').label,'1 h 55 min disponibles');assert.equal(day.gaps.get('herculano').label,'5 min de margen');
+ const day=agendaForDay([train,pass,herculano,pompei],'2026-10-29');assert.deepEqual(day.context.map(e=>e.id),['pass']);assert.equal(day.gaps.get('pompei').label,'1 h 55 min libres');assert.equal(day.gaps.get('herculano').label,'5 min libres');
 });
 test('explicit coordinates outrank Maps, which outranks Plus Code; viewport coordinates are never pins',()=>{
  assert.equal(locationInput({gps:{lat:40.123456,lng:14.123456},location:short}).source,'explicit');assert.equal(locationInput({location:short,description:'849VCWC8+R9'}).source,'google-maps');assert.deepEqual(pointFromMapsUrl(long),point);assert.equal(pointFromMapsUrl('https://www.google.com/maps/@40.123456,14.123456,15z'),null);assert.equal(pointFromMapsUrl('https://www.google.com/maps/dir/A/B/data=!3d40.123456!4d14.123456'),null);assert.equal(gpsFor({location:'Roma Termini'}),null);

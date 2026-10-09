@@ -11,7 +11,7 @@ export class GoogleProviderBackend {
    if(!error)return data;
    let code;try{code=(await error.context.json()).error;}catch{/* Network errors never imply revoked consent. */}
    if(code==='GOOGLE_REFRESH_BUSY'&&attempt<4){await new Promise(resolve=>setTimeout(resolve,400*(attempt+1)));continue;}
-   const failure=Error(code||'GOOGLE_BACKEND_UNAVAILABLE');failure.code=code;throw failure;
+   const failure=Error(code||'GOOGLE_BACKEND_UNAVAILABLE');failure.code=code;failure.status=error.context?.status;throw failure;
   }
  }
 }
