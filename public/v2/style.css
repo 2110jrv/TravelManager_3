@@ -36,3 +36,5 @@ main{padding-top:6px}h1,h2,h3,p{line-height:1.25}h1{margin-block:8px 10px}h2{mar
 @media(max-width:640px){.layout{padding-inline:12px}.card,.event,.compact-pin,.place-row{padding:10px}.event{gap:8px}.day-strip{gap:5px}.day-strip button{padding:9px 8px}.section{margin-block:10px}.form-grid{gap:5px}.itinerary-cover{height:140px}.places-list{gap:5px}.primary,.secondary,.danger{padding:8px 10px}.offline-banner .secondary{margin-left:0}.list-row{padding:10px}header{gap:5px}.event-rail{width:60px}.event-body h3{font-size:13px}.more-header>div{padding:12px}.menu-list{padding:8px 10px}}
 
 .events{gap:5px}.events>.event,.grid>.card,.places-list>.card,.places-grid>.card{margin:0}.category-list{gap:5px}.balance-section .stat,.budget-hero .stat{padding:10px}
+
+.guide-copy{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.5}.place-guide section{margin-block:16px}.guide-voice select{max-width:100%}.guide-voice .actions{display:flex;flex-wrap:wrap}.guide-voice .actions button{min-height:44px}

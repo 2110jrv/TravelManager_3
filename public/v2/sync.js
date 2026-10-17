@@ -40,7 +40,7 @@ export class SyncEngine {
       for (const operation of queue) {
         if(this.store.pinMode&&operation.actor_user!==this.store.activeUser?.id)continue;
         if(this.store.pinMode){await this.remote.check();if(operation.actor_user!==this.store.activeUser?.id)continue;operation.device_id=this.store.device;}
-        const predecessor=['expenses','day_pin_schedule'].includes(operation.kind)?acknowledged.get(operation.record_id):null;if(predecessor){operation.base_version=predecessor.version;await this.store.put('outbox',operation);}const result = await this.remote.apply(operation); await this.store.acknowledge(operation, result);if(['expenses','day_pin_schedule'].includes(operation.kind)&&result.record&&!(result.conflicts||[]).length)acknowledged.set(operation.record_id,result.record);else acknowledged.delete(operation.record_id);
+        const predecessor=['expenses','day_pin_schedule','app_settings'].includes(operation.kind)?acknowledged.get(operation.record_id):null;if(predecessor){operation.base_version=predecessor.version;await this.store.put('outbox',operation);}const result = await this.remote.apply(operation); await this.store.acknowledge(operation, result);if(['expenses','day_pin_schedule','app_settings'].includes(operation.kind)&&result.record&&!(result.conflicts||[]).length)acknowledged.set(operation.record_id,result.record);else acknowledged.delete(operation.record_id);
       }
       await this.store.ingest(await this.remote.pull());
       if (this.remote.pullConflicts) await this.store.ingestConflicts(await this.remote.pullConflicts());
