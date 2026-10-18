@@ -1,4 +1,6 @@
-export const READ_TOOLS=['list_places','get_place','get_audio_guide','get_place_guide','get_place_notes','get_itinerary','get_sync_status','list_zones','list_routes','list_travel_records'];
+export const READ_TOOLS=['list_places','get_place','get_audio_guide','get_place_guide','get_place_notes','list_content_history','get_itinerary','get_sync_status','list_zones','list_routes','list_travel_records'];
+// A content grant never exposes Calendar or unfiltered route/journey payloads.
+export const CONTENT_EXCLUDED_TOOLS=['get_itinerary','list_routes','list_travel_records'];
 export const WRITE_TOOLS=['create_place','update_audio_guide','update_place_guide','update_place_notes','update_place_metadata','rollback_content'];
 const uuid=s=>typeof s==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 const object=x=>x&&typeof x==='object'&&!Array.isArray(x);
@@ -11,6 +13,7 @@ export function validateCall(tool,args={}){
  if(Object.keys(args).some(k=>!allowed.includes(k)))fail('UNKNOWN_FIELD');
  if(args.place_id!=null&&!uuid(args.place_id)||args.history_id!=null&&!uuid(args.history_id)||args.after!=null&&!uuid(args.after))fail('INVALID_ID');
  if(tool.startsWith('get_')&&!['get_itinerary','get_sync_status'].includes(tool)&&!uuid(args.place_id))fail('PLACE_ID_REQUIRED');
+ if(tool==='list_content_history'&&!uuid(args.place_id))fail('PLACE_ID_REQUIRED');
  if(args.limit!=null&&(!Number.isInteger(args.limit)||args.limit<1||args.limit>100))fail('INVALID_LIMIT');
  if(WRITE_TOOLS.includes(tool)){
   if(!uuid(args.request_id)||!Number.isSafeInteger(args.expected_version)||args.expected_version<0)fail('VERSION_AND_REQUEST_ID_REQUIRED');
@@ -40,6 +43,7 @@ export async function contentCall(tool,input,context){
   if(['update_audio_guide','update_place_guide'].includes(tool))request.record_id=await guideRecordId(credentials.p_trip,args.place_id);
   return rpc('av2_remote_content_write',{...credentials,p_request:request});
  }
+ if(tool==='list_content_history')return rpc('av2_remote_content_history',{...credentials,p_place:args.place_id,p_after:args.after||null,p_limit:args.limit||50});
  if(tool==='get_itinerary')return itinerary();
  if(tool==='get_sync_status'){const conflicts=await rpc('av2_sync_conflicts',{...credentials,p_after:null});return{device:'ACTIVE',server_reachable:true,unresolved_conflicts:conflicts.filter(c=>!c.deleted_at&&!c.resolved_at).length,mobile_pending:'unknown_until_device_sync',gps_tracks:'device_local_only'};}
  const readAll=async name=>{const rows=[];let after=null;for(;;){const batch=await rpc(name,{...credentials,p_after:after});rows.push(...batch);if(batch.length<500)return rows;after=batch.at(-1).id;if(rows.length>10000)fail('TOO_MANY_RECORDS',413);}};
@@ -56,4 +60,29 @@ export async function contentCall(tool,input,context){
  const guide=records.find(r=>!r.deleted_at&&r.data?.type==='place_guide'&&r.data.place_id===pin.id);
  return{place_id:pin.id,record_id:guide?.id||await guideRecordId(credentials.p_trip,pin.id),version:guide?.version||0,updated_at:guide?.updated_at||null,...(tool==='get_audio_guide'?{audio_guide:guide?.data.guide?.audio_guide||''}:{guide:guide?.data.guide||{}})};
 }
-export function toolDefinitions(){return[...READ_TOOLS,...WRITE_TOOLS].map(name=>({name,description:name.replaceAll('_',' ')+'; IDs y versiones exactos. Casa y GPS local excluidos.',inputSchema:{type:'object',properties:{place_id:{type:'string',format:'uuid'},expected_version:{type:'integer',minimum:0},request_id:{type:'string',format:'uuid'},history_id:{type:'string',format:'uuid'},patch:{type:'object'},limit:{type:'integer',minimum:1,maximum:100},after:{type:'string',format:'uuid'}},additionalProperties:false,required:WRITE_TOOLS.includes(name)?['expected_version','request_id',...(name==='rollback_content'?['history_id']:['place_id','patch'])]:name.startsWith('get_')&&!['get_itinerary','get_sync_status'].includes(name)?['place_id']:[]},annotations:{readOnlyHint:READ_TOOLS.includes(name),destructiveHint:WRITE_TOOLS.includes(name),idempotentHint:true,openWorldHint:false}}));}
+// Tool descriptions carry the field/version contract to clients without exposing credentials.
+export function toolDefinitions(){
+ const id={type:'string',format:'uuid'},version={type:'integer',minimum:0};
+ const descriptions={
+  list_places:'Lista paginada de pins autorizados. Usar UUID exacto; Casa y ubicaciones privadas están excluidos.',
+  get_place:'Lee el pin completo autorizado con su UUID, poi_code y versión del pin.',
+  get_audio_guide:'Lee audio_guide y la versión de la guía, independiente de la versión del pin.',
+  get_place_guide:'Lee todos los campos autorizados de la guía y su versión, preservando su record_id original.',
+  get_place_notes:'Lee Mis notas: el campo description del pin. Descripción y Mis notas son el mismo campo, no dos copias.',
+  list_content_history:'Historial paginado de un pin autorizado: history_id, herramienta, campos y versión resultante. No entrega snapshots ni credenciales.',
+  update_audio_guide:'Actualiza solamente patch.audio_guide (texto, máximo 80000 caracteres). Usar versión de get_audio_guide.',
+  update_place_notes:'Actualiza solamente patch.description (Mis notas/descripción, texto, máximo 4000 caracteres). Usar versión de get_place_notes.',
+  update_place_guide:'Fusiona solo los campos de investigación indicados. Usar versión de get_place_guide; conserva audio y geometría. Ausentes se conservan.',
+  update_place_metadata:'Modifica solo metadatos permitidos de un pin público, con versión del pin. No cambia UUID, poi_code, nombre ni privacidad.',
+  create_place:'Crea exclusivamente un pin público nuevo con UUID nuevo y expected_version=0; nunca recrear un pin existente.',
+  rollback_content:'Revierte únicamente campos de history_id con expected_version actual y request_id nuevo. No borra pins ni pisa ediciones posteriores. Releer ante conflicto.'
+ };
+ const patchKeys={update_audio_guide:['audio_guide'],update_place_notes:['description'],update_place_guide:['experience','affinity','prices','sources_say','safety','questions','dairy','limitations','sources','reviewed_at'],update_place_metadata:['label','priority','lat','lng','google_maps_url','google_place_id','resolved_address','resolved_city','coordinates_verified'],create_place:['name','description','label','priority','lat','lng','google_maps_url','google_place_id','resolved_address','resolved_city','coordinates_verified']};
+ return [...READ_TOOLS,...WRITE_TOOLS].map(name=>{
+  const write=WRITE_TOOLS.includes(name),rollback=name==='rollback_content',list=name.startsWith('list_');
+  const place=write?!rollback:name==='list_content_history'||name.startsWith('get_')&&!['get_itinerary','get_sync_status'].includes(name);
+  const properties={...(place?{place_id:id}:{}),...(write?{expected_version:version,request_id:id}:{}),...(rollback?{history_id:id}:{}),...(list?{limit:{type:'integer',minimum:1,maximum:100},after:id}:{})};
+  if(patchKeys[name])properties.patch={type:'object',minProperties:1,additionalProperties:false,properties:Object.fromEntries(patchKeys[name].map(k=>[k,k==='audio_guide'?{type:'string',maxLength:80000}:k==='description'?{type:'string',maxLength:4000}:{}]))};
+  return {name,description:descriptions[name]||name.replaceAll('_',' ')+'; solo lectura autorizada. GPS local excluido.',inputSchema:{type:'object',properties,additionalProperties:false,required:[...(place?['place_id']:[]),...(write?['expected_version','request_id',rollback?'history_id':'patch']:[])]},annotations:{readOnlyHint:!write,destructiveHint:write,idempotentHint:true,openWorldHint:false}};
+ });
+}
