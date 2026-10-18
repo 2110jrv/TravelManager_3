@@ -1,7 +1,7 @@
 name: V2 remote source checks
 on:
   push:
-    branches: ['codex/v2-remote-022', 'codex/remote-*']
+    branches: ['codex/v2-cloud-stable', 'codex/v2-remote-022', 'codex/remote-*']
   pull_request:
 permissions:
   contents: read
@@ -18,5 +18,6 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build:v2
+      - run: npm run test:v2
       - run: npm run test:v2:remote-content
       - run: node --test tests/av2-travel-gps.test.mjs tests/av2-travel-replay.test.mjs tests/av2-travel-recovery.test.mjs tests/av2-travel-audio.test.mjs

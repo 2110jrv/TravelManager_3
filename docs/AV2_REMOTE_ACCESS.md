@@ -6,7 +6,7 @@ Estado: implementación preparada; API/MCP NO desplegados. La revisión anterior
 
 ## Arquitectura comprobada
 
-Fuente: `2110jrv/TravelManager_3`, rama `codex/v2-remote-022`, código `public/v2`. `main` conserva el app antiguo; su workflow `deploy-pages.yml` publica `public/` al recibir push. No mezclar esta rama en main ni publicar producción durante el viaje.
+Fuente: `2110jrv/TravelManager_3`, rama estable Cloud `codex/v2-cloud-stable`, código `public/v2`. Incluye `codex/v2-remote-022` y sus correcciones `d746aee`. `main` (`53e4ae5`) conserva el app antiguo; su workflow `deploy-pages.yml` publica `public/` al recibir push. No fusionar PR #1 ni cambiar main o la rama predeterminada para preparar Cloud.
 
 Staging independiente: `2110jrv/agenda-viajera-v2-staging`, URL https://2110jrv.github.io/agenda-viajera-v2-staging/v2/. El artefacto lo generan `scripts/av2-staging-build.mjs` y `av2-staging-audit.mjs`; la configuración privada llega después de autenticar. `v2/build.json` identifica el commit fuente servido.
 
@@ -22,15 +22,48 @@ La API reutiliza esos RPC y `av2_schedule_access`. Historial adicional append-on
 
 ## Flujo Cloud sin PC encendida
 
-En ChatGPT, crear/publicar un entorno Cloud conectado a este repositorio y preparar el checkout de `codex/v2-remote-022`, Node 22+, `npm ci`, `npm run build:v2`, `npm run test:v2:remote-content`. Después seleccionarlo desde el teléfono. Crear una rama `codex/<tarea>`, implementar, ejecutar CI, abrir PR y revisar el diff. La disponibilidad del entorno y su primer trabajo deben comprobarse en la cuenta; el conector GitHub por sí solo no demuestra acceso a Codex Cloud.
+TM3-CLOUD-SINCRONIZACION-028: el propietario confirmó disponible/publicado el entorno **Mis Proyectos - Codex Cloud**. Su tarea `work` abrió main antiguo; esa copia no es V2. La rama recomendada es `codex/v2-cloud-stable`. No se ha comprobado todavía una tarea Cloud ejecutando esa rama.
+
+En Settings > Codex Cloud > Environments, editar ese entorno y preparar el repositorio `2110jrv/TravelManager_3` con la rama estable. Si la interfaz ofrece selector de rama/revisión, elegir `codex/v2-cloud-stable`; si no, usar los comandos siguientes durante la preparación. Republish y abrir **una tarea nueva** en ese entorno desde el celular; reabrir `work` puede conservar su copia antigua.
+
+En el checkout Linux del repositorio (no en Windows), después de comprobar origin y árbol limpio:
+
+```bash
+pwd
+git remote get-url origin
+git status --short
+git fetch origin refs/heads/codex/v2-cloud-stable:refs/remotes/origin/codex/v2-cloud-stable
+git switch -c codex/cloud-028 origin/codex/v2-cloud-stable
+git rev-parse HEAD
+git merge-base --is-ancestor d746aee98a22f465cfd51d59764b6026b435738f HEAD
+git ls-files --error-unmatch public/v2/app.js public/v2/travel-audio.js public/v2/travel-gps.js public/v2/travel-replay.js
+npm ci
+npm run build:v2
+npm run test:v2
+npm run test:v2:remote-content
+```
+
+Usar un nombre de tarea nuevo si `codex/cloud-028` ya existe. No usar reset --hard, clean ni switch -C para arreglar una copia con cambios. Una rama local llamada `work` es aceptable solo si su SHA/ascendencia y archivos corresponden a V2; el nombre por sí solo no demuestra qué fuente cargó Cloud.
+
+### Si falla el proxy o fetch
+
+Verificar el destino y el acceso del entorno; mantener su proxy y certificados configurados. Permitir solo los hosts necesarios (`github.com`, `api.github.com`, `codeload.github.com`, `registry.npmjs.org`; añadir el host exacto de una descarga si falla). Guardar, comprobar, Republish y probar en una tarea nueva. No quitar el proxy ni desactivar TLS. [OpenAI Docs](https://learn.chatgpt.com/docs/environments/cloud-environments).
+
+```bash
+curl --head --connect-timeout 15 --max-time 30 https://github.com
+git ls-remote --heads origin codex/v2-cloud-stable
+npm ping --registry=https://registry.npmjs.org
+```
+
+No imprimir variables proxy, encabezados de autorización ni salida de `git credential`. Si un cliente tiene una configuración local obsoleta, corregirla con el proxy aprobado del entorno; no hacer unset global ni usar --noproxy, http.sslVerify=false o NODE_TLS_REJECT_UNAUTHORIZED=0. Un 407 requiere revisar autenticación del proxy/entorno; 401/403 de GitHub exige revisar la conexión GitHub y sus permisos; DNS, timeout o conexión rechazada al proxy requieren revisar su disponibilidad/configuración y volver a preparar el entorno. Si GitHub permite lectura pero falla el proxy de git, probar el conector GitHub para leer la revisión; eso no actualiza el checkout ni demuestra que las pruebas se ejecutaron sobre V2. Si el servicio sigue caído, conservar el trabajo y reportar host/código sin secretos; no continuar editando main viejo.
 
 Procedimiento del checkout Linux, una vez disponible el entorno Cloud en la cuenta:
 
 1. Conectar GitHub y seleccionar exclusivamente `2110jrv/TravelManager_3` al crear el entorno. No copiar `.av2-private`, adjuntos ni credenciales de Windows. Preparar Node 22 y acceso de instalación npm; publicar el entorno para seleccionarlo desde el celular.
 2. Comprobar `pwd`, `git remote get-url origin`, `git branch --show-current` y `git status --short`. Detenerse si origin no es este repositorio o hay cambios ajenos. La excepción Linux de AGENTS.md no autoriza otros repositorios.
-3. Ejecutar `git fetch origin codex/v2-remote-022`, luego `git switch -c codex/<numero-tarea> origin/codex/v2-remote-022`. Sustituir `<numero-tarea>` por el identificador real; nunca trabajar sobre main. No fusionar PR #1 para preparar el entorno.
-4. Ejecutar `npm ci`, `npm run build:v2`, `npm run test:v2:remote-content` y `git diff --check`. Implementar únicamente la tarea y repetir las pruebas afectadas. Guardar/push en la rama de tarea y abrir un PR hacia `codex/v2-remote-022`; revisar CI y diff antes de integrar a esa rama.
-5. El primer trabajo Cloud debe informar SHA, rama, origin y resultados de CI. Su disponibilidad y ejecución real siguen pendientes de verificación en la cuenta; GitHub Actions sí ejecuta estas pruebas en un runner remoto sin depender de esta PC.
+3. Crear cada rama de tarea desde `origin/codex/v2-cloud-stable` como en los comandos anteriores. Nunca trabajar sobre main ni fusionar PR #1 para preparar el entorno.
+4. Ejecutar `npm ci`, `npm run build:v2`, `npm run test:v2`, `npm run test:v2:remote-content` y `git diff --check`. Implementar únicamente la tarea y repetir las pruebas afectadas. Guardar/push en la rama de tarea y abrir un PR hacia `codex/v2-cloud-stable`; revisar CI y diff antes de integrar a esa rama.
+5. El primer trabajo Cloud debe informar SHA, rama, origin, los cuatro archivos requeridos y resultados. La cuenta ya tiene entorno disponible según el propietario; falta comprobar su checkout V2. GitHub Actions valida la rama estable en un runner limpio sin depender de esta PC.
 6. Publicación staging posterior: instalar el workflow preparado únicamente en el repositorio staging y configurar sus Pages para Actions con autorización. Ejecutar primero `dry_run=true` con el SHA completo aprobado; publicar solo con autorización staging, `dry_run=false` y `approve_staging=true`. No utilizar el workflow main del repositorio fuente. Para rollback, elegir un SHA anterior que incluya los scripts requeridos y repetir validación y aprobación. No revertir datos ni forzar ramas.
 
 Fuente: https://learn.chatgpt.com/docs/environments/cloud-environments
