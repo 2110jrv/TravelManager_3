@@ -19,7 +19,9 @@ begin
   select h.id,jsonb_build_object('history_id',h.id,'place_id',p_place,'tool',h.request->>'tool',
    'changed_fields',h.changed_fields,'record_id',h.result->'record'->>'id',
    'result_version',h.result->'record'->'version','created_at',h.created_at) row
-  from av2_remote_history h where h.trip_id=p_trip and (p_after is null or h.id>p_after)
+  from av2_remote_history h where h.trip_id=p_trip and h.request->>'tool' in ('update_place_notes','update_place_description','update_audio_guide','update_place_guide','rollback_content')
+   and h.changed_fields <@ array['notes','description','audio_guide','experience','affinity','prices','sources_say','safety','questions','dairy','limitations','sources','reviewed_at']::text[]
+   and (p_after is null or h.id>p_after)
    and (h.result->'record'->>'id'=p_place::text or h.result->'record'->'data'->>'place_id'=p_place::text)
   order by h.id limit p_limit+1
  ) page;

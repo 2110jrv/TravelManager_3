@@ -96,7 +96,7 @@ begin
  if jsonb_typeof(p_request)<>'object' or octet_length(p_request::text)>160000
   or exists(select 1 from jsonb_object_keys(p_request) k where k<>all(array['tool','request_id','place_id','record_id','expected_version','patch','history_id'])) then raise exception 'REMOTE_INVALID_INPUT';end if;
  request_id=(p_request->>'request_id')::uuid;tool=p_request->>'tool';
- if request_id is null or tool not in ('create_place','update_place_notes','update_place_description','update_place_metadata','update_audio_guide','update_place_guide','rollback_content')
+ if request_id is null or tool not in ('update_place_notes','update_place_description','update_audio_guide','update_place_guide','rollback_content')
   or coalesce(p_request->>'expected_version','')!~'^\d+$' then raise exception 'REMOTE_INVALID_INPUT';end if;
  perform pg_advisory_xact_lock(hashtextextended(p_trip::text||':places',0));
  perform pg_advisory_xact_lock(hashtextextended(p_trip::text||':remote-content',0));
@@ -107,6 +107,8 @@ begin
  if tool='rollback_content' then
   select * into undo from av2_remote_history where id=(p_request->>'history_id')::uuid and trip_id=p_trip;
   if not found or undo.before_record is null then raise exception 'REMOTE_NO_NONDESTRUCTIVE_ROLLBACK';end if;
+  if undo.request->>'tool' not in ('update_place_notes','update_place_description','update_audio_guide','update_place_guide','rollback_content')
+   or not(undo.changed_fields <@ array['notes','description','audio_guide','experience','affinity','prices','sources_say','safety','questions','dairy','limitations','sources','reviewed_at']::text[]) then raise exception 'REMOTE_FIELD_NOT_AUTHORIZED';end if;
   target=(undo.result->'record'->>'id')::uuid;record_kind=undo.result->'record'->>'kind';
  else
   target=(p_request->>'place_id')::uuid;
@@ -157,19 +159,10 @@ begin
   changes=changes-'coordinates_verified';
   if tool='update_place_notes' and (select array_agg(k) from jsonb_object_keys(changes) k) is distinct from array['notes'] then raise exception 'REMOTE_INVALID_INPUT';end if;
   if tool='update_place_description' and (select array_agg(k) from jsonb_object_keys(changes) k) is distinct from array['description'] then raise exception 'REMOTE_INVALID_INPUT';end if;
-  if tool='update_place_metadata' and exists(select 1 from jsonb_object_keys(changes) k where k<>all(array['label','priority','lat','lng','google_maps_url','google_place_id','resolved_address','resolved_city'])) then raise exception 'REMOTE_INVALID_INPUT';end if;
-  if exists(select 1 from jsonb_object_keys(changes) k where k<>all(array['name','description','notes','label','priority','lat','lng','google_maps_url','google_place_id','resolved_address','resolved_city'])) then raise exception 'REMOTE_INVALID_INPUT';end if;
+  if exists(select 1 from jsonb_object_keys(changes) k where k<>all(array['description','notes'])) then raise exception 'REMOTE_INVALID_INPUT';end if;
   if tool<>'create_place' and changes ? 'name' then raise exception 'REMOTE_IDENTITY_PROTECTED';end if;
   if changes ? 'notes' and (jsonb_typeof(changes->'notes')<>'string' or length(changes->>'notes')>4000) then raise exception 'REMOTE_INVALID_INPUT';end if;
   if changes ? 'description' and (jsonb_typeof(changes->'description')<>'string' or length(changes->>'description')>4000) then raise exception 'REMOTE_INVALID_INPUT';end if;
-  if tool='create_place' then
-   if current_version<>0 then raise exception 'REMOTE_VERSION_CONFLICT';end if;
-   if jsonb_typeof(changes->'name') is distinct from 'string' or length(trim(changes->>'name')) not between 1 and 250 then raise exception 'REMOTE_INVALID_INPUT';end if;
-   if exists(select 1 from av2_places_of_interest p where p.trip_id=p_trip and p.deleted_at is null
-    and lower(regexp_replace(trim(p.name),'\s+',' ','g'))=lower(regexp_replace(trim(changes->>'name'),'\s+',' ','g'))
-    and coalesce(p.resolved_address,'')=coalesce(changes->>'resolved_address','') and coalesce(p.resolved_city,'')=coalesce(changes->>'resolved_city','')
-    and p.lat is not distinct from (changes->>'lat')::double precision and p.lng is not distinct from (changes->>'lng')::double precision) then raise exception 'REMOTE_DUPLICATE_PLACE';end if;
-  end if;
   operation=jsonb_build_object('id',request_id,'record_id',target,'kind',record_kind,'device_id',p_device,'actor_user',d.user_id,'installation_id',d.installation_id,'base_version',current_version,'base',coalesce(before_value->'data','{}'),'changes',changes);
   result=av2_place_apply(p_trip,p_device,p_token,operation);
   if (result->'record'->>'id')::uuid<>target then raise exception 'REMOTE_DUPLICATE_PLACE';end if;
@@ -197,12 +190,9 @@ begin
   result=av2_sync_apply(p_trip,p_device,p_token,operation);
  end if;
  if jsonb_array_length(coalesce(result->'conflicts','[]'))<>0 then raise exception 'REMOTE_VERSION_CONFLICT';end if;
- if tool='create_place' then
-  insert into av2_remote_public_places(trip_id,place_id,approved_by) values(p_trip,target,d.user_id) on conflict(trip_id,place_id) do nothing;
- end if;
  insert into av2_remote_history(id,trip_id,actor_user,device_id,request,before_record,result,changed_fields)
  values(request_id,p_trip,d.user_id,p_device,p_request,before_value,result,fields);
- return result||jsonb_build_object('history_id',request_id,'persisted',true);
+ return result||jsonb_build_object('history_id',request_id,'persisted',true,'changed_fields',fields);
 end $$;
 revoke all on function public.av2_remote_content_write(uuid,uuid,text,jsonb) from public,anon;
 grant execute on function public.av2_remote_content_write(uuid,uuid,text,jsonb) to authenticated;

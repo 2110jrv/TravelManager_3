@@ -1,4 +1,4 @@
-import { contentCall, toolDefinitions, ContentError, WRITE_TOOLS, CONTENT_EXCLUDED_TOOLS } from "./content.js";
+import { contentCall, toolDefinitions, ContentError, WRITE_TOOLS } from "./content.js";
 import { remoteAccess } from "./access.js";
 function createRemoteHandler({ url, anon, createClient, cipher, serviceRoleKey }) {
   const resource = url + "/functions/v1/av2-remote-content";
@@ -74,29 +74,13 @@ function createRemoteHandler({ url, anon, createClient, cipher, serviceRoleKey }
       }
       if (isMcp) {
         if (!grant) throw new ContentError("OAUTH_CLIENT_GRANT_REQUIRED", 403);
-        if (body.method === "initialize") return reply({ jsonrpc: "2.0", id: rpcId, result: { protocolVersion: ["2025-03-26", "2025-06-18"].includes(body.params?.protocolVersion) ? body.params.protocolVersion : "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "Agenda Viajera private content", version: "content-031" } } });
+        if (body.method === "initialize") return reply({ jsonrpc: "2.0", id: rpcId, result: { protocolVersion: ["2025-03-26", "2025-06-18"].includes(body.params?.protocolVersion) ? body.params.protocolVersion : "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "Agenda Viajera private content", version: "content-035" } } });
         if (body.method === "notifications/initialized") return reply(null, 202);
-        if (body.method === "tools/list") return reply({ jsonrpc: "2.0", id: rpcId, result: { tools: toolDefinitions().filter((t) => !CONTENT_EXCLUDED_TOOLS.includes(t.name) && (canWrite || !WRITE_TOOLS.includes(t.name))) } });
+        if (body.method === "tools/list") return reply({ jsonrpc: "2.0", id: rpcId, result: { tools: toolDefinitions().filter((t) => canWrite || !WRITE_TOOLS.includes(t.name)) } });
         if (body.method !== "tools/call") throw new ContentError("METHOD_NOT_FOUND", 404);
       } else if (!path.endsWith("/api")) throw new ContentError("MCP_REQUEST_REQUIRED");
       const tool = isMcp ? body.params?.name : body.tool, args = isMcp ? body.params?.arguments : body.arguments;
-      if (grant && CONTENT_EXCLUDED_TOOLS.includes(tool)) throw new ContentError("OAUTH_CONTENT_SCOPE_REQUIRED", 403);
-      const itinerary = async () => {
-        const config = await rpc("av2_trip_configuration", credentials);
-        const events = [];
-        let page;
-        do {
-          const params = new URLSearchParams({ singleEvents: "true", showDeleted: "false", maxResults: "2500", timeMin: config.start + "T00:00:00Z", timeMax: config.end + "T23:59:59Z" });
-          if (page) params.set("pageToken", page);
-          const r = await client.functions.invoke("av2-google-token", { headers: { Authorization: authorization }, body: { ...credentials, action: "google_read", path: "calendar/v3/calendars/" + encodeURIComponent(config.calendarId) + "/events?" + params } });
-          if (r.error) throw new ContentError("CALENDAR_READ_UNAVAILABLE", 503);
-          const raw = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(r.data.body), (c) => c.charCodeAt(0))));
-          events.push(...raw.items || []);
-          page = raw.nextPageToken;
-        } while (page);
-        return { source: "Google Calendar", timezone: config.timezone, events };
-      };
-      const result = await contentCall(tool, args, { rpc, credentials, canWrite, itinerary });
+      const result = await contentCall(tool, args, { rpc, credentials, canWrite });
       return reply(isMcp ? { jsonrpc: "2.0", id: rpcId, result: { content: [{ type: "text", text: JSON.stringify(result) }], structuredContent: result } } : result);
     } catch (e) {
       const error = e instanceof ContentError ? e : new ContentError("REMOTE_UNAVAILABLE", 503);
