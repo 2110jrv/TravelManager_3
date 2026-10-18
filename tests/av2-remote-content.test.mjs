@@ -7,7 +7,7 @@ import{SupabaseRemote,SyncEngine}from'../public/v2/sync.js';
 const id=()=>crypto.randomUUID();
 test('remote tools reject destructive, ambiguous, unversioned and unverified coordinate requests',()=>{
  assert.throws(()=>validateCall('delete_place',{}),/UNKNOWN_TOOL/);assert.throws(()=>validateCall('update_audio_guide',{place_id:id(),patch:{audio_guide:'text'}}),/VERSION/);
- const base={place_id:id(),request_id:id(),expected_version:1};assert.throws(()=>validateCall('update_place_notes',{...base,patch:{description:'a',lat:10}}),/FIELD_NOT_ALLOWED/);
+ const base={place_id:id(),request_id:id(),expected_version:1};assert.throws(()=>validateCall('update_place_notes',{...base,patch:{notes:'a',description:'wrong field'}}),/FIELD_NOT_ALLOWED/);assert.throws(()=>validateCall('update_place_description',{...base,patch:{description:'a',notes:'wrong field'}}),/FIELD_NOT_ALLOWED/);
  assert.throws(()=>validateCall('update_place_metadata',{...base,patch:{lat:18,lng:-66}}),/VERIFIED/);
  assert.throws(()=>validateCall('update_place_guide',{...base,patch:{audio_guide:'overwrite'}}),/FIELD_NOT_ALLOWED/);
  assert.throws(()=>validateCall('create_place',{...base,expected_version:0,patch:{name:'Casa',lat:18,lng:-66}}),/PUBLIC_PLACE/);
@@ -16,9 +16,9 @@ test('remote tools reject destructive, ambiguous, unversioned and unverified coo
 test('read-only requests cannot reach writes; pagination hides Casa and keeps notes literal',async()=>{
  const a=id(),b=id(),places=[{id:a,version:2,kind:'places_of_interest',data:{name:'Public place',description:' exact\nnotes '}},{id:b,kind:'places_of_interest',data:{name:'Casa',lat:null,lng:null}}];let writes=0;
  const context={credentials:{p_trip:id()},canWrite:false,rpc:async name=>{if(name.includes('write'))writes++;return name==='av2_sync_places'?places:[];}};
- const list=await contentCall('list_places',{},context);assert.equal(list.items.length,1);assert.equal((await contentCall('get_place_notes',{place_id:a},context)).description,' exact\nnotes ');
+ const list=await contentCall('list_places',{},context);assert.equal(list.items.length,1);assert.deepEqual((({notes,legacy_description_fallback})=>({notes,legacy_description_fallback}))(await contentCall('get_place_notes',{place_id:a},context)),{notes:' exact\nnotes ',legacy_description_fallback:true});assert.equal((await contentCall('get_place_description',{place_id:a},context)).description,' exact\nnotes ');
  await assert.rejects(contentCall('get_place',{place_id:b},context),/PLACE_NOT_AVAILABLE/);
- await assert.rejects(contentCall('update_place_notes',{place_id:a,request_id:id(),expected_version:2,patch:{description:'b'}},context),/READ_ONLY/);assert.equal(writes,0);
+ await assert.rejects(contentCall('update_place_notes',{place_id:a,request_id:id(),expected_version:2,patch:{notes:'b'}},context),/READ_ONLY/);assert.equal(writes,0);
 });
 test('real SQL contracts: authenticated create/read/write/rollback, exact versions, immutable history and original content preservation',async(t)=>{
  const db=new PGlite(),trip='7c0801ee-07b1-4d86-95d7-202610200001',auth=id(),installation=id(),token='b'.repeat(64);
@@ -28,14 +28,18 @@ test('real SQL contracts: authenticated create/read/write/rollback, exact versio
  await db.query('insert into auth.users values($1)',[auth]);await db.query("select set_config('request.jwt.claim.sub',$1,false)",[auth]);await db.exec("update av2_app_users set pin_salt='fake',pin_hash='fake',pin_version=1");const actor=(await db.query("select id from av2_app_users where name='Jonathan'")).rows[0].id;
  const device=(await db.query('select av2_pin_authorize($1,$2,$3,$4,$5,$6,$7,$8) r',[trip,actor,auth,installation,token,{},'Remote test','qa'])).rows[0].r.device.id;
  const seeded=id();await db.query("insert into av2_places_of_interest(id,trip_id,name,description,created_by,created_device) values($1,$2,'Ordinary private location','literal original notes',$3,$4)",[seeded,trip,actor,device]);
+ const unreviewed=id();await db.query("insert into av2_places_of_interest(id,trip_id,name,description,created_by,created_device) values($1,$2,'Unreviewed public-looking place','legacy description remains exact',$3,$4)",[unreviewed,trip,actor,device]);
  await db.query("insert into av2_records(id,trip_id,kind,data,updated_by_device) select $1,trip_id,'app_settings',jsonb_build_object('type','place_guide','place_id',id,'poi_code',poi_code,'name',name,'guide',jsonb_build_object('audio_guide','original guide','geo',jsonb_build_object('private',true))),$2 from av2_places_of_interest where id=$3",[id(),device,seeded]);
- const snapshot=async()=>({pins:(await db.query('select to_jsonb(p) r from av2_places_of_interest p where id=$1',[seeded])).rows,records:(await db.query("select to_jsonb(r) r from av2_records r where data->>'place_id'=$1",[seeded])).rows});
+ const snapshot=async()=>({pins:(await db.query("select to_jsonb(p)-'notes' r from av2_places_of_interest p where id=$1",[seeded])).rows,records:(await db.query("select to_jsonb(r) r from av2_records r where data->>'place_id'=$1",[seeded])).rows});
  const originals=await snapshot();await db.exec(readFileSync(new URL('../supabase/migrations/20261018190000_av2_remote_content.sql',import.meta.url),'utf8'));assert.deepEqual(await snapshot(),originals);
- await db.exec(readFileSync(new URL('../supabase/migrations/20261018200000_av2_remote_content_history.sql',import.meta.url),'utf8'));
+ const historyBeforeSplit=await snapshot();await db.exec(readFileSync(new URL('../supabase/migrations/20261018200000_av2_remote_content_history.sql',import.meta.url),'utf8'));
+ await db.exec(readFileSync(new URL('../supabase/migrations/20261018210000_av2_split_pin_notes.sql',import.meta.url),'utf8'));assert.deepEqual((await snapshot()).records,historyBeforeSplit.records);assert.equal((await db.query('select description,notes from av2_places_of_interest where id=$1',[unreviewed])).rows[0].notes,null);assert.equal((await db.query('select description,notes from av2_places_of_interest where id=$1',[unreviewed])).rows[0].description,'legacy description remains exact');
  await db.exec('set role authenticated');const credentials={p_trip:trip,p_device:device,p_token:token},rpc=async(name,args)=>{const call=name+'('+Object.keys(args).map((_,i)=>'$'+(i+1)).join(',')+')';if(['av2_sync_pull','av2_sync_conflicts'].includes(name))return(await db.query('select to_jsonb(x) result from '+call+' x',Object.values(args))).rows.map(r=>r.result);return(await db.query('select '+call+' result',Object.values(args))).rows[0].result;},context={credentials,rpc,canWrite:true};
- const place=id(),create={place_id:place,expected_version:0,request_id:id(),patch:{name:'REMOTE_TEST',description:'EXACT original notes',lat:null,lng:null}};
+ const place=id(),create={place_id:place,expected_version:0,request_id:id(),patch:{name:'REMOTE_TEST',description:'Historical description',notes:'Independent original notes',lat:null,lng:null}};
  let r=await contentCall('create_place',create,context);assert.equal(r.record.id,place);assert.equal(r.record.version,1);assert.match(r.record.data.poi_code,/^POI_/);assert.equal(r.record.data.importance,'optional');assert.deepEqual(await contentCall('create_place',create,context),r);
  await assert.rejects(contentCall('get_place',{place_id:seeded},context),/NOT_AVAILABLE/);
+ await assert.rejects(contentCall('get_place',{place_id:unreviewed},context),/NOT_AVAILABLE/);
+ await assert.rejects(contentCall('get_place_notes',{place_id:unreviewed},context),/NOT_AVAILABLE/);
  await assert.rejects(contentCall('create_place',{...create,place_id:id(),request_id:id()},context),/DUPLICATE/);
  await assert.rejects(contentCall('create_place',{...create,request_id:id()},context),/VERSION_CONFLICT/);
  assert.equal((await contentCall('list_places',{},context)).items.filter(p=>p.id===place).length,1);
@@ -46,21 +50,30 @@ test('real SQL contracts: authenticated create/read/write/rollback, exact versio
  await assert.rejects(contentCall('update_audio_guide',{...next,request_id:id()},context),/VERSION_CONFLICT/);
  const restored=await contentCall('rollback_content',{history_id:changed.history_id,expected_version:changed.record.version,request_id:id()},context);assert.equal(restored.record.data.guide.audio_guide,'Narration A');
  await assert.rejects(contentCall('rollback_content',{history_id:r.history_id,expected_version:r.record.version,request_id:id()},context),/NONDESTRUCTIVE/);
- await assert.rejects(db.exec('select * from av2_remote_grants'),/permission denied/);await assert.rejects(db.exec('select * from av2_remote_history'),/permission denied/);
- assert.equal((await contentCall('get_place_notes',{place_id:place},context)).description,'EXACT original notes');
+ await assert.rejects(db.exec('select * from av2_remote_grants'),/permission denied/);await assert.rejects(db.exec('select * from av2_remote_history'),/permission denied/);await assert.rejects(db.exec('select * from av2_remote_public_places'),/permission denied/);
+ assert.equal((await contentCall('get_place_notes',{place_id:place},context)).notes,'Independent original notes');assert.equal((await contentCall('get_place_description',{place_id:place},context)).description,'Historical description');
+ await t.test('separate notes never overwrite legacy descriptions; unreviewed existing pins remain private by default',async()=>{
+  const before=await contentCall('get_place_notes',{place_id:place},context);assert.equal(before.legacy_description_fallback,false);
+  const first=await contentCall('update_place_notes',{place_id:place,expected_version:r.record.version,request_id:id(),patch:{notes:'new independent notes'}},context);
+  assert.equal(first.record.data.notes,'new independent notes');assert.equal(first.record.data.description,'Historical description');
+  const readDescription=await contentCall('get_place_description',{place_id:place},context);assert.equal(readDescription.description,'Historical description');
+  const second=await contentCall('update_place_description',{place_id:place,expected_version:first.record.version,request_id:id(),patch:{description:'separate description'}},context);
+  assert.equal(second.record.data.notes,'new independent notes');assert.equal(second.record.data.description,'separate description');
+  assert.equal((await contentCall('get_place_notes',{place_id:place},context)).notes,'new independent notes');
+ });
  await t.test('rollback only changed fields, restores absence and rejects intervening changes for all four tools',async()=>{
   const getPin=()=>contentCall('get_place',{place_id:place},context),getGuide=()=>contentCall('get_place_guide',{place_id:place},context);
   for(const [tool,patch,guide]of[
    ['update_audio_guide',{audio_guide:'C'},true],['update_place_guide',{experience:'new research',limitations:'pending verification'},true],
-   ['update_place_notes',{description:'new notes'},false],['update_place_metadata',{label:'Restaurant',priority:'important'},false]]){
+   ['update_place_notes',{notes:'new notes'},false],['update_place_description',{description:'new description'},false],['update_place_metadata',{label:'Restaurant',priority:'important'},false]]){
    const before=guide?await getGuide():await getPin(),version=before.version;
    const written=await contentCall(tool,{place_id:place,expected_version:version,request_id:id(),patch},context);
    for(const [field,value]of Object.entries(patch))assert.deepEqual(guide?written.record.data.guide[field]:written.record.data[field],value);
    const back=await contentCall('rollback_content',{history_id:written.history_id,expected_version:written.record.version,request_id:id()},context);
-   assert.deepEqual(guide?back.record.data.guide:back.record.data.description,guide?before.guide:before.data.description);
+   if(guide)assert.deepEqual(back.record.data.guide,before.guide);else assert.equal(back.record.data[Object.keys(patch)[0]],before.data[Object.keys(patch)[0]]);
    if(!guide)for(const field of ['label','priority','lat','lng','assignment_mode','assigned_dates','visited'])assert.deepEqual(back.record.data[field],before.data[field]);
    const first=await contentCall(tool,{place_id:place,expected_version:back.record.version,request_id:id(),patch},context);
-   const second=await contentCall(tool,{place_id:place,expected_version:first.record.version,request_id:id(),patch:guide?{[Object.keys(patch)[0]]:'later edit'}:tool==='update_place_notes'?{description:'later edit'}:{label:'later edit'}},context);
+   const second=await contentCall(tool,{place_id:place,expected_version:first.record.version,request_id:id(),patch:guide?{[Object.keys(patch)[0]]:'later edit'}:tool==='update_place_notes'?{notes:'later edit'}:tool==='update_place_description'?{description:'later edit'}:{label:'later edit'}},context);
    await assert.rejects(contentCall('rollback_content',{history_id:first.history_id,expected_version:second.record.version,request_id:id()},context),/VERSION_CONFLICT/);
    assert.equal((guide?await getGuide():await getPin()).version,second.record.version);
   }
@@ -110,7 +123,7 @@ test('real SQL contracts: authenticated create/read/write/rollback, exact versio
   await assert.rejects(contentCall('get_place',{place_id:p},context),/NOT_AVAILABLE/);
   await assert.rejects(contentCall('get_audio_guide',{place_id:p},context),/NOT_AVAILABLE/);
   await assert.rejects(contentCall('list_content_history',{place_id:p},context),/NOT_FOUND/);
-  for(const [tool,patch]of[['update_place_notes',{description:'leak'}],['update_place_metadata',{label:'leak'}],['update_place_guide',{experience:'leak'}]])await assert.rejects(contentCall(tool,{place_id:p,expected_version:tool==='update_place_guide'?g.record.version:made.record.version,request_id:id(),patch},context),/PRIVATE_PLACE/);
+  for(const [tool,patch]of[['update_place_notes',{notes:'leak'}],['update_place_description',{description:'leak'}],['update_place_metadata',{label:'leak'}],['update_place_guide',{experience:'leak'}]])await assert.rejects(contentCall(tool,{place_id:p,expected_version:tool==='update_place_guide'?g.record.version:made.record.version,request_id:id(),patch},context),/PRIVATE_PLACE/);
   await assert.rejects(contentCall('update_audio_guide',a,context),/PRIVATE_PLACE/);
   await assert.rejects(contentCall('rollback_content',{history_id:g.history_id,expected_version:g.record.version,request_id:id()},context),/PRIVATE_PLACE/);
   await assert.rejects(rpc('av2_remote_content_write',{...credentials,p_request:{tool:'update_place_metadata',place_id:p,expected_version:made.record.version,request_id:id(),patch:{name:'Bypass identity'}}}),/PRIVATE_PLACE/);
@@ -118,7 +131,7 @@ test('real SQL contracts: authenticated create/read/write/rollback, exact versio
  });
  await t.test('SQL independently enforces OAuth write grants, expiry, revocation and device binding',async()=>{
   const client=id(),claims=JSON.stringify({client_id:client});await db.query("select set_config('request.jwt.claims',$1,false)",[claims]);
-  const write=()=>contentCall('update_place_notes',{place_id:place,expected_version:1,request_id:id(),patch:{description:'forbidden'}},context);
+  const write=()=>contentCall('update_place_notes',{place_id:place,expected_version:1,request_id:id(),patch:{notes:'forbidden'}},context);
   await assert.rejects(write(),/OAUTH_READ_ONLY/);
   await assert.rejects(contentCall('list_content_history',{place_id:place},context),/GRANT_REVOKED/);
   await db.exec('reset role');await db.query("insert into av2_remote_grants(auth_user_id,client_id,trip_id,actor_user,device_id,cipher,can_write,expires_at) values($1,$2,$3,$4,$5,'{}',false,now()+interval '1 day')",[auth,client,trip,actor,device]);await db.exec('set role authenticated');await assert.rejects(write(),/OAUTH_READ_ONLY/);
@@ -131,15 +144,15 @@ test('real SQL contracts: authenticated create/read/write/rollback, exact versio
   const store={pinMode:true,device,deviceToken:token,activeUser:{id:actor},all:async table=>table==='records'?[...cached.values()]:[],put:async(table,row)=>{if(table==='meta')meta.set(row.id,row);},ingest:async rows=>{for(const row of rows)cached.set(row.id,structuredClone(row));},ingestConflicts:async()=>{}};
   const remote=new SupabaseRemote({rpc:async(name,args)=>{if(!online)return{error:{message:'OFFLINE'}};return{data:await rpc(name,args),error:null};}},device,token,trip);remote.pinAccess={store,validate:async()=>{if(!online)throw Error('OFFLINE');}};
   const sync=new SyncEngine(store,remote);await sync.run();assert.equal(cached.get(place).id,place);
-  const before=await contentCall('get_place_notes',{place_id:place},context),edit=await contentCall('update_place_notes',{place_id:place,expected_version:before.version,request_id:id(),patch:{description:'remote sync text'}},context);
-  await sync.run();assert.equal(cached.get(place).data.description,'remote sync text');assert.equal(cached.get(place).version,edit.record.version);
-  online=false;await assert.rejects(sync.run(),/OFFLINE/);assert.equal(cached.get(place).data.description,'remote sync text');
+  const before=await contentCall('get_place_notes',{place_id:place},context),edit=await contentCall('update_place_notes',{place_id:place,expected_version:before.version,request_id:id(),patch:{notes:'remote sync text'}},context);
+  await sync.run();assert.equal(cached.get(place).data.notes,'remote sync text');assert.equal(cached.get(place).version,edit.record.version);
+  online=false;await assert.rejects(sync.run(),/OFFLINE/);assert.equal(cached.get(place).data.notes,'remote sync text');
   online=true;await sync.run();assert.equal(cached.get(place).version,edit.record.version);assert.ok(meta.has('last-sync'));
  });
  await db.exec('reset role');assert.deepEqual(await snapshot(),originals);assert.ok(!(await db.query('select request from av2_remote_history')).rows.some(r=>JSON.stringify(r).includes(token)));await db.exec('set role authenticated');
  await db.exec('reset role');await assert.rejects(db.exec('delete from av2_remote_history'),/APPEND_ONLY/);
  await db.query("update av2_app_users set agenda_role='VIEWER' where id=$1",[actor]);await db.exec('set role authenticated');
- await assert.rejects(contentCall('update_place_notes',{place_id:place,expected_version:1,request_id:id(),patch:{description:'blocked'}},context),/READ_ONLY/);
+ await assert.rejects(contentCall('update_place_notes',{place_id:place,expected_version:1,request_id:id(),patch:{notes:'blocked'}},context),/READ_ONLY/);
  await db.exec('reset role');await db.query("update av2_user_devices set state='Revocado' where device_id=$1",[device]);await db.exec('set role authenticated');
  await assert.rejects(contentCall('get_place',{place_id:place},context),/REVOKED/);
  }finally{await db.close();}
@@ -154,7 +167,7 @@ test('HTTP MCP/API enforce delegated read-only permissions, expiry, revocation a
  const handler=createRemoteHandler({url,anon:'public',serviceRoleKey:'SERVER_KEY_TEST',createClient:()=>fakeClient,cipher:async()=>({open:async()=>{opened++;return credentials;}})});
  const token=claims=>'Bearer '+['e30',Buffer.from(JSON.stringify(claims)).toString('base64url'),'signature'].join('.');
  const call=(path,body,claims={client_id:clientId})=>handler(new Request(url+'/functions/v1/av2-remote-content'+path,{method:'POST',headers:{Authorization:token(claims),'Content-Type':'application/json'},body:JSON.stringify(body)}));
- const patch={place_id:id(),expected_version:1,request_id:id(),patch:{description:'edit'}};
+ const patch={place_id:id(),expected_version:1,request_id:id(),patch:{notes:'edit'}};
  const api={tool:'update_place_notes',arguments:patch},mcp={jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'update_place_notes',arguments:patch}};
  for(const [path,body]of[['/api',api],['',mcp]]){const r=await call(path,body);assert.equal(r.status,403);assert.doesNotMatch(await r.text(),/ffffffff|SERVER_KEY_TEST|sealed|p_token/);}
  assert.equal(writes,0);
@@ -191,8 +204,9 @@ test('MCP schemas disclose exact field and version contracts without device secr
  const tools=toolDefinitions(),by=name=>tools.find(t=>t.name===name);
  assert.deepEqual(by('list_content_history').inputSchema.required,['place_id']);
  assert.equal(by('list_content_history').annotations.readOnlyHint,true);
- assert.deepEqual(Object.keys(by('update_place_notes').inputSchema.properties.patch.properties),['description']);
+ assert.deepEqual(Object.keys(by('update_place_notes').inputSchema.properties.patch.properties),['notes']);
  assert.deepEqual(Object.keys(by('update_audio_guide').inputSchema.properties.patch.properties),['audio_guide']);
+ assert.deepEqual(Object.keys(by('update_place_description').inputSchema.properties.patch.properties),['description']);
  assert.equal(by('update_place_guide').inputSchema.properties.patch.additionalProperties,false);
  assert.deepEqual(by('rollback_content').inputSchema.required,['expected_version','request_id','history_id']);
  assert.doesNotMatch(JSON.stringify(tools),/p_token|p_device|service_role/);

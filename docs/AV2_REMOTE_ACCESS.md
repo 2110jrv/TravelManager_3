@@ -2,7 +2,7 @@
 
 Revisión de seguridad: TM3-ACCESO-REMOTO-024; preparación Cloud: TM3-ACCESO-CONTENIDO-031. No aplicar migraciones ni desplegar API/MCP hasta nueva autorización explícita. PR #1 permanece en borrador, sin fusionar.
 
-Estado: implementación preparada; API/MCP NO desplegados. La revisión anterior de la migración pasó una transacción real con rollback; la revisión de seguridad actual se valida únicamente en PostgreSQL local PGlite. La aplicación persistente fue rechazada por revisión automática y el propietario ordenó expresamente no ejecutarla todavía. No se creó el pin remoto de prueba ni se modificaron datos del viaje. Antes de ejecutar la API: autorizar y aplicar, en orden, `20261018190000_av2_remote_content.sql` y `20261018200000_av2_remote_content_history.sql`, provisionar `AV2_REMOTE_ENCRYPTION_KEY` exclusivamente en servidor y desplegar la función; luego probar guardado/sync/reversión real antes de activar OAuth o publicar la interfaz de consentimiento. El workflow staging está preparado en `deploy/`, todavía no instalado en el repositorio staging.
+Estado: implementación preparada; API/MCP NO desplegados. Migraciones y cambios actuales comprobados solo en PostgreSQL local PGlite descartable; no se aplicaron a Supabase. Se preserva cualquier migración anterior sin revertirla. La API no se despliega hasta que el propietario autorice el entorno aislado, el respaldo y la revisión exacta. No se creó un pin real ni se modificó el viaje.
 
 ## Arquitectura comprobada
 
@@ -10,7 +10,7 @@ Fuente: `2110jrv/TravelManager_3`, rama estable Cloud `codex/v2-cloud-stable`, c
 
 Staging independiente: `2110jrv/agenda-viajera-v2-staging`, URL https://2110jrv.github.io/agenda-viajera-v2-staging/v2/. El artefacto lo generan `scripts/av2-staging-build.mjs` y `av2-staging-audit.mjs`; la configuración privada llega después de autenticar. `v2/build.json` identifica el commit fuente servido.
 
-Supabase: `cslludzuejkhsydqiabx`. Las tablas V2 son `av2_*`; las tablas históricas `av_*` no alimentan esta interfaz. Pins: `av2_places_of_interest`, UUID estable, `poi_code` inmutable; notas `description`, categoría `label`, coordenadas `lat/lng`. Guías: `av2_records`, kind `app_settings`, tipo `place_guide`, unión `data.place_id`; narración `data.guide.audio_guide`. Geometrías en `guide.geo`; rutas y plantillas en tipos `travel_network` y `travel_journey`.
+Supabase previsto: `cslludzuejkhsydqiabx`. Las tablas V2 son `av2_*`; las tablas históricas `av_*` no alimentan esta interfaz. Pins: `av2_places_of_interest`, UUID estable, `poi_code` inmutable; categoría `label`, coordenadas `lat/lng`, Descripción en `description` y Mis notas en `notes` (columna nueva nullable). Antes de esta separación, la aplicación presentaba `description` como Mis notas; las filas viejas conservan exactamente ese texto y `notes=NULL`, sin backfill ni inferencia. Lectores antiguos siguen leyendo description. En lectura remota de pins viejos, Mis notas usa temporalmente description como fallback y marca `legacy_description_fallback=true`. Al editar desde la UI antigua, el formulario conserva el texto visible al enviar ambos campos. Guías: `av2_records`, kind `app_settings`, tipo `place_guide`, unión `data.place_id`; Audio Guide es `data.guide.audio_guide` en el mismo registro, sin reemplazar los demás campos de guía. Geometrías en `guide.geo`.
 
 Google Calendar sigue siendo canónico para eventos y reservas. `av2-google-token` conserva lectura y edición existentes. La sesión directa conserva la lectura de Calendar existente. Las concesiones OAuth de contenido ahora excluyen Calendar, rutas y recorridos; no alteran eventos.
 
@@ -284,3 +284,31 @@ instalada y su registry no está permitido en la política de red actual. No se
 cambió la política ni se intentó sortearla. Las migraciones se comprobaron con
 PostgreSQL PGlite desechable en memoria. Motorola y OAuth/MCP en ChatGPT real
 siguen pendientes de la activación expresamente autorizada.
+
+## Actualización TM3-ACCESO-CONTENIDO-034
+
+Esta actualización reemplaza cualquier descripción anterior que afirmaba que Descripción y Mis notas eran un mismo campo, que enumeraba solo dos migraciones o que permitía exponer pins existentes sin aprobación explícita por pin.
+
+### Esquema y separación de campos
+
+`description` existía en `av2_places_of_interest` y era la fuente mostrada como Mis notas en la aplicación anterior. `guide` y `audio_guide` son claves distintas dentro de `av2_records.data.guide`; la API fusiona solo las claves autorizadas. La nueva columna `notes` separa las notas sin mover ni reinterpretar cadenas antiguas: comienza NULL y solo se escribe cuando alguien guarda Mis notas. El lector ofrece la descripción antigua como fallback marcado hasta que existan notas independientes. Descripción y notas tienen herramientas MCP distintas, validación, historial y rollback por campo; ninguna escritura copia sobre el otro campo. Audio Guide preserva los demás campos de guía. UUID y poi_code no son modificables por el cliente.
+
+### Privacidad por defecto
+
+La tabla `av2_remote_public_places` exige aprobación explícita en servidor para exponer pins existentes. Todo pin sin aprobación se oculta y su lectura, edición e historial fallan cerrados, aunque su nombre parezca público. Casa, variantes Unicode y marcadores de privacidad quedan además bloqueados por UUID. Un pin nuevo solo se añade a la lista tras validar nombre y payload público. El acceso remoto no consulta itinerario, Calendar, rutas ni recorridos. No se escaneó ni cambió el inventario real; al activar en sandbox, el propietario debe aprobar explícitamente solo pins sintéticos o revisados que quiera compartir.
+
+### Migraciones y activación aislada
+
+La cadena completa consta de `20261018190000_av2_remote_content.sql`, `20261018200000_av2_remote_content_history.sql` y la migración aditiva `20261018210000_av2_split_pin_notes.sql`. Se probaron en ese orden con las migraciones existentes hasta `20261017120000` sobre PGlite en memoria: filas preexistentes se mantienen idénticas salvo la columna nueva NULL; se ejercitaron permisos, conflictos y rollback. La compatibilidad cubre también `priority` del esquema previo. Esto no sustituye una revisión contra copia real del esquema, que no se consultó.
+
+Procedimiento futuro, exclusivamente aislado: (1) exportar esquema y respaldo cifrado de un sandbox desechable; guardar SHA-256 y conteos; confirmar que está separado de Calendar/datos reales; (2) restaurar en un proyecto Supabase aislado y verificar inventario de migraciones; (3) aplicar manualmente solo las tres migraciones aprobadas y en orden; (4) validar que descripciones coincidan byte por byte, `notes` siga NULL, UUID/poi_code no cambien y la lista pública esté vacía salvo pins sintéticos aprobados; (5) configurar el secreto de cifrado en el gestor de secretos del sandbox, desplegar solo su Edge Function y probar lectura, escritura, conflicto, historial, reversión y revocación con pins sintéticos; (6) ante un fallo, revocar cliente/tokens, deshabilitar la función aislada y restaurar el proyecto desechable desde respaldo. No borrar `notes` si recibió datos. Nada de esto se ejecutó en esta tarea.
+
+### Conexión OAuth/MCP
+
+Endpoint MCP propuesto: `https://cslludzuejkhsydqiabx.supabase.co/functions/v1/av2-remote-content`. En ChatGPT, Configuración → Apps/Conectores → crear conexión MCP personalizada, indicar el endpoint del sandbox y elegir OAuth. Copiar el callback exacto que muestre ChatGPT y registrarlo sin comodines en el cliente OAuth del sandbox; completar Authorization Code con PKCE S256; regresar a ChatGPT y autorizar. En Agenda, el propietario concede primero lectura y debe aprobar escritura por separado. Probar listado, lecturas por UUID y actualización/reversión de un pin sintético verificando versión e historial. Revocar en Agenda y desconectar también la app de ChatGPT. OAuth remoto, callback y disponibilidad de apps MCP dependen de la cuenta y no se verificaron ni configuraron. No guardar credenciales en código o chat.
+
+### Estado de pruebas y JSON
+
+Las pruebas nuevas cubren separación literal, migraciones en orden, privacidad cerrada por defecto, escritura independiente, historial/reversión y OAuth. Los resultados actualizados de navegador y Node se consignan en el reporte TM3-034; la tabla «Validación Cloud (031)» es solo el baseline anterior. Copiar/importar JSON por pin con vista previa sigue pendiente.
+
+Ejecución TM3-034 en este checkout: `npm run build:v2` pasó; el script `npm run test:v2` pasó; `node --test --test-concurrency=2 tests/av2-*.test.mjs` reportó 204 pasadas, 0 fallidas y 1 omitida. `npm run test:v2:remote-content` pasó 14/14 con PGlite. La suite Playwright completa reportó 28 pasadas y 14 fallidas. El caso de navegador añadido para el formulario legado pasó aislado (1/1) tras corregir el fixture para recargar IndexedDB. Los 14 fallos se agrupan en los contratos antiguos de presupuesto/Calendar (valores y gaps esperados no coinciden), mapa/documentos (fixture no entrega los dos eventos esperados), persistencia (texto de offline distinto), renovación Google (total de presupuesto cero), transferencia staging (PENDING frente a EXPIRED), gaps de itinerario con minutos esperados distintos, snapshot Calendar ausente/incompleto y actualización del Service Worker que no queda waiting. Estos fallos no implican escritura en Calendar; todos usan mocks/fixtures locales. No se modificaron los módulos funcionales que fallan porque son ajenos a esta integración. `npm run build:v2` pasó aquí, aunque en el sandbox sin permiso de red local el mismo script había fallado al intentar `spawnSync process.execPath` con EPERM; la repetición posterior sí pasó.
