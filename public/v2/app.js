@@ -215,7 +215,7 @@ async function renderScreen() {
   if(route==='map')mountTripMap(app.querySelector('#trip-map'),mapUx.visible(),selectMapPin,mapUx.mode+':'+mapUx.label+':'+selectedDay,mapUx.position,mapUx.selected);else closeTripMap();
   if(route==='home'){const hero=app.querySelector('.travel-hero');hero?.insertAdjacentHTML('beforeend','<div id="banner-conditions">'+conditions.render()+'</div>');hero?.insertAdjacentHTML('afterend',travel.center());await conditions.mount();}
   if(route==='itinerary')app.insertAdjacentHTML('beforeend',travel.dayPanel());
-  if(route==='event'){const e=events.find(x=>x.id===id);if(e&&/transport|tren|train|bus|barco|ferry/i.test(categoryFor(e)+' '+e.title)&&!/flight|vuelo|united|\bUA\s*\d/i.test(e.title))app.insertAdjacentHTML('beforeend',travel.transport(e));}
+  if(route==='event'){const e=events.find(x=>x.id===id);if(e&&/transport|tren|train|bus|barco|ferry|flight|vuelo|united|\bUA\s*\d/i.test(categoryFor(e)+' '+e.title))app.insertAdjacentHTML('beforeend',travel.transport(e));}
   travel.mount();
   if(route==='place'&&records.some(r=>r.id===id&&r.kind==='places_of_interest'&&!r.deleted_at)){voicePin=id;app.insertAdjacentHTML('beforeend','<div data-pin-audio="'+id+'">'+travel.pinAudio(id)+'</div>'+renderGuide(guideFor(records,id))+travel.radiusPanel(id)+narrationEditor(id)+'<details><summary>Voz y velocidad del dispositivo</summary><div id="guide-voice">'+renderVoice(voice)+'</div></details>');}
   if(route==='preferences'&&canSchedule(scheduleAccess,store.activeUser))app.insertAdjacentHTML('beforeend',guideImportForm()+travel.geometryForm());
