@@ -1,5 +1,7 @@
 # Agenda Viajera V2 — TM3-ACCESO-REMOTO-022
 
+Estado: implementación preparada y pruebas locales/CI aprobadas; API/MCP NO desplegados. La migración pasó una transacción real con rollback, pero la revisión automática rechazó su aplicación persistente a la base compartida por requerir autorización explícita adicional. No se creó el pin remoto de prueba ni se modificaron datos del viaje. Antes de ejecutar la API: autorizar y aplicar exclusivamente `20261018190000_av2_remote_content.sql`, provisionar `AV2_REMOTE_ENCRYPTION_KEY` exclusivamente en servidor y desplegar la función; luego probar guardado/sync/reversión real antes de activar OAuth o publicar la interfaz de consentimiento. El workflow staging está preparado en `deploy/`, todavía no instalado en el repositorio staging.
+
 ## Arquitectura comprobada
 
 Fuente: `2110jrv/TravelManager_3`, rama `codex/v2-remote-022`, código `public/v2`. `main` conserva el app antiguo; su workflow `deploy-pages.yml` publica `public/` al recibir push. No mezclar esta rama en main ni publicar producción durante el viaje.
