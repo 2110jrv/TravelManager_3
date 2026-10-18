@@ -1,7 +1,8 @@
+import{distanceUS}from './units.js';
 import{mapPlaces}from'./places.js';
 export const POI_LABELS=['Transporte','Estación','Bus','Comida','Supermercado','Compras','Farmacia','Café','Mirador/Foto','Interés','Otros'];
 export function distanceMeters(a,b){const rad=v=>v*Math.PI/180,dlat=rad(b.lat-a.lat),dlng=rad(b.lng-a.lng),h=Math.sin(dlat/2)**2+Math.cos(rad(a.lat))*Math.cos(rad(b.lat))*Math.sin(dlng/2)**2;return 6371000*2*Math.atan2(Math.sqrt(h),Math.sqrt(Math.max(0,1-h)));}
-export const distanceLabel=m=>m<1000?`${Math.round(m)} m`:`${(m/1000).toFixed(1)} km`;
+export const distanceLabel=distanceUS;
 export const optionalPlace=p=>Boolean(p.poi);
 export function nearbyPlaces(places,position){if(!position)return[];const sorted=places.map(p=>({...p,distance:distanceMeters(position,p.gps)})).sort((a,b)=>a.distance-b.distance);const radius=[1000,3000,10000,25000].find(r=>sorted.filter(p=>p.distance<=r).length>=3)||25000;return sorted.filter(p=>p.distance<=radius);}
 export function combinedPlaces(events,records,day=null){const pois=records.filter(r=>r.kind==='places_of_interest'&&!r.deleted_at&&(!day||(r.data.assigned_dates||[]).includes(day))).filter(r=>Number.isFinite(r.data.lat)&&Number.isFinite(r.data.lng)).map(r=>({...r.data,id:r.id,poi:true,title:r.data.name,label:{name:r.data.label},gps:{lat:r.data.lat,lng:r.data.lng},start:r.data.assigned_dates?.[0]||'',location:r.data.resolved_address||r.data.name}));return[...mapPlaces(events,day),...pois];}
