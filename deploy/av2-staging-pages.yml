@@ -1,0 +1,61 @@
+name: Publish reviewed V2 source to staging
+on:
+  workflow_dispatch:
+    inputs:
+      source_commit:
+        description: Reviewed full SHA in 2110jrv/TravelManager_3 (V2 branch)
+        required: true
+        type: string
+      dry_run:
+        description: Validate artifact without publishing
+        default: true
+        type: boolean
+      approve_staging:
+        description: Approve staging publication only
+        default: false
+        type: boolean
+permissions:
+  contents: read
+concurrency:
+  group: av2-staging-publication
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate target and revision
+        env:
+          SOURCE_COMMIT: ${{ inputs.source_commit }}
+        run: |
+          test "$GITHUB_REPOSITORY" = '2110jrv/agenda-viajera-v2-staging'
+          [[ "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+      - uses: actions/checkout@v4
+        with:
+          repository: 2110jrv/TravelManager_3
+          ref: ${{ inputs.source_commit }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run build:v2
+      - run: npm run test:v2:remote-content
+      - run: node scripts/av2-staging-build.mjs
+      - run: node scripts/av2-staging-audit.mjs
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .av2-private/staging-artifact
+  publish:
+    if: ${{ !inputs.dry_run && inputs.approve_staging }}
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/deploy-pages@v4
+        id: deployment

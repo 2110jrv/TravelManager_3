@@ -1,0 +1,8 @@
+import {ProviderLifecycle,ProviderError,credentialCipher} from '../av2-google-token/lifecycle.js';
+export async function ownerGoogleAccess(admin:any,trip:string){
+ const checked=async(p:any)=>{const r=await p;if(r.error)throw new ProviderError('GOOGLE_STORAGE_UNAVAILABLE');return r.data;};
+ const owner=await checked(admin.from('av2_trip_users').select('user_id').eq('trip_id',trip).eq('role','OWNER').is('deleted_at',null).single()),user=(await admin.auth.admin.getUserById(owner.user_id)).data.user,subject=user?.identities?.find((x:any)=>x.provider==='google')?.identity_data?.sub;
+ if(!subject)throw new ProviderError('GOOGLE_IDENTITY_REQUIRED');const table=()=>admin.from('av2_google_credentials');
+ const repository={get:async(id:string)=>checked(table().select('ciphertext,revoked_at').eq('user_id',id).maybeSingle()),save:async(id:string,ciphertext:any,lease:string)=>checked(table().update({ciphertext,revoked_at:null,updated_at:new Date().toISOString()}).eq('user_id',id).eq('lease_id',lease)),lock:async(id:string,lease:string)=>!!await checked(admin.rpc('av2_google_refresh_lock',{p_user:id,p_lease:lease})),revoke:async(id:string,lease:string)=>checked(table().update({revoked_at:new Date().toISOString()}).eq('user_id',id).eq('lease_id',lease)),unlock:async(id:string,lease:string)=>checked(table().update({lease_id:null,lease_until:null}).eq('user_id',id).eq('lease_id',lease))};
+ const lifecycle=new ProviderLifecycle({repository,cipher:await credentialCipher(Deno.env.get('AV2_GOOGLE_CREDENTIAL_KEY')),clientId:Deno.env.get('AV2_GOOGLE_CLIENT_ID'),clientSecret:Deno.env.get('AV2_GOOGLE_CLIENT_SECRET')});return(await lifecycle.run(user.id,String(subject),{action:'access'})).access_token;
+}

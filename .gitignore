@@ -14,3 +14,6 @@ coverage/
 AGENTS.backup-*.md
 .playwright/
 test-results/
+.av2-private/
+
+/Patch y guias/

@@ -1,0 +1,20 @@
+import {test,expect} from '@playwright/test';
+import {readFileSync} from 'node:fs';
+const root='1061fd41-2893-44c5-b45d-aa98c290cffd',trip='7c0801ee-07b1-4d86-95d7-202610200001';
+test('cached trip and ROOT render before stalled auth and survive offline reopen and missing device reference',async({page,context})=>{
+ let authRequests=0;
+ await context.route('https://cslludzuejkhsydqiabx.supabase.co/**',r=>{if(r.request().url().includes('/auth/'))authRequests++;return new Promise(()=>{});});
+ const jwt=[Buffer.from('{"alg":"HS256"}').toString('base64url'),Buffer.from(JSON.stringify({sub:root,exp:1})).toString('base64url'),'qa'].join('.');
+ await context.addInitScript(session=>{if(!localStorage.getItem('av2.auth'))localStorage.setItem('av2.auth',JSON.stringify(session));},{access_token:jwt,refresh_token:'qa-expired-session',expires_at:1,user:{id:root}});
+ await context.route('https://api.frankfurter.dev/**',r=>r.abort());
+ await context.addInitScript(({root,trip})=>{globalThis.__av2Ready=new Promise(resolve=>{const r=indexedDB.open('agenda-viajera-v2',2);r.onupgradeneeded=()=>{for(const n of ['meta','events','records','blobs','outbox','conflicts'])r.result.createObjectStore(n,{keyPath:'id'});};r.onsuccess=()=>{const db=r.result,tx=db.transaction(['meta','events','records'],'readwrite'),meta=tx.objectStore('meta'),exists=meta.get('seeded');exists.onsuccess=()=>{if(exists.result)return;for(const row of [{id:'seeded',value:true},{id:'device',value:root},{id:'device-token',value:'a'.repeat(64)},{id:'authorized',value:true},{id:'device-list',value:[{id:root,trip_id:trip,name:'PC Casa',role:'ROOT_DEVICE',deleted_at:null}]},{id:'drive-files',value:[{id:'ticket',name:'Pompeya ticket',mimeType:'application/pdf'}]}])meta.put(row);tx.objectStore('events').put({id:'pompeya',title:'✅ Pompeya',start:'2026-10-20T09:00:00+02:00',end:'2026-10-20T13:00:00+02:00',description:'[AGENDA_VIAJERA] COST=54.76 CURRENCY=USD COST_STATUS=PAID [/AGENDA_VIAJERA]',lat:40.749,lng:14.485});};tx.oncomplete=()=>{db.close();resolve();};};});},{root,trip});
+ await context.route('**/v2/app.js',r=>r.fulfill({contentType:'application/javascript',body:'await globalThis.__av2Ready;\n'+readFileSync(new URL('../public/v2/app.js',import.meta.url),'utf8')}));
+ await page.goto('/v2/#budget');await expect(page.locator('.paid-stat strong')).toHaveText('$54.76');
+ await expect.poll(()=>authRequests).toBeGreaterThan(0);
+ await page.goto('/v2/#devices');await expect(page.getByRole('heading',{name:'PC Casa',exact:true})).toBeVisible();await expect(page.getByText('ROOT · Autorizado',{exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Activar PC Casa'})).toHaveCount(0);
+ await page.evaluate(async()=>{const {LocalStore}=await import('/v2/store.js');const s=await new LocalStore().open();await s.transaction(['meta'],tx=>tx.objectStore('meta').delete('device'));});
+ await page.evaluate(()=>navigator.serviceWorker.ready);await expect.poll(()=>page.evaluate(()=>!!navigator.serviceWorker.controller)).toBe(true);
+ await page.close();await context.setOffline(true);page=await context.newPage();await page.goto('/v2/#devices');await expect(page.getByText('ROOT · Autorizado',{exact:true})).toBeVisible();await expect(page.locator('#connection')).toHaveText('Sin conexión · mostrando datos guardados');
+ expect(await page.evaluate(async()=>{const{LocalStore}=await import('/v2/store.js');const s=await new LocalStore().open();return s.device;})).toBe(root);
+ await page.goto('/v2/#documents');await expect(page.getByRole('heading',{name:'Pompeya ticket'})).toBeVisible();await page.goto('/v2/#budget');await expect(page.locator('.paid-stat strong')).toHaveText('$54.76');
+});

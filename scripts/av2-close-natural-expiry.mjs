@@ -1,0 +1,17 @@
+import {chromium} from '@playwright/test';import {readFileSync} from 'node:fs';import {assertRoot,privateJson} from './av2-management.mjs';
+assertRoot();const browser=await chromium.connectOverCDP('http://127.0.0.1:9224');
+try{const context=browser.contexts()[0],page=context.pages().find(p=>p.url().startsWith('http://127.0.0.1:5004/v2/'));if(!page)throw Error('RETURN_TO_PWA_REQUIRED');
+const expired=JSON.parse(readFileSync('.av2-private/google-natural-ui-evidence.json','utf8'));if(!expired.reauth||!expired.calendar_requires_reauth||!expired.drive_requires_reauth)throw Error('NATURAL_EXPIRY_NOT_OBSERVED');
+const result=await page.evaluate(async()=>{
+ const{LocalStore}=await import('/v2/store.js');const{GoogleAuthorization}=await import('/v2/google-auth.js');const{GoogleSource}=await import('/v2/google.js');const{TRIP}=await import('/v2/config.js');
+ const store=await new LocalStore().open(),auth=new GoogleAuthorization(store),source=new GoogleSource(()=>auth.token());const before={events:(await store.all('events')).map(x=>x.id).sort(),records:(await store.all('records')).map(x=>({id:x.id,kind:x.kind,data:x.data,deleted:!!x.deleted_at})).sort((a,b)=>a.id.localeCompare(b.id)),queue:(await store.all('outbox')).length,device:store.device};
+ const token=await auth.token(),response=await fetch('https://oauth2.googleapis.com/tokeninfo?'+new URLSearchParams({access_token:token}));if(!response.ok)throw Error('TOKENINFO_FAILED');const info=await response.json();
+ await source.syncCalendar(store);const documents=await source.listDocuments();const after={events:(await store.all('events')).map(x=>x.id).sort(),records:(await store.all('records')).map(x=>({id:x.id,kind:x.kind,data:x.data,deleted:!!x.deleted_at})).sort((a,b)=>a.id.localeCompare(b.id)),queue:(await store.all('outbox')).length,device:store.device};
+ if(JSON.stringify(before.events)!==JSON.stringify(after.events)||JSON.stringify(before.records)!==JSON.stringify(after.records)||before.device!==after.device)throw Error('DATA_INTEGRITY_FAILED');
+ const session=JSON.parse(localStorage.getItem('av2.auth')||'null');if(session?.user?.email!=='2110jrv@gmail.com'||!session.access_token)throw Error('OWNER_SESSION_REQUIRED');
+ const scopes=info.scope.split(' ');for(const scope of ['calendar.events','calendar.calendars.readonly','drive.file','drive.readonly'])if(!scopes.includes('https://www.googleapis.com/auth/'+scope))throw Error('SCOPE_MISSING');
+ return{session:true,provider_token:true,email:session.user.email,scopes,calendar:true,labels:Object.keys((await store.get('meta','calendar-labels'))?.value||{}).length,drive:true,drive_files:documents.length,data_integrity:true,events:after.events.length,records:after.records.length,queue:after.queue,device:after.device};
+});if(result.events!==expired.events||result.records!==expired.records||result.device!==expired.device)throw Error('EXPIRATION_LOST_DATA');
+await context.setOffline(true);try{for(const route of ['expenses','documents']){await page.goto('http://127.0.0.1:5004/v2/#'+route);await page.locator('h1').waitFor();}result.offline_views=true;}finally{await context.setOffline(false);}
+privateJson('google-natural-recovery-evidence.json',{at:new Date().toISOString(),...result});const old=JSON.parse(readFileSync('.av2-private/google-lifecycle-evidence.json','utf8'));privateJson('google-lifecycle-evidence.json',{...old,at:new Date().toISOString(),natural_expiration_observed:true,google_real_recovered:true,natural_recovery:result});console.log(JSON.stringify(result));
+}finally{await browser.close();}

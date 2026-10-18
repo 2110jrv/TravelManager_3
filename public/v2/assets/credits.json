@@ -1,0 +1,58 @@
+[
+  {
+    "key": "italia",
+    "author": "Luca Casartelli",
+    "license": "CC BY-SA 2.0",
+    "license_url": "https://creativecommons.org/licenses/by-sa/2.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Vernazza,_Cinque_Terre_(panorama).jpg",
+    "adaptation": "Resized Wikimedia thumbnail; UI crops with object-fit."
+  },
+  {
+    "key": "venezia",
+    "author": "Vyacheslav Argenberg",
+    "license": "CC BY 4.0",
+    "license_url": "https://creativecommons.org/licenses/by/4.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Venice_view,_Grand_Canal,_Venice,_Italy.jpg",
+    "adaptation": "Resized Wikimedia thumbnail; UI crops with object-fit."
+  },
+  {
+    "key": "bernina",
+    "author": "Leonhard Lenz",
+    "license": "CC0",
+    "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+    "source": "https://commons.wikimedia.org/wiki/File:Viadotto_elicoidale_di_Brusio_Berninabahn_2022-09-28_11.jpg",
+    "adaptation": "Resized Wikimedia thumbnail; UI crops with object-fit."
+  },
+  {
+    "key": "lucca",
+    "author": "Pietro Colnago",
+    "license": "CC BY-SA 4.0",
+    "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Lucca_panorama_dalla_Torre_Giunigi.jpg",
+    "adaptation": "Resized Wikimedia thumbnail; UI crops with object-fit."
+  },
+  {
+    "key": "firenze",
+    "author": "PROPOLI87",
+    "license": "CC BY-SA 4.0",
+    "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Firenze_Panorama_del_Centro_con_il_Duomo_e_Palazzo_Vecchio.jpg",
+    "adaptation": "Resized Wikimedia thumbnail; UI crops with object-fit."
+  },
+  {
+    "key": "amalfi",
+    "author": "Jensens",
+    "license": "Public domain",
+    "license_url": "",
+    "source": "https://commons.wikimedia.org/wiki/File:Amalfi_panorama_I.jpg",
+    "adaptation": "Resized Wikimedia thumbnail; UI crops with object-fit."
+  },
+  {
+    "key": "roma",
+    "author": "Nicholas Hartmann",
+    "license": "CC BY-SA 4.0",
+    "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Rome_Colosseum_exterior_panorama.jpg",
+    "adaptation": "Resized Wikimedia thumbnail; UI crops with object-fit."
+  }
+]
