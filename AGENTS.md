@@ -56,3 +56,6 @@ Keep the complete final response under 250 words unless a failure requires essen
   `MESSAGE: TM3-024`
 * Never omit or reuse a message number.
 <!-- CODEX_EXECUTION_PROTOCOL_END -->
+
+## Remote Cloud checkout exception (TM3-ACCESO-REMOTO-021)
+The Windows project path lock remains mandatory on this PC. In a Linux Codex Cloud environment only, use the Git root of a checkout whose origin is exactly https://github.com/2110jrv/TravelManager_3.git (or its SSH equivalent); verify origin and current branch before work. Start from codex/v2-remote-022, create a codex/* task branch, and run npm ci, npm run build:v2 and npm run test:v2:remote-content. Never push or merge main, change production, copy private attachments, or use the local .av2-private directory as a cloud credential source. Staging publishing requires a reviewed source SHA and the staging-only workflow.

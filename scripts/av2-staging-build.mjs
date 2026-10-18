@@ -13,3 +13,5 @@ export const KINDS=${JSON.stringify(KINDS)};
 execFileSync(process.execPath,['--check',join(output,'v2/config.js')]);
 writeFileSync(join(output,'robots.txt'),'User-agent: *\nDisallow: /\n');
 const landing=join(output,'index.html');writeFileSync(landing,readFileSync(landing,'utf8').replace('<meta charset="utf-8">','<meta charset="utf-8"><meta name="robots" content="noindex,nofollow">'));
+
+writeFileSync(join(output,'v2/build.json'),JSON.stringify({source_repository:'TravelManager_3',source_commit:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim()},null,2));

@@ -4,3 +4,7 @@ verify_jwt = false
 verify_jwt = false
 [functions.av2-google-token]
 verify_jwt = true
+[functions.av2-remote-content]
+# OAuth resource discovery must be public; index.ts verifies auth.getUser() and
+# existing ACTIVE device/PIN/role checks before EVERY API or MCP operation.
+verify_jwt = false
