@@ -38,3 +38,5 @@ main{padding-top:6px}h1,h2,h3,p{line-height:1.25}h1{margin-block:8px 10px}h2{mar
 .events{gap:5px}.events>.event,.grid>.card,.places-list>.card,.places-grid>.card{margin:0}.category-list{gap:5px}.balance-section .stat,.budget-hero .stat{padding:10px}
 
 .guide-copy{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.5}.place-guide section{margin-block:16px}.guide-voice select{max-width:100%}.guide-voice .actions{display:flex;flex-wrap:wrap}.guide-voice .actions button{min-height:44px}
+
+.travel-panel,.travel-leg{overflow-wrap:anywhere}.travel-stats{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;font-size:14px}.travel-stats dt,.travel-stats dd{margin:0}.travel-stats dd{text-align:right}.speedometer{font-size:42px;display:block;color:#176555}.speedometer small{font-size:16px}.travel-map{height:340px;border-radius:14px}.travel-panel .actions{display:flex;flex-wrap:wrap}.travel-panel button,.travel-leg button{min-height:44px}.travel-leg{padding:12px 0;border-bottom:1px solid #dde4e8}
