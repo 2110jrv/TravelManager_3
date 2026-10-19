@@ -40,9 +40,9 @@ changed:
   END_REPORT
 Keep the complete final response under 250 words unless a failure requires essential diagnostic evidence.
 ## Project path lock
-* The authorized project root is exactly: `C:\Codex\TravelManager_3`.
+* Authorized project roots are `C:\Codex\TravelManager_3` on Windows and `/workspace/TravelManager_3` in Linux Codex Cloud. No other checkout path is authorized.
 * Before reading, modifying, testing, or running commands, verify the active working directory.
-* If the active directory is not `C:\Codex\TravelManager_3`, stop immediately.
+* Stop immediately unless the resolved working directory and Git top-level directory both equal the authorized root for the current environment. In Codex Cloud, verify that origin identifies `2110jrv/TravelManager_3` on `github.com` before work; do not print embedded credentials.
 * Do not read or modify files outside the authorized project root.
 * Do not infer the project root from the editor workspace or current terminal directory.
 * Every task message must include the absolute project path near the top.
@@ -58,4 +58,4 @@ Keep the complete final response under 250 words unless a failure requires essen
 <!-- CODEX_EXECUTION_PROTOCOL_END -->
 
 ## Remote Cloud checkout exception (TM3-ACCESO-REMOTO-021)
-The Windows project path lock remains mandatory on this PC. In a Linux Codex Cloud environment only, use the Git root of a checkout whose origin is exactly https://github.com/2110jrv/TravelManager_3.git (or its SSH equivalent); verify origin and current branch before work. Start from codex/v2-cloud-stable (which includes codex/v2-remote-022), create a codex/* task branch, and run npm ci, npm run build:v2, npm run test:v2 and npm run test:v2:remote-content. Never push or merge main, change production, copy private attachments, or use the local .av2-private directory as a cloud credential source. Staging publishing requires a reviewed source SHA and the staging-only workflow.
+The Windows project path lock remains mandatory on this PC. In a Linux Codex Cloud environment only, use `/workspace/TravelManager_3` as the Git root of a checkout whose origin is exactly https://github.com/2110jrv/TravelManager_3.git (or its SSH equivalent); verify origin and current branch before work. Start from codex/v2-cloud-stable (which includes codex/v2-remote-022), or an explicitly authorized reference branch (TM3-CLOUD-SETUP-043: codex/tm3-conexion-segura-035), create a codex/* task branch, and run npm ci, npm run build:v2, npm run test:v2 and npm run test:v2:remote-content. Never push or merge main, change production, copy private attachments, or use the local .av2-private directory as a cloud credential source. Staging publishing requires a reviewed source SHA and the staging-only workflow.

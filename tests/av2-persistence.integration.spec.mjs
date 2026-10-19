@@ -14,7 +14,7 @@ test('cached trip and ROOT render before stalled auth and survive offline reopen
  await page.goto('/v2/#devices');await expect(page.getByRole('heading',{name:'PC Casa',exact:true})).toBeVisible();await expect(page.getByText('ROOT · Autorizado',{exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Activar PC Casa'})).toHaveCount(0);
  await page.evaluate(async()=>{const {LocalStore}=await import('/v2/store.js');const s=await new LocalStore().open();await s.transaction(['meta'],tx=>tx.objectStore('meta').delete('device'));});
  await page.evaluate(()=>navigator.serviceWorker.ready);await expect.poll(()=>page.evaluate(()=>!!navigator.serviceWorker.controller)).toBe(true);
- await page.close();await context.setOffline(true);page=await context.newPage();await page.goto('/v2/#devices');await expect(page.getByText('ROOT · Autorizado',{exact:true})).toBeVisible();await expect(page.locator('#connection')).toHaveText('Sin conexión · mostrando datos guardados');
+ await page.close();await context.setOffline(true);page=await context.newPage();await page.goto('/v2/#devices');await expect(page.getByText('ROOT · Autorizado',{exact:true})).toBeVisible();await expect(page.locator('#connection')).toHaveText('Sin conexión · datos locales disponibles');
  expect(await page.evaluate(async()=>{const{LocalStore}=await import('/v2/store.js');const s=await new LocalStore().open();return s.device;})).toBe(root);
  await page.goto('/v2/#documents');await expect(page.getByRole('heading',{name:'Pompeya ticket'})).toBeVisible();await page.goto('/v2/#budget');await expect(page.locator('.paid-stat strong')).toHaveText('$54.76');
 });

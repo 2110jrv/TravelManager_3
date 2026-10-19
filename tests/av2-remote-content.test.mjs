@@ -32,11 +32,41 @@ test('real SQL contracts: authenticated create/read/write/rollback, exact versio
  const unreviewed=id();await db.query("insert into av2_places_of_interest(id,trip_id,name,description,created_by,created_device) values($1,$2,'Unreviewed public-looking place','legacy description remains exact',$3,$4)",[unreviewed,trip,actor,device]);
  await db.query("insert into av2_records(id,trip_id,kind,data,updated_by_device) select $1,trip_id,'app_settings',jsonb_build_object('type','place_guide','place_id',id,'poi_code',poi_code,'name',name,'guide',jsonb_build_object('audio_guide','original guide','geo',jsonb_build_object('private',true))),$2 from av2_places_of_interest where id=$3",[id(),device,seeded]);
  const snapshot=async()=>({pins:(await db.query("select to_jsonb(p)-'notes' r from av2_places_of_interest p where id=$1",[seeded])).rows,records:(await db.query("select to_jsonb(r) r from av2_records r where data->>'place_id'=$1",[seeded])).rows});
+ const baselineTables=(await db.query("select tablename from pg_tables where schemaname='public' and tablename like 'av2_%' order by tablename")).rows.map(r=>r.tablename);
+ const protectedState=async()=>Object.fromEntries(await Promise.all(baselineTables.map(async name=>[name,(await db.query(`select coalesce(jsonb_agg(value order by value::text),'[]'::jsonb) rows from (select ${name==='av2_places_of_interest'?"to_jsonb(t)-'notes'":'to_jsonb(t)'} value from public."${name}" t) s`)).rows[0].rows])));
+ await t.test('pending MCP migrations rehearse atomically, preserve every existing V2 row and roll back schema',async()=>{
+  await db.exec(readFileSync(new URL('../scripts/av2-mcp-preflight.sql',import.meta.url),'utf8'));
+  const before=await protectedState();await db.exec('begin');
+  try{
+   for(const file of ['20261018190000_av2_remote_content.sql','20261018200000_av2_remote_content_history.sql','20261018210000_av2_split_pin_notes.sql'])await db.exec(readFileSync(new URL('../supabase/migrations/'+file,import.meta.url),'utf8'));
+   assert.deepEqual(await protectedState(),before);
+   assert.equal((await db.query('select count(*)::int n from av2_places_of_interest where notes is not null')).rows[0].n,0);
+   assert.equal((await db.query('select count(*)::int n from av2_remote_public_places')).rows[0].n,0);
+  }finally{await db.exec('rollback');}
+  assert.deepEqual(await protectedState(),before);
+  assert.equal((await db.query("select to_regclass('public.av2_remote_grants') r")).rows[0].r,null);
+  assert.equal((await db.query("select count(*)::int n from information_schema.columns where table_schema='public' and table_name='av2_places_of_interest' and column_name='notes'")).rows[0].n,0);
+ });
  const originals=await snapshot();await db.exec(readFileSync(new URL('../supabase/migrations/20261018190000_av2_remote_content.sql',import.meta.url),'utf8'));assert.deepEqual(await snapshot(),originals);
  const historyBeforeSplit=await snapshot();await db.exec(readFileSync(new URL('../supabase/migrations/20261018200000_av2_remote_content_history.sql',import.meta.url),'utf8'));
  await db.exec(readFileSync(new URL('../supabase/migrations/20261018210000_av2_split_pin_notes.sql',import.meta.url),'utf8'));assert.deepEqual((await snapshot()).records,historyBeforeSplit.records);assert.equal((await db.query('select description,notes from av2_places_of_interest where id=$1',[unreviewed])).rows[0].notes,null);assert.equal((await db.query('select description,notes from av2_places_of_interest where id=$1',[unreviewed])).rows[0].description,'legacy description remains exact');
  const place=id();await db.query("insert into av2_places_of_interest(id,trip_id,name,description,notes,created_by,created_device) values($1,$2,'REMOTE_TEST','Historical description','Independent original notes',$3,$4)",[place,trip,actor,device]);await db.query('insert into av2_remote_public_places(trip_id,place_id,approved_by) values($1,$2,$3)',[trip,place,actor]);
  await db.exec('set role authenticated');const credentials={p_trip:trip,p_device:device,p_token:token},rpc=async(name,args)=>{const call=name+'('+Object.keys(args).map((_,i)=>'$'+(i+1)).join(',')+')';if(['av2_sync_pull','av2_sync_conflicts'].includes(name))return(await db.query('select to_jsonb(x) result from '+call+' x',Object.values(args))).rows.map(r=>r.result);return(await db.query('select '+call+' result',Object.values(args))).rows[0].result;},context={credentials,rpc,canWrite:true};
+ await t.test('initial synthetic MCP acceptance is read-only over real PostgreSQL and preserves all rows',async()=>{
+  await db.exec('reset role');const clientId=id(),before=await protectedState();await db.exec('set role authenticated');let active=true;
+  const grant={auth_user_id:auth,client_id:clientId,trip_id:trip,actor_user:actor,device_id:device,cipher:{test:true},can_write:false,revoked_at:null,expires_at:new Date(Date.now()+60000).toISOString()};
+  const client={auth:{getUser:async()=>({data:{user:{id:auth}},error:null})},from:()=>{const q={select:()=>q,eq:()=>q,is:()=>q,gt:async()=>({data:active?[grant]:[],error:null})};return q;},rpc:async(name,args)=>{try{return{data:await rpc(name,args),error:null};}catch(e){return{data:null,error:{message:e.message}};}}};
+  const handler=createRemoteHandler({url:'https://example.supabase.co',anon:'synthetic',serviceRoleKey:'synthetic',createClient:()=>client,cipher:async()=>({open:async()=>credentials})});
+  const bearer=['e30',Buffer.from(JSON.stringify({sub:auth,client_id:clientId})).toString('base64url'),'synthetic'].join('.');
+  const call=body=>handler(new Request('https://example.supabase.co/functions/v1/av2-remote-content',{method:'POST',headers:{authorization:'Bearer '+bearer},body:JSON.stringify(body)}));
+  const tools=await(await call({jsonrpc:'2.0',id:1,method:'tools/list'})).json();assert.ok(tools.result.tools.every(t=>t.annotations.readOnlyHint));
+  const list=await(await call({jsonrpc:'2.0',id:2,method:'tools/call',params:{name:'list_places',arguments:{}}})).json();
+  assert.equal(list.error,undefined);assert.match(JSON.stringify(list.result),new RegExp(place));assert.doesNotMatch(JSON.stringify(list.result),new RegExp(unreviewed));
+  const read=await(await call({jsonrpc:'2.0',id:3,method:'tools/call',params:{name:'get_place_description',arguments:{place_id:place}}})).json();assert.match(JSON.stringify(read.result),/Historical description/);
+  const denied=await call({jsonrpc:'2.0',id:4,method:'tools/call',params:{name:'update_place_notes',arguments:{place_id:place,request_id:id(),expected_version:1,patch:{notes:'forbidden'}}}});assert.equal(denied.status,403);
+  active=false;assert.equal((await call({jsonrpc:'2.0',id:5,method:'tools/list'})).status,403);
+  await db.exec('reset role');assert.deepEqual(await protectedState(),before);assert.equal((await db.query('select count(*)::int n from av2_remote_history')).rows[0].n,0);await db.exec('set role authenticated');
+ });
  let r=await contentCall('get_place_description',{place_id:place},context);assert.equal(r.description,'Historical description');assert.equal(r.version,1);
  await assert.rejects(contentCall('get_audio_guide',{place_id:seeded},context),/NOT_AVAILABLE/);
  await assert.rejects(contentCall('get_audio_guide',{place_id:unreviewed},context),/NOT_AVAILABLE/);

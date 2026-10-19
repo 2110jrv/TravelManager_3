@@ -5,6 +5,7 @@ test('mobile shell, real Calendar snapshot, expense receipt, persistence and off
   await page.goto('/v2/?fixture=1'); await expect(page.getByRole('heading',{name:'Italia 2026',exact:true})).toBeVisible();
   await page.evaluate(async () => { await navigator.serviceWorker.ready; });
   await expect.poll(() => page.evaluate(() => !!navigator.serviceWorker.controller)).toBe(true);
+  await page.goto('/v2/#budget');
   const baseline=Number((await page.locator('.stat strong').first().innerText()).replace(/[^\d.-]/g,''));
   const snapshotPath = new URL('../.av2-private/calendar.json',import.meta.url);
   if (existsSync(snapshotPath)) {
@@ -113,7 +114,7 @@ test('explicit service worker update preserves IndexedDB and legacy caches',asyn
  const identity=await page.evaluate(async()=>{const{LocalStore}=await import('/v2/store.js');const s=await new LocalStore().open();await s.mutate('notes',crypto.randomUUID(),{text:'update-survivor'});await(await caches.open('legacy-cache-sentinel')).put('/sentinel',new Response('legacy'));return s.device;});
  await page.evaluate(async()=>{await navigator.serviceWorker.register('./sw.js?test-update=2',{scope:'./'});});
  await expect.poll(()=>page.evaluate(async()=>!!(await navigator.serviceWorker.getRegistration()).waiting)).toBe(true);
- await expect(page.locator('#update')).toBeVisible();await page.locator('#update').click();
+ await expect(page.locator('#update')).toBeVisible();await Promise.all([page.waitForEvent('load'),page.locator('#update').click()]);
  await expect(page.getByRole('heading',{name:'Italia 2026',exact:true})).toBeVisible();
  await expect.poll(()=>page.evaluate(async()=>navigator.serviceWorker.controller?.scriptURL.includes('test-update=2'))).toBe(true);
  const state=await page.evaluate(async()=>{const{LocalStore}=await import('/v2/store.js');const s=await new LocalStore().open();return{device:s.device,notes:(await s.all('records')).filter(x=>x.data?.text==='update-survivor').length,legacy:(await caches.keys()).includes('legacy-cache-sentinel')};});
